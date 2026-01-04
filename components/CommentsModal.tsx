@@ -163,84 +163,6 @@ export default function CommentsModal({
     };
   }, []);
 
-  // Handle visibility changes
-  useEffect(() => {
-    if (!isMounted.current) return;
-
-    if (visible && postId) {
-      slideAnim.setValue(SCREEN_HEIGHT);
-      fadeAnim.setValue(0);
-      keyboardAnim.setValue(0);
-      
-      Animated.parallel([
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 65,
-          friction: 11,
-        }),
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-      
-      setCurrentPage(1);
-      setHasMore(true);
-      setError(null);
-      // Only fetch if we have a postId and modal is opening
-      if (postId) {
-        fetchComments(1, true);
-      }
-    }
-  }, [visible, postId, fetchComments]);
-
-  // Reset state when modal closes
-  useEffect(() => {
-    if (!visible) {
-      const timer = setTimeout(() => {
-        if (isMounted.current) {
-          setComments([]);
-          setCurrentPage(1);
-          setHasMore(true);
-          setError(null);
-          setCommentText('');
-          setKeyboardHeight(0);
-          setSelectedComment(null);
-          setShowOptionsModal(false);
-          setShowReportModal(false);
-          setReportReason('');
-          setReportDescription('');
-        }
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [visible]);
-
-  const handleClose = useCallback(() => {
-    if (!isMounted.current) return;
-    
-    Keyboard.dismiss();
-    
-    Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      if (isMounted.current) {
-        onClose();
-      }
-    });
-  }, [onClose, slideAnim, fadeAnim]);
-
   const fetchComments = useCallback(async (page = 1, isInitial = false) => {
     if (!postId || !isMounted.current) return;
     
@@ -327,6 +249,84 @@ export default function CommentsModal({
       }
     }
   }, [postId, loading, loadingMore]);
+
+  // Handle visibility changes
+  useEffect(() => {
+    if (!isMounted.current) return;
+
+    if (visible && postId) {
+      slideAnim.setValue(SCREEN_HEIGHT);
+      fadeAnim.setValue(0);
+      keyboardAnim.setValue(0);
+      
+      Animated.parallel([
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 65,
+          friction: 11,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+      setCurrentPage(1);
+      setHasMore(true);
+      setError(null);
+      // Only fetch if we have a postId and modal is opening
+      if (postId) {
+        fetchComments(1, true);
+      }
+    }
+  }, [visible, postId, fetchComments]);
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!visible) {
+      const timer = setTimeout(() => {
+        if (isMounted.current) {
+          setComments([]);
+          setCurrentPage(1);
+          setHasMore(true);
+          setError(null);
+          setCommentText('');
+          setKeyboardHeight(0);
+          setSelectedComment(null);
+          setShowOptionsModal(false);
+          setShowReportModal(false);
+          setReportReason('');
+          setReportDescription('');
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [visible]);
+
+  const handleClose = useCallback(() => {
+    if (!isMounted.current) return;
+    
+    Keyboard.dismiss();
+    
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      if (isMounted.current) {
+        onClose();
+      }
+    });
+  }, [onClose, slideAnim, fadeAnim]);
 
   const loadMoreComments = () => {
     if (!loadingMore && hasMore && !loading) {
