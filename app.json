@@ -15,6 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.ihirwe.talynksocial",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to record videos for your posts.",
         "NSMicrophoneUsageDescription": "This app uses the microphone to record audio for your videos."
@@ -85,6 +86,14 @@
       "router": {},
       "eas": {
         "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"
+      }
+    },
+    "build": {
+      "development": {
+        "developmentClient": true,
+        "ios": {
+          "simulator": true
+        }
       }
     }
   }
