@@ -30,6 +30,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Video, ResizeMode, Audio } from 'expo-av';
+import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
@@ -164,6 +165,7 @@ export default function CreatePostScreen() {
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [capturedPhotoPreview, setCapturedPhotoPreview] = useState<string | null>(null);
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -319,17 +321,36 @@ export default function CreatePostScreen() {
       if (!cameraPermission?.granted) {
         const cameraResult = await requestCameraPermission();
         if (!cameraResult.granted) {
-          Alert.alert('Permission Required', 'Camera permission is required to record videos.');
+          Alert.alert(
+            'Permission Required', 
+            'Camera permission is required to take photos and record videos. Please enable it in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => {
+                // On iOS, this will open settings. On Android, user needs to manually go to settings.
+                if (Platform.OS === 'ios') {
+                  // Linking.openSettings() would require expo-linking
+                }
+              }}
+            ]
+          );
           return;
         }
       }
 
-      // Request microphone permission for audio recording
-      if (!microphonePermission?.granted) {
+      // Request microphone permission for audio recording (only needed for video mode)
+      if (cameraMode === 'video' && !microphonePermission?.granted) {
         const micResult = await requestMicrophonePermission();
         if (!micResult.granted) {
-          Alert.alert('Permission Required', 'Microphone permission is required to record audio with your video.');
-          return;
+          Alert.alert(
+            'Permission Required', 
+            'Microphone permission is required to record audio with your video. Please enable it in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'OK' }
+            ]
+          );
+          // Still allow camera to open, but user won't be able to record video with audio
         }
       }
 
@@ -346,10 +367,12 @@ export default function CreatePostScreen() {
         await new Promise(resolve => setTimeout(resolve, 200));
       } catch (audioError) {
         console.error('Error setting audio mode before camera:', audioError);
+        // Don't block camera opening if audio setup fails
       }
 
       setShowCamera(true);
       setRecordingDuration(0);
+      setCapturedPhotoPreview(null); // Clear any previous preview
     } catch (error: any) {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
@@ -358,6 +381,17 @@ export default function CreatePostScreen() {
 
   const startRecording = async () => {
     if (!cameraRef.current) return;
+
+    // Check if running on simulator (video recording not supported)
+    if (!Device.isDevice) {
+      Alert.alert(
+        'Simulator Limitation',
+        'Video recording is not supported on simulators. Please test on a physical device to record videos.',
+        [{ text: 'OK' }]
+      );
+      setIsRecording(false);
+      return;
+    }
 
     try {
       // Double-check microphone permission before recording
@@ -426,35 +460,16 @@ export default function CreatePostScreen() {
       }
 
       // Start recording (this is async and will resolve when stopRecording is called)
-      // Enhanced audio settings for better quality and volume
-      // CRITICAL: These settings aim to capture clear, loud audio like native camera apps
+      // Use only supported recording options
       const recordingOptions: any = {
         maxDuration: 150, // 2:30 minutes in seconds
         mute: false, // CRITICAL: Ensure audio is not muted - explicitly set to false
         quality: 'high', // Use high quality recording
       };
       
-      // Platform-specific options with enhanced audio settings
-      if (Platform.OS === 'ios') {
-        recordingOptions.codec = 'h264';
-        recordingOptions.extension = '.mov';
-        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // iOS audio settings optimized for clear, loud audio
-        recordingOptions.audioBitrate = 192000; // Increased from 128kbps for better quality
-        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
-        recordingOptions.audioChannels = 2; // Stereo audio
-        // Note: iOS handles noise suppression automatically, but higher bitrate helps
-      } else {
-        // Android settings optimized for clear, loud audio
+      // Platform-specific options (only use supported options)
+      if (Platform.OS === 'android') {
         recordingOptions.maxFileSize = 100 * 1024 * 1024; // 100MB max for Android
-        recordingOptions.extension = '.mp4';
-        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // Android audio settings - optimized for video recording (like native camera)
-        recordingOptions.audioBitrate = 256000; // Higher audio bitrate (256 kbps) for better quality
-        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
-        recordingOptions.audioChannels = 2; // Stereo audio (2 channels)
-        // Try to use video-optimized audio source if available
-        // Note: expo-camera may not expose audioSource directly, but higher bitrate helps
       }
       
       console.log('Starting recording with options:', recordingOptions);
@@ -509,7 +524,16 @@ export default function CreatePostScreen() {
         }
         // Don't show error if user cancelled
         if (error?.message && !error.message.includes('cancel')) {
-          Alert.alert('Error', 'Failed to record video. Please try again.');
+          // Check for simulator error
+          if (error?.message?.includes('simulator') || error?.message?.includes('not supported')) {
+            Alert.alert(
+              'Simulator Limitation',
+              'Video recording is not supported on simulators. Please test on a physical device to record videos.',
+              [{ text: 'OK' }]
+            );
+          } else {
+            Alert.alert('Error', 'Failed to record video. Please try again.');
+          }
         }
         setShowCamera(false);
         setRecordingDuration(0);
@@ -545,6 +569,7 @@ export default function CreatePostScreen() {
     setShowCamera(false);
     setRecordingDuration(0);
     setIsRecording(false);
+    setCapturedPhotoPreview(null);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
@@ -592,10 +617,11 @@ export default function CreatePostScreen() {
       await new Promise(resolve => setTimeout(resolve, 100));
       
       // Capture the composite view (image + watermark overlay)
-      if (imageCompositeRef.current) {
+      const compositeRef = imageCompositeRef.current;
+      if (compositeRef && typeof compositeRef.capture === 'function') {
         try {
           // Use ViewShot's capture method directly
-          const watermarkedUri = await imageCompositeRef.current.capture();
+          const watermarkedUri = await compositeRef.capture();
           setTempImageUri(null); // Clear temp image
           return watermarkedUri;
         } catch (error) {
@@ -636,7 +662,10 @@ export default function CreatePostScreen() {
 
   // --- IMAGE CAPTURE ---
   const takePicture = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current) {
+      Alert.alert('Error', 'Camera is not ready. Please try again.');
+      return;
+    }
 
     try {
       // Try to capture with view-shot first (includes watermark overlay)
@@ -657,30 +686,55 @@ export default function CreatePostScreen() {
       
       // If view-shot didn't work, use regular camera capture
       if (!imageUri) {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8,
-          base64: false,
-        });
-        if (photo && photo.uri) {
-          imageUri = photo.uri;
+        try {
+          const photo = await cameraRef.current.takePictureAsync({
+            quality: 0.9,
+            base64: false,
+            skipProcessing: false,
+          });
+          if (photo && photo.uri) {
+            imageUri = photo.uri;
+          }
+        } catch (captureError) {
+          console.error('Camera capture error:', captureError);
+          throw captureError;
         }
       }
 
       if (imageUri) {
-        // Add watermark to the captured image (if not already included via view-shot)
-        const watermarkedUri = await addWatermarkToImage(imageUri);
-        setCapturedImageUri(watermarkedUri);
-        setRecordedVideoUri(null); // Clear video when image is captured
-        setEditedVideoUri(null);
-        setShowCamera(false);
-        // Don't show modal - buttons will be in the form
+        // Show preview immediately
+        setCapturedPhotoPreview(imageUri);
       } else {
         Alert.alert('Error', 'Failed to capture image. Please try again.');
       }
     } catch (error: any) {
       console.error('Image capture error:', error);
-      Alert.alert('Error', 'Failed to capture image. Please try again.');
+      const errorMessage = error?.message || 'Failed to capture image. Please try again.';
+      Alert.alert('Error', errorMessage);
     }
+  };
+
+  // Confirm captured photo (add watermark and close camera)
+  const confirmPhoto = async () => {
+    if (!capturedPhotoPreview) return;
+    
+    try {
+      // Add watermark to the captured image
+      const watermarkedUri = await addWatermarkToImage(capturedPhotoPreview);
+      setCapturedImageUri(watermarkedUri);
+      setRecordedVideoUri(null); // Clear video when image is captured
+      setEditedVideoUri(null);
+      setCapturedPhotoPreview(null);
+      setShowCamera(false);
+    } catch (error: any) {
+      console.error('Error confirming photo:', error);
+      Alert.alert('Error', 'Failed to process image. Please try again.');
+    }
+  };
+
+  // Retake photo (clear preview and show camera again)
+  const retakePhoto = () => {
+    setCapturedPhotoPreview(null);
   };
 
   // --- VIDEO EDITING --- (Re-record instead of edit)
@@ -1000,112 +1054,145 @@ export default function CreatePostScreen() {
           options={{ format: 'jpg', quality: 0.9 }}
           style={[styles.cameraContainer, { paddingTop: insets.top }]}
         >
-          <CameraView
-            ref={cameraRef}
-            style={styles.camera}
-            facing={cameraFacing}
-            mode={cameraMode}
-          />
-          {/* Overlay with absolute positioning */}
-            <View style={styles.cameraOverlay}>
-              {/* Watermark - Bottom Right */}
-              {user?.id && (
-                <View style={styles.watermarkContainer}>
-                  <Text style={styles.watermarkText}>Talentix</Text>
-                  <Text style={styles.watermarkUserId}>{user.id}</Text>
-                </View>
-              )}
-
-              {/* Top bar - only cancel and timer */}
-              <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
+          {/* Photo Preview Overlay */}
+          {capturedPhotoPreview ? (
+            <View style={styles.photoPreviewContainer}>
+              <Image
+                source={{ uri: capturedPhotoPreview }}
+                style={styles.photoPreviewImage}
+                resizeMode="contain"
+              />
+              <View style={[styles.photoPreviewControls, { paddingBottom: insets.bottom + 20 }]}>
                 <TouchableOpacity
-                  style={styles.cameraCancelButton}
-                  onPress={cancelCamera}
-                  accessibilityLabel="Cancel"
+                  style={styles.photoPreviewButton}
+                  onPress={retakePhoto}
+                  accessibilityLabel="Retake photo"
                   accessibilityRole="button"
                 >
-                  <MaterialIcons name="close" size={24} color="#fff" />
+                  <MaterialIcons name="refresh" size={24} color="#fff" />
+                  <Text style={styles.photoPreviewButtonText}>Retake</Text>
                 </TouchableOpacity>
-                
-                {isRecording && (
-                  <View style={styles.recordingIndicator}>
-                    <View style={styles.recordingDot} />
-                    <Text style={styles.recordingTimer}>
-                      {formatDuration(recordingDuration)}
-                    </Text>
+                <TouchableOpacity
+                  style={[styles.photoPreviewButton, styles.photoPreviewConfirmButton]}
+                  onPress={confirmPhoto}
+                  accessibilityLabel="Use photo"
+                  accessibilityRole="button"
+                >
+                  <MaterialIcons name="check" size={24} color="#fff" />
+                  <Text style={styles.photoPreviewButtonText}>Use Photo</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <>
+              <CameraView
+                ref={cameraRef}
+                style={styles.camera}
+                facing={cameraFacing}
+                mode={cameraMode}
+              />
+              {/* Overlay with absolute positioning */}
+              <View style={styles.cameraOverlay}>
+                {/* Watermark - Bottom Right */}
+                {user?.id && (
+                  <View style={styles.watermarkContainer}>
+                    <Text style={styles.watermarkText}>Talentix</Text>
+                    <Text style={styles.watermarkUserId}>{user.id}</Text>
                   </View>
                 )}
 
-                <View style={{ width: 36 }} />
-              </View>
-
-              {/* Bottom controls - phone-like layout */}
-              <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
-                <View style={styles.cameraBottomControls}>
-                  {/* Left side - Mode toggle */}
-                    <TouchableOpacity
-                    style={styles.cameraModeButton}
-                    onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
-                    disabled={isRecording}
-                    accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
+                {/* Top bar - only cancel and timer */}
+                <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
+                  <TouchableOpacity
+                    style={styles.cameraCancelButton}
+                    onPress={cancelCamera}
+                    accessibilityLabel="Cancel"
                     accessibilityRole="button"
                   >
-                    <MaterialIcons 
-                      name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
-                      size={28} 
-                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
-                    />
+                    <MaterialIcons name="close" size={24} color="#fff" />
                   </TouchableOpacity>
-
-                  {/* Center - Record/Stop/Capture Button */}
-                  {cameraMode === 'video' ? (
-                    !isRecording ? (
-                      <TouchableOpacity
-                        style={styles.recordButtonCompact}
-                      onPress={startRecording}
-                        accessibilityLabel="Start recording"
-                        accessibilityRole="button"
-                    >
-                        <View style={styles.recordButtonInnerCompact} />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                        style={styles.stopButtonCompact}
-                      onPress={stopRecording}
-                        accessibilityLabel="Stop recording"
-                        accessibilityRole="button"
-                      >
-                        <View style={styles.stopButtonInnerCompact} />
-                      </TouchableOpacity>
-                    )
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.captureButtonCompact}
-                      onPress={takePicture}
-                      accessibilityLabel="Take picture"
-                      accessibilityRole="button"
-                    >
-                      <View style={styles.captureButtonInnerCompact} />
-                    </TouchableOpacity>
+                  
+                  {isRecording && (
+                    <View style={styles.recordingIndicator}>
+                      <View style={styles.recordingDot} />
+                      <Text style={styles.recordingTimer}>
+                        {formatDuration(recordingDuration)}
+                      </Text>
+                    </View>
                   )}
 
-                  {/* Right side - Flip camera */}
-                  <TouchableOpacity
-                    style={styles.cameraFlipButton}
-                    onPress={handleFlipCamera}
-                    disabled={isRecording}
-                    accessibilityLabel="Flip camera"
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons 
-                      name="flip-camera-ios" 
-                      size={28} 
-                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
-                    />
-                  </TouchableOpacity>
+                  <View style={{ width: 36 }} />
+                </View>
+
+                {/* Bottom controls - phone-like layout */}
+                <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
+                  <View style={styles.cameraBottomControls}>
+                    {/* Left side - Mode toggle */}
+                    <TouchableOpacity
+                      style={styles.cameraModeButton}
+                      onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
+                      disabled={isRecording}
+                      accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons 
+                        name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
+                        size={28} 
+                        color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                      />
+                    </TouchableOpacity>
+
+                    {/* Center - Record/Stop/Capture Button */}
+                    {cameraMode === 'video' ? (
+                      !isRecording ? (
+                        <TouchableOpacity
+                          style={styles.recordButtonCompact}
+                          onPress={startRecording}
+                          accessibilityLabel="Start recording"
+                          accessibilityRole="button"
+                        >
+                          <View style={styles.recordButtonInnerCompact} />
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.stopButtonCompact}
+                          onPress={stopRecording}
+                          accessibilityLabel="Stop recording"
+                          accessibilityRole="button"
+                        >
+                          <View style={styles.stopButtonInnerCompact} />
+                        </TouchableOpacity>
+                      )
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.captureButtonCompact}
+                        onPress={takePicture}
+                        accessibilityLabel="Take picture"
+                        accessibilityRole="button"
+                      >
+                        <View style={styles.captureButtonInnerCompact} />
+                      </TouchableOpacity>
+                    )}
+
+                    {/* Right side - Flip camera */}
+                    <TouchableOpacity
+                      style={styles.cameraFlipButton}
+                      onPress={handleFlipCamera}
+                      disabled={isRecording}
+                      accessibilityLabel="Flip camera"
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons 
+                        name="flip-camera-ios" 
+                        size={28} 
+                        color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                      />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
-            </View>
+            </>
+          )}
         </ViewShot>
       )}
 
@@ -2403,5 +2490,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     flex: 1,
+  },
+  // Photo Preview
+  photoPreviewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoPreviewControls: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  photoPreviewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    gap: 8,
+    minWidth: 120,
+  },
+  photoPreviewConfirmButton: {
+    backgroundColor: '#10b981',
+  },
+  photoPreviewButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

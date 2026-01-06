@@ -358,16 +358,42 @@ export const postsApi = {
         data: { posts: [], pagination: {}, filters: {} },
       };
     } catch (error: any) {
-      console.error('Featured posts API error:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-        url: error.config?.url
-      });
+      const status = error.response?.status;
+      const isServerError = status && status >= 500;
+      
+      // Log server errors (5xx) as warnings, client errors (4xx) as errors
+      if (isServerError) {
+        console.warn('Featured posts API server error:', {
+          status,
+          message: error.message,
+          url: error.config?.url
+        });
+      } else {
+        console.error('Featured posts API error:', {
+          message: error.message,
+          status,
+          data: error.response?.data,
+          url: error.config?.url
+        });
+      }
+      
+      // Provide user-friendly error messages
+      let errorMessage = 'Failed to fetch featured posts';
+      if (status === 502) {
+        errorMessage = 'Server is temporarily unavailable. Please try again later.';
+      } else if (status === 503) {
+        errorMessage = 'Service is temporarily unavailable. Please try again later.';
+      } else if (status === 504) {
+        errorMessage = 'Request timed out. Please try again.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
       
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to fetch featured posts',
+        message: errorMessage,
         data: { posts: [], pagination: {}, filters: {} },
       };
     }
@@ -989,7 +1015,48 @@ export const likesApi = {
         data: response.data.data || {},
       };
     } catch (error: any) {
-      console.error('Batch check like status API error:', error);
+      const status = error.response?.status;
+      const isNetworkError = error.code === 'NETWORK_ERROR' || 
+                            error.message?.includes('Network') ||
+                            error.message === 'Network Error' ||
+                            error.isAxiosError && !error.response;
+      const isServerError = status && status >= 500;
+      
+      // Handle network errors gracefully - log as warning, not error
+      if (isNetworkError) {
+        console.warn('Batch check like status network error:', {
+          message: error.message,
+          postIdsCount: postIds.length
+        });
+        return {
+          status: 'error',
+          message: 'Network error. Please check your connection.',
+          data: {},
+        };
+      }
+      
+      // Log server errors (5xx) as warnings, client errors (4xx) as errors
+      if (isServerError) {
+        console.warn('Batch check like status server error:', {
+          status,
+          message: error.message,
+          postIdsCount: postIds.length
+        });
+        return {
+          status: 'error',
+          message: 'Server is temporarily unavailable. Please try again later.',
+          data: {},
+        };
+      }
+      
+      // Log client errors (4xx) as errors
+      console.error('Batch check like status API error:', {
+        message: error.message,
+        status,
+        data: error.response?.data,
+        postIdsCount: postIds.length
+      });
+      
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to check like statuses',

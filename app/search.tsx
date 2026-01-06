@@ -16,6 +16,7 @@ import { Post, User } from '@/types';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
+import { getPostMediaUrl } from '@/lib/utils/file-url';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -212,13 +213,31 @@ export default function SearchScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#60a5fa" />
         </View>
-      ) : (
-        <FlatList
+      ) : activeTab === 'posts' ? (
+        <FlatList<Post>
           key={activeTab}
-          data={searchResults}
-          renderItem={activeTab === 'posts' ? renderPostResult : renderUserResult}
+          data={searchResults as Post[]}
+          renderItem={renderPostResult}
           keyExtractor={(item) => item.id}
-          numColumns={activeTab === 'posts' ? 3 : 1}
+          numColumns={3}
+          contentContainerStyle={styles.resultsContainer}
+          ListEmptyComponent={
+            searchQuery.length > 0 ? (
+              <View style={styles.emptyContainer}>
+                <Feather name="search" size={48} color="#666" />
+                <Text style={styles.emptyText}>No results found</Text>
+                <Text style={styles.emptySubtext}>Try searching for something else</Text>
+              </View>
+            ) : null
+          }
+        />
+      ) : (
+        <FlatList<User>
+          key={activeTab}
+          data={searchResults as User[]}
+          renderItem={renderUserResult}
+          keyExtractor={(item) => item.id}
+          numColumns={1}
           contentContainerStyle={styles.resultsContainer}
           ListEmptyComponent={
             searchQuery.length > 0 ? (
