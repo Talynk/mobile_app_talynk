@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
-import { userApi, postsApi, likesApi } from '@/lib/api';
+import { userApi, postsApi, likesApi, viewsApi } from '@/lib/api';
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -38,7 +38,7 @@ const DefaultAvatar = ({ size = 100, name = '' }: { size?: number; name?: string
   const initials = name
     ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : '?';
-  
+
   return (
     <LinearGradient
       colors={['#3b82f6', '#8b5cf6']}
@@ -56,29 +56,30 @@ interface VideoThumbnailProps {
   onPress: () => void;
   onOptionsPress?: () => void;
   onPublishPress?: () => void;
+  onViewsPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onViewsPress }: VideoThumbnailProps) => {
   const videoRef = useRef<Video>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
-  
+
   const videoUrl = getFileUrl(post.video_url || post.videoUrl || '');
   const isVideo = !!videoUrl;
-  
+
   // Get fallback image URL
   const fallbackImageUrl = getThumbnailUrl(post) || getFileUrl(post.image || (post as any).thumbnail || '');
-  
+
   // Generate thumbnail for videos, use image directly for non-videos
   const generatedThumbnail = useVideoThumbnail(
     isVideo ? videoUrl : null,
     fallbackImageUrl || '',
     1000 // Extract thumbnail at 1 second
   );
-  
+
   // For videos: use generated thumbnail, fallback to provided image
   // For images: use image directly
-  const staticThumbnailUrl = isVideo 
+  const staticThumbnailUrl = isVideo
     ? (generatedThumbnail || fallbackImageUrl)
     : getPostMediaUrl(post) || '';
 
@@ -94,7 +95,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       setIsLoaded(false);
       // Stop video when not active
       if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => {});
+        videoRef.current.pauseAsync().catch(() => { });
       }
     }
   }, [isActive, isVideo, videoUrl]);
@@ -110,7 +111,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
   };
 
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       style={styles.postItem}
       onPress={onPress}
       onLongPress={onOptionsPress}
@@ -118,8 +119,8 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
     >
       {/* Static thumbnail image - always visible in background */}
       {staticThumbnailUrl ? (
-        <Image 
-          source={{ uri: staticThumbnailUrl }} 
+        <Image
+          source={{ uri: staticThumbnailUrl }}
           style={styles.postMedia}
           resizeMode="cover"
           onError={() => {
@@ -153,7 +154,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         />
       )}
-      
+
       {/* Overlay with stats */}
       <View style={styles.postOverlay}>
         <View style={styles.postStats}>
@@ -161,19 +162,34 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           <Text style={styles.postStatText}>{formatNumber(post.likes || 0)}</Text>
         </View>
         
+        {/* Views count button */}
+        {onViewsPress && (
+          <TouchableOpacity
+            style={styles.postStats}
+            onPress={(e) => {
+              e.stopPropagation();
+              onViewsPress();
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="eye" size={12} color="#fff" />
+            <Text style={styles.postStatText}>{formatNumber((post as any).views || (post as any).view_count || 0)}</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Status indicator */}
         <View style={[
           styles.statusIndicator,
           { backgroundColor: getStatusColor(post.status || 'active') }
         ]}>
-          <MaterialIcons 
-            name={getStatusIcon(post.status || 'active') as any} 
-            size={10} 
-            color="#fff" 
+          <MaterialIcons
+            name={getStatusIcon(post.status || 'active') as any}
+            size={10}
+            color="#fff"
           />
         </View>
       </View>
-      
+
       {/* Video play indicator / Active indicator */}
       {isVideo && (
         <View style={[
@@ -187,7 +203,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           )}
         </View>
       )}
-      
+
       {/* Options button (3 dots) */}
       {onOptionsPress && (
         <TouchableOpacity
@@ -201,7 +217,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           <Feather name="more-vertical" size={16} color="#fff" />
         </TouchableOpacity>
       )}
-      
+
       {/* Publish button for draft posts */}
       {(() => {
         const isDraft = post.status === 'draft' || post.status === 'Draft';
@@ -214,21 +230,21 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
         }
         return isDraft && onPublishPress;
       })() && (
-        <TouchableOpacity
-          style={styles.publishDraftButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            if (__DEV__) {
-              console.log('📤 [VideoThumbnail] Publish button pressed');
-            }
-            onPublishPress();
-          }}
-          activeOpacity={0.8}
-        >
-          <Feather name="send" size={14} color="#fff" />
-          <Text style={styles.publishDraftButtonText}>Publish</Text>
-        </TouchableOpacity>
-      )}
+          <TouchableOpacity
+            style={styles.publishDraftButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              if (__DEV__) {
+                console.log('📤 [VideoThumbnail] Publish button pressed');
+              }
+              onPublishPress?.();
+            }}
+            activeOpacity={0.8}
+          >
+            <Feather name="send" size={14} color="#fff" />
+            <Text style={styles.publishDraftButtonText}>Publish</Text>
+          </TouchableOpacity>
+        )}
     </TouchableOpacity>
   );
 };
@@ -284,7 +300,7 @@ export default function ProfileScreen() {
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const likesManager = useLikesManager();
-  
+
   const [profile, setProfile] = useState<any>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -301,18 +317,25 @@ export default function ProfileScreen() {
   const [videoLoading, setVideoLoading] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
-  
+
   // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
-  
+
   // Video teaser playback state
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const [viewsModalVisible, setViewsModalVisible] = useState(false);
+  const [viewsModalPostId, setViewsModalPostId] = useState<string | null>(null);
+  const [viewsData, setViewsData] = useState<any[]>([]);
+  const [loadingViews, setLoadingViews] = useState(false);
+  const [likesModalVisible, setLikesModalVisible] = useState(false);
+  const [likesData, setLikesData] = useState<any[]>([]);
+  const [loadingLikes, setLoadingLikes] = useState(false);
   const teaserIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  
+
   const insets = useSafeAreaInsets();
 
   // Cycle through video teasers - one at a time
@@ -320,22 +343,22 @@ export default function ProfileScreen() {
     if (isScreenFocused && posts.length > 0) {
       // Find video posts only
       const videoPosts = posts.filter(p => !!p.video_url);
-      
+
       if (videoPosts.length > 0) {
         // Clear any existing interval
         if (teaserIntervalRef.current) {
           clearInterval(teaserIntervalRef.current);
         }
-        
+
         // Cycle through video posts every 4 seconds
         teaserIntervalRef.current = setInterval(() => {
           setActiveTeaserIndex(prev => {
             const videoIndices = posts
               .map((p, i) => getFileUrl(p.video_url) ? i : -1)
               .filter(i => i !== -1);
-            
+
             if (videoIndices.length === 0) return 0;
-            
+
             const currentVideoPosition = videoIndices.indexOf(prev);
             const nextPosition = (currentVideoPosition + 1) % videoIndices.length;
             return videoIndices[nextPosition] ?? 0;
@@ -343,7 +366,7 @@ export default function ProfileScreen() {
         }, 4000);
       }
     }
-    
+
     return () => {
       if (teaserIntervalRef.current) {
         clearInterval(teaserIntervalRef.current);
@@ -351,14 +374,19 @@ export default function ProfileScreen() {
     };
   }, [isScreenFocused, posts]);
 
-  // Handle screen focus for video playback
+  // Handle screen focus for video playback and refresh posts
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
+      // Refresh posts when screen comes into focus (e.g., after publishing a new post)
+      if (user) {
+        loadPosts(false);
+        loadProfile(false);
+      }
       return () => {
         setIsScreenFocused(false);
       };
-    }, [])
+    }, [user, activeTab])
   );
 
   useEffect(() => {
@@ -366,14 +394,14 @@ export default function ProfileScreen() {
       router.replace('/auth/login');
       return;
     }
-    
+
     if (__DEV__) {
       console.log('🔄 [useEffect] Tab or user changed:', {
         activeTab,
         userId: user?.id,
       });
     }
-    
+
     loadProfile();
     loadPosts();
   }, [user, activeTab]);
@@ -383,16 +411,31 @@ export default function ProfileScreen() {
     try {
       setError(null);
       if (showLoading) setLoadingProfile(true);
-      
-      const response = await userApi.getProfile();
-      if (response.status === 'success' && response.data) {
-        const userData = (response.data as any).user || response.data;
+
+      // Fetch profile and statistics in parallel for better performance
+      const [profileResponse, statsResponse] = await Promise.all([
+        userApi.getProfile(),
+        userApi.getStatistics()
+      ]);
+
+      if (profileResponse.status === 'success' && profileResponse.data) {
+        const userData = (profileResponse.data as any).user || profileResponse.data;
+        
+        // Get following count from profile - backend returns followingCount directly
+        let followingCount = userData.followingCount || 0;
+        
+        // If still 0, try statistics endpoint
+        if (followingCount === 0 && statsResponse.status === 'success' && statsResponse.data) {
+          const stats = (statsResponse.data as any).statistics || statsResponse.data;
+          followingCount = stats.following_count || 0;
+        }
+
         setProfile({
           ...userData,
           name: userData.username,
-          followers_count: userData.follower_count || 0,
-          following_count: userData.subscribers || 0,
-          posts_count: userData.posts_count || 0,
+          followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
+          following_count: followingCount, // Use followingCount from backend
+          posts_count: userData.posts_count || userData.postsCount || 0,
           phone1: userData.phone1,
           phone2: userData.phone2,
           email: userData.email,
@@ -402,15 +445,15 @@ export default function ProfileScreen() {
           id: userData.id,
         });
       } else {
-        setError({ type: 'server', message: response.message || 'Failed to load profile' });
+        setError({ type: 'server', message: profileResponse.message || 'Failed to load profile' });
       }
     } catch (error: any) {
       console.error('Error loading profile:', error);
       const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
       setError({
         type: isNetworkError ? 'network' : 'server',
-        message: isNetworkError 
-          ? 'No internet connection. Please check your network and try again.' 
+        message: isNetworkError
+          ? 'No internet connection. Please check your network and try again.'
           : error?.message || 'Failed to load profile. Please try again.'
       });
     } finally {
@@ -423,11 +466,11 @@ export default function ProfileScreen() {
     try {
       setError(null);
       if (showLoading) setLoadingPosts(true);
-      
+
       if (__DEV__) {
         console.log('📥 [loadPosts] Loading posts for tab:', activeTab);
       }
-      
+
       // Fetch drafts separately if draft tab is active
       let response;
       if (activeTab === 'draft') {
@@ -455,12 +498,12 @@ export default function ProfileScreen() {
           return;
         }
       }
-      
+
       if (__DEV__) {
         console.log('📥 [loadPosts] Fetching own posts...');
       }
       response = await userApi.getOwnPosts();
-      
+
       if (__DEV__) {
         console.log('📥 [loadPosts] Own Posts API Response:', {
           status: response.status,
@@ -475,16 +518,16 @@ export default function ProfileScreen() {
           } : null,
         });
       }
-      
+
       if (response.status === 'success' && response.data?.posts) {
         let filteredPosts = response.data.posts;
-        
+
         // Filter by tab
         switch (activeTab) {
           case 'active':
             // Show active posts (or legacy approved posts, or posts with no status default to active)
-            filteredPosts = filteredPosts.filter((p: any) => 
-              p.status === 'active' || 
+            filteredPosts = filteredPosts.filter((p: any) =>
+              p.status === 'active' ||
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
@@ -494,21 +537,21 @@ export default function ProfileScreen() {
             break;
           case 'suspended':
             // Show suspended posts (or legacy rejected/reported posts)
-            filteredPosts = filteredPosts.filter((p: any) => 
-              p.status === 'suspended' || 
+            filteredPosts = filteredPosts.filter((p: any) =>
+              p.status === 'suspended' ||
               p.status === 'rejected' || // Legacy support
               p.status === 'reported' // Legacy support
             );
             break;
           default:
             // Default to active
-            filteredPosts = filteredPosts.filter((p: any) => 
-              p.status === 'active' || 
+            filteredPosts = filteredPosts.filter((p: any) =>
+              p.status === 'active' ||
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
         }
-        
+
         if (__DEV__) {
           console.log('📥 [loadPosts] Filtered posts:', {
             activeTab,
@@ -521,9 +564,9 @@ export default function ProfileScreen() {
             }, {}),
           });
         }
-        
+
         setPosts(filteredPosts);
-        
+
         // Calculate total likes
         const likes = filteredPosts.reduce((sum: number, post: any) => {
           const cachedCount = postLikeCounts[post.id];
@@ -538,8 +581,8 @@ export default function ProfileScreen() {
       const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
       setError({
         type: isNetworkError ? 'network' : 'server',
-        message: isNetworkError 
-          ? 'No internet connection. Please check your network and try again.' 
+        message: isNetworkError
+          ? 'No internet connection. Please check your network and try again.'
           : error?.message || 'Failed to load posts. Please try again.'
       });
     } finally {
@@ -585,9 +628,9 @@ export default function ProfileScreen() {
     dispatch(setPostLikeCount({ postId, count: newCount }));
 
     // Update local posts array
-    setPosts(prevPosts => 
-      prevPosts.map(post => 
-        post.id === postId 
+    setPosts(prevPosts =>
+      prevPosts.map(post =>
+        post.id === postId
           ? { ...post, likes: newCount }
           : post
       )
@@ -599,7 +642,7 @@ export default function ProfileScreen() {
     // Background API call
     try {
       const response = await likesApi.toggle(postId);
-      
+
       if (response.status === 'success' && response.data) {
         // Update with server response
         const serverIsLiked = response.data.isLiked;
@@ -613,9 +656,9 @@ export default function ProfileScreen() {
         dispatch(setPostLikeCount({ postId, count: serverLikeCount }));
 
         // Update local posts array with server response
-        setPosts(prevPosts => 
-          prevPosts.map(post => 
-            post.id === postId 
+        setPosts(prevPosts =>
+          prevPosts.map(post =>
+            post.id === postId
               ? { ...post, likes: serverLikeCount }
               : post
           )
@@ -632,9 +675,9 @@ export default function ProfileScreen() {
           dispatch(removeLikedPost(postId));
         }
         dispatch(setPostLikeCount({ postId, count: currentCount }));
-        setPosts(prevPosts => 
-          prevPosts.map(post => 
-            post.id === postId 
+        setPosts(prevPosts =>
+          prevPosts.map(post =>
+            post.id === postId
               ? { ...post, likes: currentCount }
               : post
           )
@@ -643,7 +686,7 @@ export default function ProfileScreen() {
           const diff = currentCount - newCount;
           return Math.max(0, prev + diff);
         });
-        
+
         // Only show alert for non-404 errors (post not found should be silent)
         const isPostNotFound = response.message?.includes('not found') || response.message?.includes('Post not found');
         if (!isPostNotFound) {
@@ -658,9 +701,9 @@ export default function ProfileScreen() {
         dispatch(removeLikedPost(postId));
       }
       dispatch(setPostLikeCount({ postId, count: currentCount }));
-      setPosts(prevPosts => 
-        prevPosts.map(post => 
-          post.id === postId 
+      setPosts(prevPosts =>
+        prevPosts.map(post =>
+          post.id === postId
             ? { ...post, likes: currentCount }
             : post
         )
@@ -672,7 +715,7 @@ export default function ProfileScreen() {
 
       const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR';
       const isPostNotFound = error?.message?.includes('not found') || error?.message?.includes('Post not found');
-      
+
       // Only show alerts for network errors, not for post not found
       if (isNetworkError) {
         Alert.alert(
@@ -712,7 +755,7 @@ export default function ProfileScreen() {
 
   const handleVideoError = (error: any) => {
     const errorMessage = error?.message || error?.toString() || '';
-    
+
     // Check for decoder errors - but we're already using native controls, so just log
     if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
       // Native controls should handle this better, but if it still fails, show error
@@ -779,7 +822,7 @@ export default function ProfileScreen() {
               }
 
               const response = await postsApi.publishDraft(postId);
-              
+
               if (__DEV__) {
                 console.log('📤 [handlePublishDraft] API Response:', {
                   status: response.status,
@@ -795,7 +838,7 @@ export default function ProfileScreen() {
                   } : null,
                 });
               }
-              
+
               if (response.status === 'success') {
                 // Remove from drafts list
                 setPosts(prevPosts => {
@@ -805,14 +848,14 @@ export default function ProfileScreen() {
                   }
                   return filtered;
                 });
-                
+
                 // Show success message
                 Alert.alert(
                   'Success',
                   'Your post has been published and is pending review.',
                   [{ text: 'OK' }]
                 );
-                
+
                 // Refresh posts to update counts
                 await loadPosts(true);
               } else {
@@ -842,7 +885,7 @@ export default function ProfileScreen() {
 
   const handleDeletePost = async (postId: string) => {
     const postToDelete = posts.find(p => p.id === postId);
-    
+
     if (__DEV__) {
       console.log('🗑️ [handleDeletePost] Deleting post:', {
         postId,
@@ -853,51 +896,53 @@ export default function ProfileScreen() {
         } : null,
       });
     }
-    
+
     Alert.alert(
       'Delete Post',
       'Are you sure you want to delete this post?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            if (__DEV__) {
-              console.log('🗑️ [handleDeletePost] Calling API to delete post:', postId);
-            }
-            
-            await postsApi.deletePost(postId);
-            
-            if (__DEV__) {
-              console.log('🗑️ [handleDeletePost] Post deleted successfully');
-            }
-            
-            setPosts(prev => {
-              const filtered = prev.filter(p => p.id !== postId);
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            try {
               if (__DEV__) {
-                console.log('🗑️ [handleDeletePost] Removed from list. Remaining posts:', filtered.length);
+                console.log('🗑️ [handleDeletePost] Calling API to delete post:', postId);
               }
-              return filtered;
-            });
-            setPostOptionsModalVisible(false);
-            setSelectedPost(null);
-          } catch (error: any) {
-            if (__DEV__) {
-              console.error('❌ [handleDeletePost] Error deleting post:', {
-                error,
-                message: error?.message,
-                postId,
+
+              await postsApi.deletePost(postId);
+
+              if (__DEV__) {
+                console.log('🗑️ [handleDeletePost] Post deleted successfully');
+              }
+
+              setPosts(prev => {
+                const filtered = prev.filter(p => p.id !== postId);
+                if (__DEV__) {
+                  console.log('🗑️ [handleDeletePost] Removed from list. Remaining posts:', filtered.length);
+                }
+                return filtered;
               });
+              setPostOptionsModalVisible(false);
+              setSelectedPost(null);
+            } catch (error: any) {
+              if (__DEV__) {
+                console.error('❌ [handleDeletePost] Error deleting post:', {
+                  error,
+                  message: error?.message,
+                  postId,
+                });
+              }
+              Alert.alert('Error', 'Failed to delete post');
             }
-            Alert.alert('Error', 'Failed to delete post');
           }
-        }}
+        }
       ]
     );
   };
 
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
     const isActiveTeaser = isScreenFocused && activeTeaserIndex === index;
-    
+
     // Log post being rendered (only first few to avoid spam)
     if (__DEV__ && index < 3) {
       console.log(`📄 [renderPost ${index}] Rendering post:`, {
@@ -914,7 +959,7 @@ export default function ProfileScreen() {
         allKeys: Object.keys(item),
       });
     }
-    
+
     return (
       <VideoThumbnail
         post={item}
@@ -930,12 +975,31 @@ export default function ProfileScreen() {
           // Navigate to full-screen profile feed with current post as initial
           router.push({
             pathname: '/profile-feed/[userId]',
-            params: { 
-              userId: user?.id || '', 
+            params: {
+              userId: user?.id || '',
               initialPostId: item.id,
-              status: activeTab 
+              status: activeTab
             }
           });
+        }}
+        onViewsPress={async () => {
+          setViewsModalPostId(item.id);
+          setViewsModalVisible(true);
+          setLoadingViews(true);
+          try {
+            const response = await viewsApi.getViewStats(item.id);
+            if (response.status === 'success' && response.data?.recentViews) {
+              setViewsData(response.data.recentViews);
+            } else {
+              setViewsData([]);
+            }
+          } catch (error) {
+            console.error('Error loading views:', error);
+            setViewsData([]);
+            Alert.alert('Error', 'Failed to load views');
+          } finally {
+            setLoadingViews(false);
+          }
         }}
         onOptionsPress={() => {
           if (__DEV__) {
@@ -976,7 +1040,7 @@ export default function ProfileScreen() {
         <View style={styles.loginPrompt}>
           <Feather name="user" size={64} color="#666" />
           <Text style={styles.loginPromptText}>Sign in to view your profile</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.loginButton}
             onPress={() => router.push('/auth/login')}
           >
@@ -997,7 +1061,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
         }
@@ -1014,14 +1078,14 @@ export default function ProfileScreen() {
           )}
           <Text style={styles.username}>@{profile.username}</Text>
           {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
-          
+
           {/* Stats */}
           <View style={styles.statsContainer}>
             <TouchableOpacity style={styles.stat}>
               <Text style={styles.statValue}>{profile.posts_count || 0}</Text>
               <Text style={styles.statLabel}>Posts</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.stat}
               onPress={() => router.push({
                 pathname: '/followers/[id]',
@@ -1031,7 +1095,7 @@ export default function ProfileScreen() {
               <Text style={styles.statValue}>{profile.followers_count || 0}</Text>
               <Text style={styles.statLabel}>Followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.stat}
               onPress={() => router.push({
                 pathname: '/followers/[id]',
@@ -1041,14 +1105,54 @@ export default function ProfileScreen() {
               <Text style={styles.statValue}>{profile.following_count || 0}</Text>
               <Text style={styles.statLabel}>Following</Text>
             </TouchableOpacity>
-            <View style={styles.stat}>
+            <TouchableOpacity
+              style={styles.stat}
+              onPress={async () => {
+                setLikesModalVisible(true);
+                setLoadingLikes(true);
+                try {
+                  // Fetch likes for all posts and combine
+                  const allLikers = new Map<string, any>();
+                  for (const post of posts) {
+                    try {
+                      const response = await likesApi.getLikers(post.id, 1, 50);
+                      if (response.status === 'success' && response.data?.users) {
+                        response.data.users.forEach((user: any) => {
+                          if (!allLikers.has(user.id)) {
+                            allLikers.set(user.id, {
+                              ...user,
+                              likedPosts: [post.id],
+                              totalLikesGiven: 1,
+                            });
+                          } else {
+                            const existing = allLikers.get(user.id);
+                            if (!existing.likedPosts.includes(post.id)) {
+                              existing.likedPosts.push(post.id);
+                              existing.totalLikesGiven += 1;
+                            }
+                          }
+                        });
+                      }
+                    } catch (error) {
+                      console.error('Error fetching likers for post:', post.id, error);
+                    }
+                  }
+                  setLikesData(Array.from(allLikers.values()));
+                } catch (error) {
+                  console.error('Error loading likes data:', error);
+                  Alert.alert('Error', 'Failed to load likes data');
+                } finally {
+                  setLoadingLikes(false);
+                }
+              }}
+            >
               <Text style={styles.statValue}>{totalLikes}</Text>
               <Text style={styles.statLabel}>Likes</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* Edit Profile Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.editButton}
             onPress={() => setEditModalVisible(true)}
           >
@@ -1075,10 +1179,10 @@ export default function ProfileScreen() {
                 setActiveTab(tab.key);
               }}
             >
-              <MaterialIcons 
-                name={tab.icon as any} 
-                size={16} 
-                color={activeTab === tab.key ? '#60a5fa' : '#666'} 
+              <MaterialIcons
+                name={tab.icon as any}
+                size={16}
+                color={activeTab === tab.key ? '#60a5fa' : '#666'}
               />
               <Text style={[
                 styles.tabText,
@@ -1103,7 +1207,7 @@ export default function ProfileScreen() {
               <MaterialIcons name="video-library" size={48} color="#666" />
               <Text style={styles.emptyText}>No {activeTab} posts</Text>
               {activeTab === 'active' && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.createButton}
                   onPress={() => router.push('/(tabs)/create')}
                 >
@@ -1117,13 +1221,13 @@ export default function ProfileScreen() {
 
       {/* Menu Modal */}
       <Modal visible={menuVisible} transparent animationType="fade">
-        <TouchableOpacity 
-          style={styles.menuOverlay} 
+        <TouchableOpacity
+          style={styles.menuOverlay}
           onPress={() => setMenuVisible(false)}
           activeOpacity={1}
         >
           <View style={styles.menuContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
@@ -1133,8 +1237,8 @@ export default function ProfileScreen() {
               <Feather name="edit" size={20} color="#fff" />
               <Text style={styles.menuItemText}>Edit Profile</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
@@ -1144,8 +1248,8 @@ export default function ProfileScreen() {
               <Feather name="settings" size={20} color="#fff" />
               <Text style={styles.menuItemText}>Settings</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[styles.menuItem, styles.menuItemDanger]}
               onPress={() => {
                 setMenuVisible(false);
@@ -1166,10 +1270,134 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
+      {/* Views Modal */}
+      <Modal visible={viewsModalVisible} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          onPress={() => setViewsModalVisible(false)}
+          activeOpacity={1}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Views</Text>
+              <TouchableOpacity onPress={() => setViewsModalVisible(false)}>
+                <MaterialIcons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {loadingViews ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color="#60a5fa" />
+              </View>
+            ) : viewsData.length > 0 ? (
+              <FlatList
+                data={viewsData}
+                keyExtractor={(item) => item.user?.id || item.id || Math.random().toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.modalUserItem}
+                    onPress={() => {
+                      if (item.user?.id) {
+                        router.push({
+                          pathname: '/user/[id]',
+                          params: { id: item.user.id }
+                        });
+                        setViewsModalVisible(false);
+                      }
+                    }}
+                  >
+                    <Image
+                      source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/50' }}
+                      style={styles.modalUserAvatar}
+                    />
+                    <View style={styles.modalUserInfo}>
+                      <Text style={styles.modalUserName}>
+                        {item.user?.username || item.user?.display_name || 'Anonymous'}
+                      </Text>
+                      {item.viewedAt && (
+                        <Text style={styles.modalUserMeta}>
+                          {new Date(item.viewedAt).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                contentContainerStyle={styles.modalListContent}
+              />
+            ) : (
+              <View style={styles.modalEmpty}>
+                <MaterialIcons name="visibility-off" size={48} color="#666" />
+                <Text style={styles.modalEmptyText}>No views yet</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Likes Modal */}
+      <Modal visible={likesModalVisible} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.menuOverlay}
+          onPress={() => setLikesModalVisible(false)}
+          activeOpacity={1}
+        >
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>People Who Liked Your Posts</Text>
+              <TouchableOpacity onPress={() => setLikesModalVisible(false)}>
+                <MaterialIcons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            {loadingLikes ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color="#60a5fa" />
+              </View>
+            ) : likesData.length > 0 ? (
+              <FlatList
+                data={likesData}
+                keyExtractor={(item) => item.id || Math.random().toString()}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.modalUserItem}
+                    onPress={() => {
+                      if (item.id) {
+                        router.push({
+                          pathname: '/user/[id]',
+                          params: { id: item.id }
+                        });
+                        setLikesModalVisible(false);
+                      }
+                    }}
+                  >
+                    <Image
+                      source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
+                      style={styles.modalUserAvatar}
+                    />
+                    <View style={styles.modalUserInfo}>
+                      <Text style={styles.modalUserName}>
+                        {item.username || item.display_name || 'Unknown'}
+                      </Text>
+                      <Text style={styles.modalUserMeta}>
+                        Liked {item.totalLikesGiven || item.likedPosts?.length || 0} of your posts
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+                contentContainerStyle={styles.modalListContent}
+              />
+            ) : (
+              <View style={styles.modalEmpty}>
+                <MaterialIcons name="favorite-border" size={48} color="#666" />
+                <Text style={styles.modalEmptyText}>No likes yet</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Post Options Modal */}
       <Modal visible={postOptionsModalVisible} transparent animationType="slide">
-        <TouchableOpacity 
-          style={styles.menuOverlay} 
+        <TouchableOpacity
+          style={styles.menuOverlay}
           onPress={() => setPostOptionsModalVisible(false)}
           activeOpacity={1}
         >
@@ -1183,8 +1411,8 @@ export default function ProfileScreen() {
                       <Feather name="video" size={24} color="#60a5fa" />
                     </View>
                   ) : getPostMediaUrl(selectedPost) ? (
-                    <Image 
-                      source={{ uri: selectedPost.image }} 
+                    <Image
+                      source={{ uri: selectedPost.image }}
                       style={styles.postOptionsThumbnail}
                       resizeMode="cover"
                     />
@@ -1209,12 +1437,12 @@ export default function ProfileScreen() {
                 </View>
               </View>
             )}
-            
+
             <View style={styles.menuDivider} />
-            
+
             {/* Publish Draft Button - Only show for draft posts */}
             {selectedPost?.status === 'draft' && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.menuItem, styles.menuItemPrimary]}
                 onPress={() => {
                   setPostOptionsModalVisible(false);
@@ -1227,8 +1455,8 @@ export default function ProfileScreen() {
                 <Text style={[styles.menuItemText, { color: '#10b981' }]}>Publish Post</Text>
               </TouchableOpacity>
             )}
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setPostOptionsModalVisible(false);
@@ -1243,8 +1471,8 @@ export default function ProfileScreen() {
               <Feather name="share-2" size={20} color="#60a5fa" />
               <Text style={styles.menuItemText}>Share Post</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[styles.menuItem, styles.menuItemDanger]}
               onPress={() => {
                 setPostOptionsModalVisible(false);
@@ -1256,8 +1484,8 @@ export default function ProfileScreen() {
               <Feather name="trash-2" size={20} color="#ef4444" />
               <Text style={[styles.menuItemText, { color: '#ef4444' }]}>Delete Post</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => setPostOptionsModalVisible(false)}
             >
@@ -1564,7 +1792,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 40, // Increased bottom padding
+    maxHeight: '70%', // Reduced max height to ensure content fits
+    marginBottom: 40, // Increased margin at bottom for better spacing
   },
   menuDivider: {
     height: 1,
@@ -1765,5 +1995,70 @@ const styles = StyleSheet.create({
     padding: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalContainer: {
+    backgroundColor: '#18181b',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 40,
+    maxHeight: '80%',
+    marginBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalLoading: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  modalListContent: {
+    paddingBottom: 20,
+  },
+  modalUserItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: '#232326',
+    marginBottom: 8,
+  },
+  modalUserAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: '#1a1a1a',
+  },
+  modalUserInfo: {
+    flex: 1,
+  },
+  modalUserName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  modalUserMeta: {
+    color: '#999',
+    fontSize: 12,
+  },
+  modalEmpty: {
+    paddingVertical: 60,
+    alignItems: 'center',
+  },
+  modalEmptyText: {
+    color: '#999',
+    fontSize: 16,
+    marginTop: 16,
   },
 });

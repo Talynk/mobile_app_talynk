@@ -1,9 +1,8 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import { captureRef } from 'react-native-view-shot';
-import { View, Text, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import React from 'react';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+import watermarkLogo from '../../assets/images/watermark_logo.png';
 
 /**
  * Creates a watermark image from text
@@ -39,7 +38,7 @@ export const WatermarkOverlay = React.forwardRef(
     return (
       <View ref={ref} style={styles.watermarkContainer} collapsable={false}>
         <View style={styles.watermarkBackground}>
-          <Text style={styles.watermarkText}>{appName}</Text>
+          <Image source={watermarkLogo} style={styles.watermarkLogo} resizeMode="contain" />
           <Text style={styles.watermarkUserId}>{userId}</Text>
         </View>
       </View>
@@ -52,8 +51,9 @@ WatermarkOverlay.displayName = 'WatermarkOverlay';
 const styles = StyleSheet.create({
   watermarkContainer: {
     position: 'absolute',
-    bottom: 20,
-    right: 16,
+    top: '40%',
+    // Hug the right edge as much as possible (some slight clipping is acceptable)
+    right: -2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -67,11 +67,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  watermarkText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+  watermarkLogo: {
+    width: 80,
+    height: 80,
   },
   watermarkUserId: {
     color: 'rgba(255, 255, 255, 0.8)',

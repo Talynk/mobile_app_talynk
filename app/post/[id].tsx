@@ -319,9 +319,11 @@ export default function PostDetailScreen() {
         contentContainerStyle={styles.scrollContentContainer}
         showsVerticalScrollIndicator={false}
       >
-        {/* Caption */}
+        {/* Caption - Show only once, prefer caption over description over content */}
         <View style={styles.captionContainer}>
-          <Text style={styles.caption}>{post.caption || post.description || post.content || ''}</Text>
+          <Text style={styles.caption}>
+            {post.caption || post.description || post.content || ''}
+          </Text>
           {post.category && (
             <TouchableOpacity 
               style={styles.categoryBadge}

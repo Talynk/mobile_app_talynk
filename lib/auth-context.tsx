@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthState, User } from '../types';
 import { authApi } from './api';
+import { authEventEmitter } from './auth-event-emitter';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<boolean>;
@@ -54,6 +55,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     loadStoredAuth();
+  }, []);
+
+  // Listen for unauthorized events (401 from API client)
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      console.log('[Auth] Received unauthorized event, logging out');
+      dispatch({ type: 'LOGOUT' });
+    };
+
+    authEventEmitter.onUnauthorized(handleUnauthorized);
+
+    return () => {
+      authEventEmitter.offUnauthorized(handleUnauthorized);
+    };
   }, []);
 
   const loadStoredAuth = async () => {

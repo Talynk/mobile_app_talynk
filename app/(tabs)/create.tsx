@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -35,65 +35,10 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import ViewShot from 'react-native-view-shot';
 import { WatermarkOverlay } from '@/lib/utils/watermark';
 import { captureRef } from 'react-native-view-shot';
+import watermarkLogo from '../../assets/images/watermark_logo.png';
+import Constants from 'expo-constants';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-// --- CATEGORY STRUCTURE (from web) ---
-const CATEGORIES_STRUCTURE = {
-  "General": [
-    { id: 1, name: "Technology" },
-    { id: 2, name: "Entertainment" },
-    { id: 3, name: "Sports" },
-    { id: 4, name: "Education" },
-    { id: 5, name: "Lifestyle" },
-    { id: 6, name: "Business" },
-    { id: 7, name: "Health" },
-    { id: 8, name: "Travel" },
-    { id: 9, name: "Science" },
-  ],
-  "Music": [
-    { id: 12, name: "Rock" },
-    { id: 13, name: "Pop" },
-    { id: 14, name: "Hip Hop" },
-    { id: 15, name: "Jazz" },
-    { id: 16, name: "Classical" },
-    { id: 17, name: "Electronic" },
-    { id: 18, name: "Afrobeat" },
-    { id: 19, name: "Gospel" },
-  ],
-  "Sports": [
-    { id: 21, name: "Football" },
-    { id: 22, name: "Basketball" },
-    { id: 23, name: "Volleyball" },
-    { id: 24, name: "Handball" },
-    { id: 25, name: "Tennis" },
-    { id: 26, name: "Rugby" },
-    { id: 27, name: "Acrobatics" },
-    { id: 28, name: "Others" },
-  ],
-  "Arts & Performance": [
-    { id: 29, name: "Theatre" },
-    { id: 30, name: "Comedy" },
-    { id: 31, name: "Drama" },
-    { id: 32, name: "Musical" },
-    { id: 33, name: "Drawing" },
-    { id: 34, name: "Painting" },
-    { id: 35, name: "Sculpture" },
-    { id: 36, name: "Photography" },
-  ],
-  "Communication & Movement": [
-    { id: 37, name: "Public Speaking" },
-    { id: 38, name: "Debate" },
-    { id: 39, name: "Presentation" },
-    { id: 40, name: "Communication" },
-    { id: 41, name: "Dance" },
-    { id: 42, name: "Ballet" },
-    { id: 43, name: "Contemporary" },
-    { id: 44, name: "Hip-Hop" },
-    { id: 45, name: "Traditional" },
-  ],
-};
-const MAIN_CATEGORY_GROUPS = Object.keys(CATEGORIES_STRUCTURE);
 
 const COLORS = {
   dark: {
@@ -186,78 +131,6 @@ export default function CreatePostScreen() {
     }
   }, [isAuthenticated, authLoading]);
 
-  // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
-  useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated) return;
-    if (hasOpenedCameraOnMount) return;
-
-    setHasOpenedCameraOnMount(true);
-
-    // Small delay so the screen can finish rendering before opening the native camera.
-    // This makes auto-open more reliable on some devices / platforms.
-    const timeoutId = setTimeout(() => {
-      handleRecordVideo();
-    }, 400);
-
-    return () => {
-      clearTimeout(timeoutId);
-    };
-  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount]);
-
-  // Show loading screen while checking authentication
-  if (authLoading) {
-    return (
-      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={C.primary} />
-        <Text style={[{ fontSize: 16, marginTop: 12, fontWeight: '500' }, { color: C.text }]}>Loading...</Text>
-      </View>
-    );
-  }
-
-  // Show login prompt if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <MaterialIcons name="lock" size={64} color={C.primary} />
-        <Text style={[{ fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 12, textAlign: 'center' }, { color: C.text }]}>Authentication Required</Text>
-        <Text style={[{ fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 32 }, { color: C.textSecondary }]}>
-          You need to be logged in to create posts and share your content with the community.
-        </Text>
-        <TouchableOpacity
-          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.primary }]}
-          onPress={() => router.push('/auth/login')}
-        >
-          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
-          onPress={() => router.replace('/')}
-        >
-          <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  // --- CATEGORY HELPERS ---
-  const getCategoriesForGroup = () => {
-    if (!selectedGroup) return [];
-    return CATEGORIES_STRUCTURE[selectedGroup as keyof typeof CATEGORIES_STRUCTURE] || [];
-  };
-  
-  const getSelectedCategoryName = () => {
-    if (!selectedCategoryId) return '';
-    const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
-    if (foundSub) return foundSub.name;
-    const allCats = Object.values(CATEGORIES_STRUCTURE).flat();
-    const found = allCats.find((cat: { id: number; name: string }) => String(cat.id) === selectedCategoryId);
-    return found ? found.name : '';
-  };
-
-  const getSelectedCategoryId = () => {
-    return selectedCategoryId || '';
-  };
 
   // --- CONFIGURE AUDIO MODE ---
   // Initialize audio mode on component mount
@@ -279,6 +152,9 @@ export default function CreatePostScreen() {
     configureAudio();
   }, []);
 
+  // Preferred category order
+  const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
+
   // --- FETCH CATEGORIES ---
   useEffect(() => {
     if (authLoading) return;
@@ -290,6 +166,15 @@ export default function CreatePostScreen() {
       if (res.status === 'success' && (res.data as any)?.categories) {
         const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
         const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
+        // Sort categories according to preferred order
+        mains.sort((a, b) => {
+          const indexA = CATEGORY_ORDER.indexOf(a.name);
+          const indexB = CATEGORY_ORDER.indexOf(b.name);
+          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          return a.name.localeCompare(b.name);
+        });
         setMainCategories(mains);
       }
       setLoadingCategories(false);
@@ -313,7 +198,8 @@ export default function CreatePostScreen() {
   }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
   // --- CAMERA RECORDING ---
-  const handleRecordVideo = async () => {
+  // Define handleRecordVideo with useCallback so it can be used in useEffect
+  const handleRecordVideo = useCallback(async () => {
     try {
       // Request camera permission
       if (!cameraPermission?.granted) {
@@ -354,7 +240,89 @@ export default function CreatePostScreen() {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
     }
+  }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission]);
+
+  // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) return;
+    if (hasOpenedCameraOnMount) return;
+
+    setHasOpenedCameraOnMount(true);
+
+    // Small delay so the screen can finish rendering before opening the native camera.
+    // This makes auto-open more reliable on some devices / platforms.
+    const timeoutId = setTimeout(() => {
+      handleRecordVideo();
+    }, 400);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo]);
+
+  // --- CATEGORY HELPERS ---
+  // All category data (main + sub) now comes directly from the backend response,
+  // so we never hardcode groups or subcategories. This keeps the UI in sync
+  // with whatever the backend currently holds.
+  const getCategoriesForGroup = () => {
+    if (!selectedGroup) return [];
+    const parent = mainCategories.find(c => c.name === selectedGroup);
+    return parent?.children || [];
   };
+  
+  const getSelectedCategoryName = () => {
+    if (!selectedCategoryId) return '';
+    const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
+    if (foundSub) return foundSub.name;
+
+    // Fallback to loaded mainCategories (server-provided category structure)
+    const foundFromLoaded = mainCategories
+      .flatMap(c => c.children || [])
+      .find(cat => String(cat.id) === selectedCategoryId);
+    if (foundFromLoaded) return foundFromLoaded.name;
+
+    return '';
+  };
+
+  const getSelectedCategoryId = () => {
+    return selectedCategoryId || '';
+  };
+
+  // Show loading screen while checking authentication
+  if (authLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.primary} />
+        <Text style={[{ fontSize: 16, marginTop: 12, fontWeight: '500' }, { color: C.text }]}>Loading...</Text>
+      </View>
+    );
+  }
+
+  // Show login prompt if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <MaterialIcons name="lock" size={64} color={C.primary} />
+        <Text style={[{ fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 12, textAlign: 'center' }, { color: C.text }]}>Authentication Required</Text>
+        <Text style={[{ fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 32 }, { color: C.textSecondary }]}>
+          You need to be logged in to create posts and share your content with the community.
+        </Text>
+        <TouchableOpacity
+          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.primary }]}
+          onPress={() => router.push('/auth/login')}
+        >
+          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
+          onPress={() => router.replace('/')}
+        >
+          <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const startRecording = async () => {
     if (!cameraRef.current) return;
@@ -551,7 +519,7 @@ export default function CreatePostScreen() {
     }
   };
 
-  // --- CREATE WATERMARK IMAGE ---
+  // --- CREATE WATERMARK IMAGE (optional helper, currently unused for upload) ---
   const createWatermarkImage = async (): Promise<string | null> => {
     try {
       if (!user?.id || !watermarkViewRef.current) {
@@ -559,8 +527,10 @@ export default function CreatePostScreen() {
         return null;
       }
 
-      // Capture the watermark view as an image
       try {
+        // Give React a moment to ensure the hidden watermark view is fully rendered
+        await new Promise(resolve => setTimeout(resolve, 150));
+
         const watermarkUri = await captureRef(watermarkViewRef, {
           format: 'png',
           quality: 1.0,
@@ -576,41 +546,109 @@ export default function CreatePostScreen() {
     }
   };
 
+  // --- NORMALIZE IMAGE TO 9:16 (1080x1920) ---
+  const normalizeImageAspect = async (imageUri: string): Promise<string> => {
+    try {
+      const info = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [],
+        { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      const sourceWidth = info.width;
+      const sourceHeight = info.height;
+
+      if (!sourceWidth || !sourceHeight) {
+        return imageUri;
+      }
+
+      const targetWidth = 1080;
+      const targetHeight = 1920;
+      const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+
+      const resizedWidth = Math.round(sourceWidth * scale);
+      const resizedHeight = Math.round(sourceHeight * scale);
+
+      const resized = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: resizedWidth, height: resizedHeight } }],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      const cropOriginX = Math.max(0, Math.round((resizedWidth - targetWidth) / 2));
+      const cropOriginY = Math.max(0, Math.round((resizedHeight - targetHeight) / 2));
+
+      const cropped = await ImageManipulator.manipulateAsync(
+        resized.uri,
+        [{
+          crop: {
+            originX: cropOriginX,
+            originY: cropOriginY,
+            width: targetWidth,
+            height: targetHeight,
+          },
+        }],
+        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      return cropped.uri;
+    } catch (error) {
+      console.error('Error normalizing image aspect ratio:', error);
+      return imageUri;
+    }
+  };
+
   // --- ADD WATERMARK TO IMAGE ---
   // Uses view-shot to composite the watermark onto the image
+  // NO FALLBACKS - MUST WORK OR THROW ERROR
   const addWatermarkToImage = async (imageUri: string): Promise<string> => {
-    try {
       if (!user?.id) {
-        console.warn('User ID not available, skipping watermark');
-        return imageUri;
+      throw new Error('[Watermark] User ID not available. Cannot add watermark to image.');
+    }
+
+    if (!imageUri) {
+      throw new Error('[Watermark] Image URI is required');
       }
 
       // Set the image URI temporarily so we can render it in the composite view
       setTempImageUri(imageUri);
       
       // Wait a bit for the view to render
-      await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 200));
       
       // Capture the composite view (image + watermark overlay)
-      if (imageCompositeRef.current) {
-        try {
-          // Use ViewShot's capture method directly
-          const watermarkedUri = await imageCompositeRef.current.capture();
-          setTempImageUri(null); // Clear temp image
-          return watermarkedUri;
-        } catch (error) {
-          console.error('Error capturing watermarked image:', error);
-          setTempImageUri(null);
-          return imageUri;
-        }
+    if (!imageCompositeRef.current) {
+      setTempImageUri(null);
+      throw new Error('[Watermark] Image composite ref not available. Cannot add watermark.');
+    }
+
+    try {
+      // Use ViewShot's capture method directly
+      if (!imageCompositeRef.current || typeof imageCompositeRef.current.capture !== 'function') {
+        setTempImageUri(null);
+        throw new Error('[Watermark] ViewShot capture method not available');
       }
       
+      const watermarkedUri = await imageCompositeRef.current.capture();
+      setTempImageUri(null); // Clear temp image
+      
+      if (!watermarkedUri) {
+        throw new Error('[Watermark] Failed to capture watermarked image. ViewShot returned null.');
+      }
+
+      // Verify the output file exists
+      const outputInfo = await FileSystem.getInfoAsync(watermarkedUri);
+      if (!outputInfo.exists) {
+        throw new Error(`[Watermark] Watermarked image file not found: ${watermarkedUri}`);
+      }
+
+      console.log('[Watermark] ✅ Image watermarked successfully:', watermarkedUri);
+      return watermarkedUri;
+    } catch (error: any) {
       setTempImageUri(null);
-      return imageUri;
-    } catch (error) {
-      console.error('Error adding watermark to image:', error);
-      setTempImageUri(null);
-      return imageUri;
+      const errorMsg = `[Watermark] Failed to add watermark to image: ${error?.message || error}`;
+      console.error(errorMsg);
+      throw new Error(errorMsg);
     }
   };
 
@@ -639,47 +677,85 @@ export default function CreatePostScreen() {
     if (!cameraRef.current) return;
 
     try {
-      // Try to capture with view-shot first (includes watermark overlay)
-      // If that fails, fall back to regular capture and add watermark separately
       let imageUri: string | null = null;
+
+      // Use native camera capture
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.92,
+        base64: false,
+        skipProcessing: false,
+        exif: false,
+      });
       
-      if (cameraViewShotRef.current && cameraViewShotRef.current.capture) {
-        try {
-          const uri = await cameraViewShotRef.current.capture();
-          if (uri) {
-            imageUri = uri;
-          }
-        } catch (viewShotError) {
-          console.log('View-shot capture failed, using regular capture:', viewShotError);
-          // Fall back to regular capture
-        }
-      }
+      console.log('[Camera] Photo captured:', photo);
       
-      // If view-shot didn't work, use regular camera capture
-      if (!imageUri) {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8,
-          base64: false,
-        });
-        if (photo && photo.uri) {
-          imageUri = photo.uri;
+      if (photo && photo.uri) {
+        imageUri = photo.uri;
+        
+        // Verify the image file exists and has content
+        const fileInfo = await FileSystem.getInfoAsync(imageUri);
+        console.log('[Camera] Image file info:', fileInfo);
+        
+        if (!fileInfo.exists || (fileInfo.size && fileInfo.size < 1000)) {
+          console.error('[Camera] Invalid image file - size:', fileInfo.size);
+          Alert.alert('Error', 'Captured image appears to be invalid. Please try again.');
+          return;
         }
       }
 
       if (imageUri) {
-        // Add watermark to the captured image (if not already included via view-shot)
-        const watermarkedUri = await addWatermarkToImage(imageUri);
-        setCapturedImageUri(watermarkedUri);
-        setRecordedVideoUri(null); // Clear video when image is captured
+        // First set the captured image immediately so user sees something
+        // This prevents the "black image" issue
+        setRecordedVideoUri(null);
         setEditedVideoUri(null);
+        
+        // Close camera to show form
         setShowCamera(false);
-        // Don't show modal - buttons will be in the form
+        
+        // Process image in background - normalize and watermark
+        try {
+          // Normalize the image to 9:16 (1080x1920)
+          const normalizedUri = await normalizeImageAspect(imageUri);
+          console.log('[Camera] Normalized image URI:', normalizedUri);
+          
+          // Verify normalized image
+          const normalizedInfo = await FileSystem.getInfoAsync(normalizedUri);
+          if (!normalizedInfo.exists || (normalizedInfo.size && normalizedInfo.size < 1000)) {
+            console.warn('[Camera] Normalized image invalid, using original');
+            setCapturedImageUri(imageUri);
+            return;
+          }
+
+          // Try to add watermark, but don't fail if it doesn't work
+          try {
+            const watermarkedUri = await addWatermarkToImage(normalizedUri);
+            console.log('[Camera] Watermarked image URI:', watermarkedUri);
+            
+            // Verify watermarked image
+            const watermarkedInfo = await FileSystem.getInfoAsync(watermarkedUri);
+            if (watermarkedInfo.exists && watermarkedInfo.size && watermarkedInfo.size > 1000) {
+              setCapturedImageUri(watermarkedUri);
+            } else {
+              console.warn('[Camera] Watermarked image invalid, using normalized');
+              setCapturedImageUri(normalizedUri);
+            }
+          } catch (watermarkError: any) {
+            console.warn('[Camera] Watermarking failed, using normalized image:', watermarkError.message);
+            setCapturedImageUri(normalizedUri);
+            showToast('Image captured');
+          }
+        } catch (processError: any) {
+          console.error('[Camera] Image processing error:', processError);
+          // If all processing fails, use the original image
+          setCapturedImageUri(imageUri);
+          showToast('Image captured');
+        }
       } else {
         Alert.alert('Error', 'Failed to capture image. Please try again.');
       }
     } catch (error: any) {
       console.error('Image capture error:', error);
-      Alert.alert('Error', 'Failed to capture image. Please try again.');
+      Alert.alert('Error', `Failed to capture image: ${error.message || 'Unknown error'}. Please try again.`);
     }
   };
 
@@ -761,10 +837,10 @@ export default function CreatePostScreen() {
     const isValid = await validate();
     if (!isValid) return;
     
-    const videoUri = editedVideoUri || recordedVideoUri;
+    const rawVideoUri = editedVideoUri || recordedVideoUri;
     const imageUri = capturedImageUri;
     
-    if (!videoUri && !imageUri) {
+    if (!rawVideoUri && !imageUri) {
       Alert.alert('Error', 'No media to upload');
       return;
     }
@@ -779,7 +855,41 @@ export default function CreatePostScreen() {
     setUploadProgress(0);
     
     try {
-      const mediaUri = videoUri || imageUri;
+      // Backend requires category NAME in `post_category` (not just ID)
+      const categoryName = getSelectedCategoryName();
+      if (!categoryName || categoryName.trim() === '') {
+        setUploading(false);
+        setUploadProgress(0);
+        Alert.alert('Category Error', 'Selected category name is missing. Please re-select a category and try again.');
+        return;
+      }
+
+      // --- FRONTEND MEDIA PROCESSING ---
+      // We no longer process videos on-device with FFmpegKit because the native
+      // module is unstable in this setup. Instead:
+      // 1) For videos, we upload the raw recorded file.
+      // 2) For images, we still normalize + watermark on-device.
+
+      // Verify image is watermarked if it's an image
+      let finalImageUri = imageUri;
+      if (imageUri && !rawVideoUri) {
+        try {
+          finalImageUri = await addWatermarkToImage(imageUri);
+        } catch (watermarkError: any) {
+          setUploading(false);
+          setUploadProgress(0);
+          const errorMessage = watermarkError?.message || 'Failed to add watermark to image';
+          console.error('[Upload] Image watermarking error:', errorMessage);
+          Alert.alert(
+            'Image Watermarking Failed',
+            errorMessage,
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
+
+      const mediaUri = rawVideoUri || finalImageUri;
       if (!mediaUri) {
         throw new Error('No media file to upload');
       }
@@ -790,17 +900,31 @@ export default function CreatePostScreen() {
         throw new Error('Media file not found');
       }
 
-      const fileName = mediaUri.split('/').pop() || (videoUri ? 'video.mp4' : 'image.jpg');
-      const fileType = videoUri ? 'video/mp4' : 'image/jpeg';
+      const isVideo = !!rawVideoUri;
+      const fileName = mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
+      const fileType = isVideo ? 'video/mp4' : 'image/jpeg';
       
+      // Verify media file exists before uploading
+      const mediaInfo = await FileSystem.getInfoAsync(mediaUri);
+      if (!mediaInfo.exists) {
+        throw new Error(`Media file not found at: ${mediaUri}`);
+      }
+      console.log('[Upload] Media file verified:', {
+        uri: mediaUri,
+        exists: mediaInfo.exists,
+        size: mediaInfo.size,
+        fileName,
+        fileType
+      });
+
       const formData = new FormData();
       // Use first 50 chars of caption as title, or generate one
       const autoTitle = caption.trim().substring(0, 50) || 'My Post';
       formData.append('title', autoTitle);
+      // Only send caption, not both title and caption to avoid duplication
       formData.append('caption', caption);
       
       const categoryId = getSelectedCategoryId();
-      const categoryName = getSelectedCategoryName();
       
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
@@ -811,6 +935,16 @@ export default function CreatePostScreen() {
         name: fileName,
         type: fileType,
       } as any);
+      
+      console.log('[Upload] FormData prepared:', {
+        title: autoTitle,
+        caption: caption.substring(0, 50) + '...',
+        categoryName,
+        categoryId,
+        status,
+        fileName,
+        fileType
+      });
       
       const xhr = new XMLHttpRequest();
       const apiUrl = `${API_BASE_URL}/api/posts`;
@@ -920,16 +1054,39 @@ export default function CreatePostScreen() {
             Alert.alert('Error', 'Failed to parse server response.');
           }
         } else {
+          // Try to parse server error for a real message (e.g. "Invalid category", "Maximum draft limit reached")
+          let serverMessage = `Failed to create post. Server responded with status ${xhr.status}`;
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            if (parsed?.message) serverMessage = parsed.message;
+          } catch (_) {
+            // ignore JSON parse errors
+          }
           await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, fileName);
-          Alert.alert('Error', `Failed to create post. Server responded with status ${xhr.status}`);
+          Alert.alert('Error', serverMessage);
         }
       };
       
       xhr.onerror = async () => {
         setUploading(false);
         setUploadProgress(0);
+        console.error('[Upload] XHR onerror triggered');
+        console.error('[Upload] XHR status:', xhr.status);
+        console.error('[Upload] XHR statusText:', xhr.statusText);
+        console.error('[Upload] XHR readyState:', xhr.readyState);
+        console.error('[Upload] Media URI:', mediaUri);
+        console.error('[Upload] File name:', fileName);
+        console.error('[Upload] File type:', fileType);
         await uploadNotificationService.showUploadError('Network or server error', fileName);
-        Alert.alert('Error', 'Failed to create post. Network or server error.');
+        Alert.alert('Error', 'Failed to create post. Network or server error. Please check your internet connection and try again.');
+      };
+      
+      xhr.ontimeout = async () => {
+        setUploading(false);
+        setUploadProgress(0);
+        console.error('[Upload] XHR timeout');
+        await uploadNotificationService.showUploadError('Upload timeout', fileName);
+        Alert.alert('Error', 'Upload timed out. Please try again.');
       };
       
       xhr.send(formData);
@@ -977,16 +1134,23 @@ export default function CreatePostScreen() {
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
       
+      {/* Hidden watermark host for FFmpeg (logo + user id) */}
+      {user && user.id && (
+        <View style={styles.hiddenCompositeView} collapsable={false}>
+          <WatermarkOverlay appName="Talentix" userId={user.id} ref={watermarkViewRef} />
+        </View>
+      )}
+
       {/* Hidden composite view for watermarking images */}
       {tempImageUri && (
         <View style={styles.hiddenCompositeView} collapsable={false}>
           <ViewShot ref={imageCompositeRef} style={styles.compositeViewShot}>
             <Image 
-              source={{ uri: tempImageUri }} 
+              source={{ uri: tempImageUri || '' }} 
               style={styles.compositeImage}
               resizeMode="cover"
             />
-            {user?.id && (
+            {user && user.id && (
               <WatermarkOverlay appName="Talentix" userId={user.id} ref={watermarkViewRef} />
             )}
           </ViewShot>
@@ -1009,9 +1173,9 @@ export default function CreatePostScreen() {
           {/* Overlay with absolute positioning */}
             <View style={styles.cameraOverlay}>
               {/* Watermark - Bottom Right */}
-              {user?.id && (
+              {user && user.id && (
                 <View style={styles.watermarkContainer}>
-                  <Text style={styles.watermarkText}>Talentix</Text>
+                  <Image source={watermarkLogo} style={styles.watermarkLogo} resizeMode="contain" />
                   <Text style={styles.watermarkUserId}>{user.id}</Text>
                 </View>
               )}
@@ -1174,7 +1338,7 @@ export default function CreatePostScreen() {
                   <>
                     <Video
                       ref={videoRef}
-                      source={{ uri: currentVideoUri }}
+                      source={{ uri: currentVideoUri || '' }}
                       style={styles.videoPlayer}
                       resizeMode={ResizeMode.COVER}
                       isLooping
@@ -1327,8 +1491,8 @@ export default function CreatePostScreen() {
                         style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}
                     />
                   ))
-                ) : (
-                  (mainCategories.length ? mainCategories.map((c) => c.name) : MAIN_CATEGORY_GROUPS).map(
+                ) : mainCategories.length > 0 ? (
+                  mainCategories.map((c) => c.name).map(
                     (group) => (
                       <TouchableOpacity
                         key={group}
@@ -1359,6 +1523,12 @@ export default function CreatePostScreen() {
                       </TouchableOpacity>
                     )
                   )
+                ) : (
+                  <View style={{ paddingVertical: 8 }}>
+                    <Text style={{ color: C.textSecondary, fontSize: 13 }}>
+                      No categories available. Please try again later.
+                    </Text>
+                  </View>
                 )}
               </ScrollView>
               {errors.group && (
@@ -1474,19 +1644,22 @@ export default function CreatePostScreen() {
               {/* Action Buttons - Horizontal */}
               <View style={styles.quickActionButtonsContainer}>
             <TouchableOpacity
-                  style={[styles.quickActionButton, styles.quickPublishButton, (uploading || !caption.trim() || !selectedCategoryId) && styles.quickActionButtonDisabled]}
+                  style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
                   onPress={() => {
-                    if (caption.trim() && selectedCategoryId) {
-                      handleCreatePost('active');
+                    // Show specific error messages for missing fields
+                    if (!caption.trim() && !selectedGroup) {
+                      showToast('Please add a caption and select a category');
+                    } else if (!caption.trim()) {
+                      showToast('Caption is required to publish');
+                    } else if (!selectedGroup) {
+                      showToast('Please select a category group');
+                    } else if (!selectedCategoryId) {
+                      showToast('Please select a specific category');
                     } else {
-                      Alert.alert(
-                        'Complete Details',
-                        'Please add a caption and select a category to publish.',
-                        [{ text: 'OK' }]
-                      );
+                      handleCreatePost('active');
                     }
                   }}
-                  disabled={uploading || !currentMediaUri || !caption.trim() || !selectedCategoryId}
+                  disabled={uploading || !currentMediaUri}
                   accessibilityLabel="Publish post"
                   accessibilityRole="button"
             >
@@ -1501,19 +1674,22 @@ export default function CreatePostScreen() {
             </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.quickActionButton, styles.quickDraftButton, (uploading || !caption.trim() || !selectedCategoryId) && styles.quickActionButtonDisabled]}
+                  style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
                   onPress={async () => {
-                    if (caption.trim() && selectedCategoryId) {
-                      await handleCreatePost('draft');
+                    // Show specific error messages for missing fields
+                    if (!caption.trim() && !selectedGroup) {
+                      showToast('Please add a caption and select a category');
+                    } else if (!caption.trim()) {
+                      showToast('Caption is required to save draft');
+                    } else if (!selectedGroup) {
+                      showToast('Please select a category group');
+                    } else if (!selectedCategoryId) {
+                      showToast('Please select a specific category');
                     } else {
-                      if (!caption.trim()) {
-                        showToast('Caption is required');
-                      } else if (!selectedCategoryId) {
-                        showToast('Please select a category');
-                      }
+                      await handleCreatePost('draft');
                     }
                   }}
-                  disabled={uploading || !currentMediaUri || !caption.trim() || !selectedCategoryId}
+                  disabled={uploading || !currentMediaUri}
                   accessibilityLabel="Save as draft"
                   accessibilityRole="button"
                 >
@@ -1871,16 +2047,18 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 1000,
-    backgroundColor: '#000',
+    backgroundColor: 'transparent', // Fix dark overlay
   },
   camera: {
     width: '100%',
     height: '100%',
+    backgroundColor: 'transparent', // Fix dark overlay
   },
   cameraOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
     pointerEvents: 'box-none',
+    backgroundColor: 'transparent', // Ensure no dark background
   },
   cameraTopBar: {
     flexDirection: 'row',
@@ -2010,7 +2188,7 @@ const styles = StyleSheet.create({
   videoPlayer: {
     width: '100%',
     height: SCREEN_WIDTH * 0.75,
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
   },
   videoPlayOverlay: {
     position: 'absolute',
@@ -2334,8 +2512,10 @@ const styles = StyleSheet.create({
   // Watermark
   watermarkContainer: {
     position: 'absolute',
-    bottom: 100, // Above the bottom controls
-    right: 16,
+    // Match right‑middle positioning, slightly above center
+    top: '40%',
+    // Push very close to the right edge; a tiny bit may be off‑screen
+    right: -2,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -2357,22 +2537,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 2,
   },
+  watermarkLogo: {
+    width: 64,
+    height: 64,
+    marginBottom: 4,
+  },
   hiddenCompositeView: {
     position: 'absolute',
     left: -9999,
     top: -9999,
     width: 1,
     height: 1,
+    backgroundColor: 'transparent', // Fix dark overlay issue
     opacity: 0,
     overflow: 'hidden',
   },
   compositeViewShot: {
     width: SCREEN_WIDTH,
     height: (SCREEN_WIDTH * 16) / 9,
+    backgroundColor: 'transparent', // Ensure no dark background
   },
   compositeImage: {
     width: '100%',
     height: '100%',
+    backgroundColor: 'transparent', // Ensure no dark background
   },
   toastContainer: {
     position: 'absolute',

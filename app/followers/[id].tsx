@@ -94,7 +94,7 @@ export default function FollowersScreen() {
       if (activeTab === 'followers') {
         response = await followsApi.getFollowers(id as string);
       } else if (activeTab === 'following') {
-        response = await followsApi.getFollowing(id as string);
+        response = await followsApi.getFollowingUsers(id as string);
       } else if (activeTab === 'suggestions') {
         response = await userApi.getSuggestions();
       }
@@ -102,23 +102,50 @@ export default function FollowersScreen() {
       if (response && response.status === 'success') {
         // Handle different response structures
         let userData = response.data;
+        let usersList: any[] = [];
+        
         if (Array.isArray(userData)) {
-          setUsers(userData);
+          usersList = userData;
         } else if (userData && Array.isArray(userData.users)) {
-          setUsers(userData.users);
+          usersList = userData.users;
         } else if (userData && Array.isArray(userData.followers)) {
-          setUsers(userData.followers);
+          usersList = userData.followers;
         } else if (userData && Array.isArray(userData.following)) {
-          setUsers(userData.following);
-        } else {
-          setUsers([]);
+          usersList = userData.following;
+        }
+        
+        setUsers(usersList);
+        
+        // Log for debugging
+        if (__DEV__) {
+          console.log(`📋 [fetchUsers] ${activeTab} tab:`, {
+            responseStatus: response.status,
+            usersCount: usersList.length,
+            userDataKeys: userData ? Object.keys(userData) : [],
+            firstUser: usersList[0] || null,
+          });
         }
       } else {
-        setError(response?.message || 'Failed to fetch users');
+        const errorMsg = response?.message || `Failed to fetch ${activeTab}`;
+        if (__DEV__) {
+          console.error(`❌ [fetchUsers] ${activeTab} error:`, {
+            response,
+            errorMsg,
+          });
+        }
+        setError(errorMsg);
         setUsers([]);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch users');
+      const errorMsg = err.response?.data?.message || err.message || `Failed to fetch ${activeTab}`;
+      if (__DEV__) {
+        console.error(`❌ [fetchUsers] ${activeTab} exception:`, {
+          error: err,
+          errorMsg,
+          response: err.response?.data,
+        });
+      }
+      setError(errorMsg);
       setUsers([]);
     } finally {
       setLoading(false);
@@ -168,30 +195,54 @@ export default function FollowersScreen() {
     fetchUsers().finally(() => setRefreshing(false));
   };
 
-  const renderUser = ({ item }: { item: any }) => (
-    <View style={[styles.userCard, { backgroundColor: C.card, borderColor: C.border }]}>
-      <Image
-        source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
-        style={styles.userAvatar}
-      />
-      <View style={styles.userInfo}>
-        <Text style={[styles.userName, { color: C.text }]}>
-          {item.name || item.username || 'User'}
-        </Text>
-        <Text style={[styles.userUsername, { color: C.textSecondary }]}>
-          @{item.username}
-        </Text>
-        {item.bio && (
-          <Text style={[styles.userBio, { color: C.textSecondary }]} numberOfLines={2}>
-            {item.bio}
-          </Text>
-        )}
-      </View>
-      {activeTab !== 'suggestions' ? (
-        <View style={styles.followingBadge}>
-          <Text style={styles.followingBadgeText}>Following</Text>
+  const navigateToProfile = (userId: string) => {
+    router.push({
+      pathname: '/user/[id]',
+      params: { id: userId }
+    });
+  };
+
+  const renderUser = ({ item }: { item: any }) => {
+    // Determine button text based on context
+    let buttonText = 'Follow';
+    if (activeTab === 'following') {
+      // In following tab, we're already following them
+      buttonText = item.isFollowing ? 'Following' : 'Following';
+    } else if (activeTab === 'followers') {
+      // In followers tab: if they follow me and I follow them = "Following"
+      // If they follow me and I don't follow them = "Follow Back"
+      // If they don't follow me and I follow them = "Following" (shouldn't happen in followers list)
+      buttonText = item.isFollowing ? 'Following' : 'Follow Back';
+    } else {
+      // Suggestions tab
+      buttonText = item.isFollowing ? 'Following' : 'Follow';
+    }
+
+    return (
+      <TouchableOpacity 
+        style={[styles.userCard, { backgroundColor: C.card, borderColor: C.border }]}
+        onPress={() => navigateToProfile(item.id)}
+        activeOpacity={0.7}
+      >
+        <Image
+          source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
+          style={styles.userAvatar}
+        />
+        <View style={styles.userInfo}>
+          <View style={styles.userTextContainer}>
+            <Text style={[styles.userName, { color: C.text }]}>
+              {item.name || item.username || 'User'}
+            </Text>
+            <Text style={[styles.userUsername, { color: C.textSecondary }]}>
+              @{item.username}
+            </Text>
+            {item.bio && (
+              <Text style={[styles.userBio, { color: C.textSecondary }]} numberOfLines={2}>
+                {item.bio}
+              </Text>
+            )}
+          </View>
         </View>
-      ) : (
         <TouchableOpacity
           style={[
             styles.followButton,
@@ -200,19 +251,22 @@ export default function FollowersScreen() {
               borderColor: C.primary 
             }
           ]}
-          onPress={() => item.isFollowing ? handleUnfollow(item.id) : handleFollow(item.id)}
+          onPress={(e) => {
+            e.stopPropagation();
+            item.isFollowing ? handleUnfollow(item.id) : handleFollow(item.id);
+          }}
           disabled={followLoading === item.id}
         >
           <Text style={[
             styles.followButtonText,
             { color: item.isFollowing ? C.primary : C.buttonText }
           ]}>
-            {followLoading === item.id ? '...' : (item.isFollowing ? 'Following' : 'Follow')}
+            {followLoading === item.id ? '...' : buttonText}
           </Text>
         </TouchableOpacity>
-      )}
-    </View>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   if (loading) {
     return (
@@ -354,8 +408,9 @@ const styles = StyleSheet.create({
   },
   userInfo: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+  },
+  userTextContainer: {
+    flex: 1,
   },
   userAvatar: {
     width: 48,

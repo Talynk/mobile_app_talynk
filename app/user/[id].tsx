@@ -239,6 +239,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [followsMeBack, setFollowsMeBack] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
@@ -344,15 +345,31 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     fetchProfile();
   }, [id]);
 
-  // Fetch follow state
+  // Fetch follow state and check if they follow me back
   useEffect(() => {
     const checkFollow = async () => {
       if (!currentUser || !id || currentUser.id === id) return;
       try {
+        // Check if I'm following them
         const response = await followsApi.checkFollowing(id as string);
         setIsFollowing(!!response.data?.isFollowing);
+        
+        // Check if they follow me back by checking my followers list
+        try {
+          const myFollowersResponse = await followsApi.getFollowers(currentUser.id, 1, 100);
+          if (myFollowersResponse.status === 'success' && myFollowersResponse.data?.followers) {
+            // Check if the profile user (id) is in my followers list
+            const followsMe = myFollowersResponse.data.followers.some((f: any) => f.id === id);
+            setFollowsMeBack(followsMe);
+          } else {
+            setFollowsMeBack(false);
+          }
+        } catch {
+          setFollowsMeBack(false);
+        }
       } catch {
         setIsFollowing(false);
+        setFollowsMeBack(false);
       }
     };
     checkFollow();
@@ -491,6 +508,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (isConnected) {
           sendFollowAction(id as string, true);
         }
+        // Refresh follow status to check if they follow me back
+        const checkResponse = await followsApi.checkFollowing(id as string);
+        setIsFollowing(!!checkResponse.data?.isFollowing);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to follow user');
@@ -515,6 +535,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (isConnected) {
           sendFollowAction(id as string, false);
         }
+        // Refresh follow status
+        const checkResponse = await followsApi.checkFollowing(id as string);
+        setIsFollowing(!!checkResponse.data?.isFollowing);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to unfollow user');
@@ -788,7 +811,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                   styles.followButtonText,
                   { color: isFollowing ? C.primary : C.buttonText }
                 ]}>
-                  {isFollowing ? 'Following' : 'Follow'}
+                  {isFollowing ? 'Following' : (followsMeBack ? 'Follow Back' : 'Follow')}
                 </Text>
               )}
             </TouchableOpacity>

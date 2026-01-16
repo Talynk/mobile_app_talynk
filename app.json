@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Talentix",
-    "slug": "talentix",
+    "slug": "mobile-app-talynk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -15,29 +15,21 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ihirwe.talynksocial",
-      "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera to record videos for your posts.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone to record audio for your videos."
-      }
+      "bundleIdentifier": "com.ihirwe.talynksocial"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "newArchEnabled": true,
-      "edgeToEdgeEnabled": true,
-      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.ihirwe.talynksocial",
       "permissions": [
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_MEDIA_AUDIO",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_MEDIA_IMAGES"
-      ],
-      "package": "com.ihirwe.talynksocial"
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -47,62 +39,57 @@
     "plugins": [
       "expo-router",
       [
-        "expo-image-picker",
-        {
-          "photosPermission": "The app accesses your photos to let you share them with your friends.",
-          "cameraPermission": "The app accesses your camera to let you take photos and share them with your friends."
-        }
-      ],
-      [
         "expo-camera",
         {
-          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to record videos.",
-          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone to record audio with videos.",
+          "cameraPermission": "Allow Talentix to access your camera to record videos and take photos.",
+          "microphonePermission": "Allow Talentix to access your microphone to record audio with your videos.",
           "recordAudioAndroid": true
         }
       ],
       [
-        "expo-notifications"
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#ffffff",
+          "sounds": [
+            "./assets/notification.wav"
+          ]
+        }
       ],
       [
         "expo-build-properties",
         {
           "android": {
             "minSdkVersion": 24,
-            "kotlinVersion": "2.0.21"
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0",
+            "kotlinVersion": "2.0.21",
+            "packagingOptions": {
+              "pickFirst": [
+                "lib/x86/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so",
+                "lib/armeabi-v7a/libc++_shared.so",
+                "lib/arm64-v8a/libc++_shared.so"
+              ]
+            }
           },
           "ios": {
-            "deploymentTarget": "16.0",
-            "useFrameworks": "dynamic"
+            "deploymentTarget": "15.1"
           }
         }
-      ],
-      "expo-web-browser"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "origin": false
+      },
       "eas": {
-        "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"
-      }
-    },
-    "build": {
-      "development": {
-        "developmentClient": true,
-        "ios": {
-          "simulator": true
-        }
+        
       }
     }
   }
 }
-
-
-
-
-
-
-
-

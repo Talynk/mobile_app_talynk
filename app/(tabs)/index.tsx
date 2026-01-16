@@ -15,19 +15,20 @@ import {
   Alert,
   Modal,
   AppState,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
 import { router, useFocusEffect } from 'expo-router';
-import { postsApi, likesApi } from '@/lib/api';
+import { postsApi, likesApi, followsApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { 
-  addLikedPost, 
-  removeLikedPost, 
-  setPostLikeCount, 
+import {
+  addLikedPost,
+  removeLikedPost,
+  setPostLikeCount,
   setPostLikeCounts,
   updateLikeCount,
   clearLikes,
@@ -39,12 +40,12 @@ import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
+import ChallengesList from '@/components/ChallengesList';
+import CreateChallengeModal from '@/components/CreateChallengeModal';
 
-// Global mute context
-const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => {} });
+const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => { } });
 const useMute = () => useContext(MuteContext);
 
-// Global video manager to ensure only one video plays at a time
 const activeVideoRef = { current: null as Video | null };
 const pauseAllVideosExcept = async (currentVideo: Video | null) => {
   if (activeVideoRef.current && activeVideoRef.current !== currentVideo) {
@@ -54,20 +55,17 @@ const pauseAllVideosExcept = async (currentVideo: Video | null) => {
         await activeVideoRef.current.pauseAsync();
       }
     } catch (error) {
-      // Silently handle errors
     }
   }
   activeVideoRef.current = currentVideo;
 };
 
-// Feed tabs
 const FEED_TABS = [
-  { key: 'featured', label: 'Featured' },
   { key: 'foryou', label: 'For You' },
   { key: 'following', label: 'Following' },
+  { key: 'challenges', label: 'Challenges' },
 ];
 
-// Utility functions
 const formatNumber = (num: number): string => {
   if (num >= 1000000) {
     return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -114,20 +112,18 @@ interface PostItemProps {
   availableHeight: number;
 }
 
-// Expandable caption component
 const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
   const [expanded, setExpanded] = useState(false);
 
   if (!text) return null;
 
-  // Estimate if text needs truncation (rough: ~50 chars per line)
   const estimatedLines = text.length / 50;
   const shouldTruncate = estimatedLines > maxLines || text.split('\n').length > maxLines;
 
   return (
     <View>
-      <Text 
-        style={styles.caption} 
+      <Text
+        style={styles.caption}
         numberOfLines={expanded ? undefined : maxLines}
       >
         {text}
@@ -143,52 +139,41 @@ const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: nu
   );
 };
 
-const PostItem: React.FC<PostItemProps> = ({ 
-  item, 
-  index, 
-  onLike, 
-  onComment, 
-  onShare, 
+const PostItem: React.FC<PostItemProps> = ({
+  item,
+  index,
+  onLike,
+  onComment,
+  onShare,
   onReport,
   onFollow,
   onUnfollow,
-  isLiked, 
+  isLiked,
   isFollowing,
-  isActive
+  isActive,
+  availableHeight
 }) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  
-  // Calculate available height (screen - header - bottom nav)
-  const headerContentHeight = 44; // Reduced from 50
-  const headerPaddingBottom = 8;
-  const headerTopPadding = Math.max(insets.top, 8); // Use minimal padding
-  const headerHeight = headerTopPadding + headerContentHeight + headerPaddingBottom;
-  const bottomNavHeight = 60 + insets.bottom;
-  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
-  
+
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
-  
-  // Check if post is liked using Redux
+
   const isPostLiked = likedPosts.includes(item.id);
-  
-  // Get like count from Redux if available, otherwise use post data
+
   const cachedLikeCount = postLikeCounts[item.id];
   const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
-  
+
   const { likes, comments, isLiked: realtimeIsLiked, updateLikesLocally } = useRealtimePost({
     postId: item.id,
     initialLikes: initialLikeCount,
-    initialComments: item.comments_count || 0,
+    initialComments: item.comments_count || item.comment_count || 0,
     initialIsLiked: isPostLiked || isLiked,
   });
-  
-  // Use Redux as single source of truth for like state
-  // The likesManager handles optimistic updates and API calls
+
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -198,18 +183,54 @@ const PostItem: React.FC<PostItemProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
-  const [videoProgress, setVideoProgress] = useState(0); // 0-1
-  const [videoDuration, setVideoDuration] = useState(0); // in milliseconds
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
   const [imageLoading, setImageLoading] = useState(true);
   const [videoLoading, setVideoLoading] = useState(true);
-  
-  // Like animation
+  const [isSeeking, setIsSeeking] = useState(false);
+  const progressBarRef = useRef<View>(null);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        setIsSeeking(true);
+      },
+      onPanResponderMove: async (evt, gestureState) => {
+        if (videoDuration === 0 || !videoRef.current) return;
+
+        const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
+        const newPosition = progressFraction * videoDuration;
+
+        setVideoProgress(progressFraction);
+
+        try {
+          await videoRef.current.setPositionAsync(newPosition);
+        } catch (error) {
+        }
+      },
+      onPanResponderRelease: async (evt, gestureState) => {
+        if (videoDuration === 0 || !videoRef.current) return;
+
+        const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
+        const newPosition = progressFraction * videoDuration;
+
+        try {
+          await videoRef.current.setPositionAsync(newPosition);
+        } catch (error) {
+        }
+
+        setIsSeeking(false);
+      },
+    })
+  ).current;
+
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
   const mediaUrl = getMediaUrl(item);
-  
-  // Log post item structure for debugging (only first 3 items to avoid spam)
+
   if (__DEV__ && index < 3) {
     console.log(`📄 [PostItem ${index}] Post data:`, {
       id: item.id,
@@ -222,11 +243,10 @@ const PostItem: React.FC<PostItemProps> = ({
       allKeys: Object.keys(item),
     });
   }
-  
-  const isVideo = item.type === 'video' || !!item.video_url || 
+
+  const isVideo = item.type === 'video' || !!item.video_url ||
     (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
 
-  // Reset loading states when post becomes active/inactive
   useEffect(() => {
     if (isActive && isVideo) {
       setVideoLoading(true);
@@ -236,27 +256,23 @@ const PostItem: React.FC<PostItemProps> = ({
     }
   }, [isActive, isVideo]);
 
-  // Simple video play/pause control - KISS principle
   useEffect(() => {
     if (!videoRef.current || useNativeControls || !isVideo) return;
-    
+
     const managePlayback = async () => {
       try {
         const currentVideo = videoRef.current;
         if (!currentVideo) return;
-        
+
         const status = await currentVideo.getStatusAsync();
         if (!status?.isLoaded) return;
-        
+
         if (isActive) {
-          // Pause all other videos first
           await pauseAllVideosExcept(currentVideo);
-          // Play this video if not already playing
           if (!status.isPlaying) {
             await currentVideo.playAsync();
           }
         } else {
-          // Pause if playing
           if (status.isPlaying) {
             await currentVideo.pauseAsync();
           }
@@ -265,21 +281,19 @@ const PostItem: React.FC<PostItemProps> = ({
           }
         }
       } catch (error) {
-        // Silently handle errors
       }
     };
-    
+
     managePlayback();
   }, [isActive, useNativeControls, isVideo]);
 
-  // Cleanup video on unmount
   useEffect(() => {
     return () => {
       if (videoRef.current) {
         if (activeVideoRef.current === videoRef.current) {
           activeVideoRef.current = null;
         }
-        videoRef.current.unloadAsync().catch(() => {});
+        videoRef.current.unloadAsync().catch(() => { });
       }
     };
   }, []);
@@ -289,7 +303,6 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const handleLike = async () => {
-    // Check if user is logged in - show alert and redirect
     if (!user) {
       Alert.alert(
         'Login Required',
@@ -307,16 +320,13 @@ const PostItem: React.FC<PostItemProps> = ({
       );
       return;
     }
-    
-    // Prevent double clicks and rapid toggling
+
     if (isLiking) return;
     setIsLiking(true);
-    
-    // Get current like state from Redux (single source of truth)
+
     const currentIsLiked = isPostLiked;
     const newIsLiked = !currentIsLiked;
-    
-    // Animate like button immediately
+
     Animated.sequence([
       Animated.timing(likeScale, {
         toValue: 1.3,
@@ -344,13 +354,11 @@ const PostItem: React.FC<PostItemProps> = ({
         }),
       ]).start();
     }
-    
-    // Send realtime update
+
     sendLikeAction(item.id, newIsLiked);
-    
-    // Use likesManager for all like operations (handles optimistic updates and API)
+
     await onLike(item.id);
-    
+
     setIsLiking(false);
   };
 
@@ -359,7 +367,7 @@ const PostItem: React.FC<PostItemProps> = ({
       router.push({ pathname: '/auth/login' as any });
       return;
     }
-    
+
     if (isFollowing) {
       onUnfollow(item.user?.id || '');
     } else {
@@ -374,12 +382,12 @@ const PostItem: React.FC<PostItemProps> = ({
   }, [onComment, item.id]);
 
   const handleUserPress = () => {
-            if (item.user?.id) {
-              router.push({
-                pathname: '/user/[id]' as any,
-                params: { id: item.user.id }
-              });
-            }
+    if (item.user?.id) {
+      router.push({
+        pathname: '/user/[id]' as any,
+        params: { id: item.user.id }
+      });
+    }
   };
 
   const handleCategoryPress = () => {
@@ -393,19 +401,17 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   return (
-    <View 
+    <View
       style={[styles.postContainer, { height: availableHeight }]}
       pointerEvents="box-none"
     >
-      {/* Media */}
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           videoError || !isActive ? (
-            // Show thumbnail when video has error OR when not active (memory optimization)
-            <TouchableOpacity 
-              style={styles.mediaWrapper} 
-              activeOpacity={1} 
-              onPress={handleVideoTap}
+            <TouchableOpacity
+              style={styles.mediaWrapper}
+              activeOpacity={1}
+              onPress={() => setIsMuted(!isMuted)}
             >
               {imageLoading && !imageError && mediaUrl && (
                 <View style={styles.loadingOverlay}>
@@ -432,7 +438,6 @@ const PostItem: React.FC<PostItemProps> = ({
                   <Text style={styles.placeholderText}>Video unavailable</Text>
                 </View>
               )}
-              {/* Play icon overlay for inactive videos */}
               {!videoError && !isActive && (
                 <View style={styles.playIconOverlay}>
                   <View style={styles.playIconCircle}>
@@ -442,11 +447,10 @@ const PostItem: React.FC<PostItemProps> = ({
               )}
             </TouchableOpacity>
           ) : (
-            // Only load Video component when active
-            <TouchableOpacity 
-              style={styles.mediaWrapper} 
-              activeOpacity={1} 
-              onPress={handleVideoTap}
+            <TouchableOpacity
+              style={styles.mediaWrapper}
+              activeOpacity={1}
+              onPress={() => setIsMuted(!isMuted)}
             >
               {videoLoading && !videoLoaded && (
                 <View style={styles.loadingOverlay}>
@@ -455,24 +459,31 @@ const PostItem: React.FC<PostItemProps> = ({
               )}
               <Video
                 ref={videoRef}
-                source={{ uri: mediaUrl || '' }}
+                source={{ 
+                  uri: mediaUrl || '',
+                  headers: {
+                    'Cache-Control': 'public, max-age=31536000, immutable'
+                  }
+                }}
                 style={styles.media}
                 resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={useNativeControls ? false : !decoderErrorDetected}
+                shouldPlay={useNativeControls ? false : !decoderErrorDetected && isActive}
                 isLooping={!useNativeControls}
                 isMuted={useNativeControls ? false : isMuted}
                 usePoster={false}
                 shouldCorrectPitch={true}
                 volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
+                useNativeControls={useNativeControls}
+                progressUpdateIntervalMillis={100}
                 onLoadStart={() => {
                   setVideoLoading(true);
                 }}
                 onLoad={() => {
                   setVideoLoaded(true);
                   setVideoLoading(false);
-                  if (!useNativeControls && videoRef.current) {
+                  if (!useNativeControls && videoRef.current && isActive) {
                     pauseAllVideosExcept(videoRef.current).then(() => {
-                      videoRef.current?.playAsync().catch(() => {});
+                      videoRef.current?.playAsync().catch(() => { });
                     });
                   }
                 }}
@@ -486,22 +497,23 @@ const PostItem: React.FC<PostItemProps> = ({
                       setVideoLoaded(true);
                     } else {
                       setVideoError(true);
+                      setVideoLoading(false);
                     }
                   }
                 }}
-                useNativeControls={useNativeControls}
-                progressUpdateIntervalMillis={500}
                 onPlaybackStatusUpdate={(status: any) => {
-                  if (status.isLoaded && !useNativeControls) {
-                    if (status.isPlaying !== isPlaying) {
-                      setIsPlaying(status.isPlaying);
-                    }
-                    if (status.durationMillis && status.positionMillis !== undefined) {
-                      const progress = status.durationMillis > 0 
-                        ? status.positionMillis / status.durationMillis 
-                        : 0;
-                      setVideoProgress(progress);
-                      setVideoDuration(status.durationMillis);
+                  if (status.isLoaded) {
+                    if (!useNativeControls) {
+                      if (status.isPlaying !== isPlaying) {
+                        setIsPlaying(status.isPlaying);
+                      }
+                      if (status.durationMillis && status.positionMillis !== undefined) {
+                        const progress = status.durationMillis > 0
+                          ? status.positionMillis / status.durationMillis
+                          : 0;
+                        setVideoProgress(progress);
+                        setVideoDuration(status.durationMillis);
+                      }
                     }
                   }
                 }}
@@ -538,53 +550,39 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Mute/Unmute Icon - only show when not using native controls */}
-        {isVideo && !useNativeControls && (
-          <TouchableOpacity 
-            style={styles.muteButton} 
-            onPress={() => setIsMuted(!isMuted)}
-          >
-            <Feather name={isMuted ? 'volume-x' : 'volume-2'} size={24} color="#fff" />
-          </TouchableOpacity>
-        )}
-
-        {/* Right Side Actions - TikTok style, positioned with proper spacing */}
-        <View style={[styles.rightActions, { bottom: Math.max(insets.bottom + 65, 81) }]}>
-          {/* User Avatar */}
+        <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Image 
-              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/48') || 'https://via.placeholder.com/48' }} 
-              style={styles.userAvatar} 
+            <Image
+              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/48') || 'https://via.placeholder.com/48' }}
+              style={styles.userAvatar}
             />
             {user && user.id !== item.user?.id && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.followIconButton}
                 onPress={handleFollow}
               >
-                <Feather 
-                  name={isFollowing ? "check" : "plus"} 
-                  size={16} 
-                  color="#000" 
+                <Feather
+                  name={isFollowing ? "check" : "plus"}
+                  size={16}
+                  color="#000"
                 />
               </TouchableOpacity>
             )}
           </TouchableOpacity>
 
-          {/* Like Button */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-              <Feather 
-                name="heart" 
-                size={24} 
-                color={isPostLiked ? "#ff2d55" : "#fff"} 
+              <Feather
+                name="heart"
+                size={24}
+                color={isPostLiked ? "#ff2d55" : "#fff"}
                 fill={isPostLiked ? "#ff2d55" : "none"}
               />
             </Animated.View>
             <Text style={styles.actionCount}>{formatNumber(cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0))}</Text>
           </TouchableOpacity>
-          
-          {/* Like Animation Overlay */}
-          <Animated.View 
+
+          <Animated.View
             style={[
               styles.likeAnimationOverlay,
               { opacity: likeOpacity }
@@ -593,9 +591,8 @@ const PostItem: React.FC<PostItemProps> = ({
             <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
           </Animated.View>
 
-          {/* Comment Button */}
-          <TouchableOpacity 
-            style={styles.actionButton} 
+          <TouchableOpacity
+            style={styles.actionButton}
             onPress={() => {
               handleComment();
             }}
@@ -606,33 +603,30 @@ const PostItem: React.FC<PostItemProps> = ({
             <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
 
-          {/* Share Button */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
             <Feather name="share-2" size={24} color="#fff" />
           </TouchableOpacity>
 
-          {/* More Actions */}
           <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
             <Feather name="more-horizontal" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Info - positioned above progress bar and bottom navbar */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 65, 81) }]}>
+        <View style={[styles.bottomInfo, { bottom: 60 + insets.bottom - 40 }]}>
           <View style={styles.bottomInfoContent}>
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
-            
-            {item.title && (
-              <ExpandableCaption text={item.title} maxLines={2} />
-            )}
-            {item.description && (
-              <ExpandableCaption text={item.description} maxLines={2} />
+
+            {/* Show caption/description only once - prefer caption, then description, then title */}
+            {(item.caption || item.description || item.title) && (
+              <ExpandableCaption 
+                text={item.caption || item.description || item.title || ''} 
+                maxLines={2} 
+              />
             )}
           </View>
 
-          {/* Category Badge */}
           {item.category && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
               <Text style={styles.categoryText}>
@@ -641,9 +635,8 @@ const PostItem: React.FC<PostItemProps> = ({
             </TouchableOpacity>
           )}
 
-          {/* Follow Button */}
           {user && user.id !== item.user?.id && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.followButton,
                 { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }
@@ -660,15 +653,31 @@ const PostItem: React.FC<PostItemProps> = ({
           )}
         </View>
 
-        {/* Video Progress Bar - at the very bottom edge, above bottom navbar */}
         {isVideo && !useNativeControls && videoDuration > 0 && (
-          <View style={[styles.progressBarContainer, { bottom: Math.max(insets.bottom + 60, 76) }]}>
+          <View
+            ref={progressBarRef}
+            style={[
+              styles.progressBarContainer,
+              {
+                position: 'absolute',
+                bottom: 60 + insets.bottom - 48,
+                left: 0,
+                right: 0,
+              },
+            ]}
+            pointerEvents="box-only"
+            {...panResponder.panHandlers}
+          >
+
             <View style={styles.progressBarTrack}>
-              <View 
+              <View
                 style={[
                   styles.progressBarFill,
-                  { width: `${videoProgress * 100}%` }
-                ]} 
+                  {
+                    width: `${videoProgress * 100}%`,
+                    backgroundColor: isSeeking ? '#ff6b9d' : '#60a5fa',
+                  }
+                ]}
               />
             </View>
           </View>
@@ -685,7 +694,7 @@ export default function FeedScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [activeTab, setActiveTab] = useState('featured');
+  const [activeTab, setActiveTab] = useState('foryou');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const lastActiveIndexRef = useRef(0);
@@ -695,7 +704,12 @@ export default function FeedScreen() {
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [commentsPostTitle, setCommentsPostTitle] = useState<string>('');
   const [commentsPostAuthor, setCommentsPostAuthor] = useState<string>('');
+  const [commentsPostOwnerId, setCommentsPostOwnerId] = useState<string | undefined>(undefined);
+  const [createChallengeVisible, setCreateChallengeVisible] = useState(false);
+  const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
+  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers, syncLikedPostsFromServer } = useCache();
@@ -704,23 +718,21 @@ export default function FeedScreen() {
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const insets = useSafeAreaInsets();
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
-  
-  // Efficient likes manager for batch checking
-  const likesManager = useLikesManager();
-  
-  // Calculate available height for posts (screen height - header - bottom navbar)
-  // Header: minimal safe area padding + ~44px (tabs content) + 8px (paddingBottom)
-  const headerContentHeight = 44; // Tabs container height (reduced)
-  const headerPaddingBottom = 8;
-  const headerTopPadding = Math.max(insets.top, 8); // Use minimal padding
-  const headerHeight = headerTopPadding + headerContentHeight + headerPaddingBottom;
-  const bottomNavHeight = 60 + insets.bottom; // Bottom navbar height
-  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
-  const INITIAL_LIMIT = 10; // Reduced initial load for faster response
-  const LOAD_MORE_LIMIT = 10; // Load 10 more posts at a time
+  const likesManager = useLikesManager();
+
+  const headerTabsHeight = 44;
+  const headerPaddingVertical = 12;
+  const headerHeight = insets.top + headerTabsHeight + headerPaddingVertical;
+  const bottomNavHeight = 60 + insets.bottom;
+  const availableHeight = screenHeight - headerHeight;
+
+  const INITIAL_LIMIT = 10;
+  const LOAD_MORE_LIMIT = 10;
 
   const loadPosts = async (tab = 'featured', refresh = false, page = 1) => {
+    if (tab === 'challenges') return; // Handled by ChallengesList
+
     try {
       if (refresh) {
         setRefreshing(true);
@@ -731,18 +743,13 @@ export default function FeedScreen() {
       } else {
         setLoadingMore(true);
       }
-      
+
       let response;
       const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
-      
-      // Add timestamp to force fresh data on refresh
+
       const timestamp = refresh ? `&t=${Date.now()}` : '';
-      
-      // Load different content based on tab
+
       switch (tab) {
-        case 'featured':
-          response = await postsApi.getFeatured(page, limit, timestamp);
-          break;
         case 'foryou':
           response = await postsApi.getAll(page, limit, timestamp);
           break;
@@ -756,12 +763,11 @@ export default function FeedScreen() {
         default:
           response = await postsApi.getAll(page, limit, timestamp);
       }
-      
+
       if (response.status === 'success') {
         const posts = response.data.posts || response.data;
         const postsArray = Array.isArray(posts) ? posts : [];
-        
-        // Log posts structure for debugging
+
         if (__DEV__) {
           console.log('📥 [fetchPosts] API Response:', {
             status: response.status,
@@ -778,13 +784,11 @@ export default function FeedScreen() {
             samplePost: postsArray[0],
           });
         }
-        
-        // Check pagination info
+
         const pagination = response.data.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsArray.length === limit;
         setHasMore(hasMoreData);
-        
-        // Update like counts in Redux
+
         const likeCountsMap: Record<string, number> = {};
         postsArray.forEach((post: Post) => {
           if (post.likes !== undefined) {
@@ -794,15 +798,45 @@ export default function FeedScreen() {
         if (Object.keys(likeCountsMap).length > 0) {
           dispatch(setPostLikeCounts(likeCountsMap));
         }
-        
-        // Sync liked posts from server if user is logged in
+
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
+          
+          // Fetch actual follow status for all unique users in posts
+          const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))];
+          const followStatusPromises = uniqueUserIds.map(async (userId: string) => {
+            try {
+              const response = await followsApi.checkFollowing(userId);
+              return { userId, isFollowing: !!response.data?.isFollowing };
+            } catch {
+              return { userId, isFollowing: false };
+            }
+          });
+          
+          const followStatuses = await Promise.all(followStatusPromises);
+          const followStatusMap: Record<string, boolean> = {};
+          followStatuses.forEach(({ userId, isFollowing }) => {
+            followStatusMap[userId] = isFollowing;
+            // Also update cache
+            updateFollowedUsers(userId, isFollowing);
+          });
+          setUserFollowStatus(prev => ({ ...prev, ...followStatusMap }));
         }
-        
+
+        // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
+        if (postsArray.length > 0 && page === 1) {
+          const videoPosts = postsArray
+            .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
+            .slice(0, 3); // Prefetch first 3 videos
+          
+          // Videos will be cached automatically when loaded by Expo AV
+          // The cache headers in source will ensure proper caching
+        }
+
         if (page === 1 || refresh) {
           setPosts(postsArray);
+          setNetworkError(false);
         } else {
           setPosts(prev => [...prev, ...postsArray]);
         }
@@ -817,18 +851,9 @@ export default function FeedScreen() {
       const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
       if (page === 1) {
         setPosts([]);
+        setNetworkError(isNetworkError);
       }
       setHasMore(false);
-      // Show error only on initial load
-      if (page === 1 && !refreshing) {
-        Alert.alert(
-          'Error',
-          isNetworkError 
-            ? 'No internet connection. Please check your network and try again.'
-            : 'Failed to load posts. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -837,7 +862,7 @@ export default function FeedScreen() {
   };
 
   const loadMorePosts = () => {
-    if (!loadingMore && hasMore && !loading) {
+    if (!loadingMore && hasMore && !loading && activeTab !== 'challenges') {
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       loadPosts(activeTab, false, nextPage);
@@ -845,27 +870,25 @@ export default function FeedScreen() {
   };
 
   useEffect(() => {
-    setCurrentPage(1);
-    setHasMore(true);
-    loadPosts(activeTab, false, 1);
+    if (activeTab !== 'challenges') {
+      setCurrentPage(1);
+      setHasMore(true);
+      loadPosts(activeTab, false, 1);
+    }
   }, [activeTab]);
 
-  // Sync liked posts when user logs in or posts change
   useEffect(() => {
     if (user && posts.length > 0) {
       const postIds = posts.map(p => p.id);
-      // Use batch checking for efficiency
       syncLikedPostsFromServer(postIds).catch(console.error);
     } else if (!user) {
-      // Clear liked posts when user logs out
       dispatch(clearLikes());
     }
-  }, [user?.id, posts.length]); // Sync when user changes or posts load
+  }, [user?.id, posts.length]);
 
-  // Reload posts when app comes back to foreground
   useEffect(() => {
     const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'active') {
+      if (nextAppState === 'active' && activeTab !== 'challenges') {
         setCurrentPage(1);
         setHasMore(true);
         loadPosts(activeTab, true, 1);
@@ -876,9 +899,8 @@ export default function FeedScreen() {
     return () => subscription?.remove();
   }, [activeTab]);
 
-  // Handle screen focus/blur - preserve video state
   const currentIndexRef = useRef(currentIndex);
-  
+
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
@@ -917,14 +939,12 @@ export default function FeedScreen() {
       return;
     }
 
-    // Use efficient likes manager for optimistic updates
     await likesManager.toggleLike(postId);
-    
-    // Update the post's like count in the posts array for UI consistency
+
     const newLikeCount = likesManager.getLikeCount(postId);
-    setPosts(prevPosts => 
-      prevPosts.map(post => 
-        post.id === postId 
+    setPosts(prevPosts =>
+      prevPosts.map(post =>
+        post.id === postId
           ? { ...post, likes: newLikeCount }
           : post
       )
@@ -932,32 +952,98 @@ export default function FeedScreen() {
   };
 
   const handleFollow = async (userId: string) => {
+    if (!user) return;
+    // Optimistic update
     updateFollowedUsers(userId, true);
+    setUserFollowStatus(prev => ({ ...prev, [userId]: true }));
     try {
-      await postsApi.like(userId); // Replace with follow API
+      const response = await followsApi.follow(userId);
+      if (response.status !== 'success') {
+        // Revert on error
+        updateFollowedUsers(userId, false);
+        setUserFollowStatus(prev => ({ ...prev, [userId]: false }));
+      } else {
+        // Confirm with backend
+        const checkResponse = await followsApi.checkFollowing(userId);
+        setUserFollowStatus(prev => ({ ...prev, [userId]: !!checkResponse.data?.isFollowing }));
+      }
     } catch (error) {
+      // Revert on error
       updateFollowedUsers(userId, false);
+      setUserFollowStatus(prev => ({ ...prev, [userId]: false }));
     }
   };
 
   const handleUnfollow = async (userId: string) => {
+    if (!user) return;
+    // Optimistic update
     updateFollowedUsers(userId, false);
+    setUserFollowStatus(prev => ({ ...prev, [userId]: false }));
     try {
-      await postsApi.unlike(userId); // Replace with unfollow API
+      const response = await followsApi.unfollow(userId);
+      if (response.status !== 'success') {
+        // Revert on error
+        updateFollowedUsers(userId, true);
+        setUserFollowStatus(prev => ({ ...prev, [userId]: true }));
+      } else {
+        // Confirm with backend
+        const checkResponse = await followsApi.checkFollowing(userId);
+        setUserFollowStatus(prev => ({ ...prev, [userId]: !!checkResponse.data?.isFollowing }));
+      }
     } catch (error) {
+      // Revert on error
       updateFollowedUsers(userId, true);
+      setUserFollowStatus(prev => ({ ...prev, [userId]: true }));
     }
   };
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
-    
+
     const post = posts.find(p => p.id === postId);
     setCommentsPostId(postId);
     setCommentsPostTitle(post?.title || post?.description || '');
     setCommentsPostAuthor(post?.user?.username || '');
+    setCommentsPostOwnerId(post?.user?.id);
     setCommentsModalVisible(true);
   }, [posts]);
+
+  const handleCommentAdded = useCallback(() => {
+    if (commentsPostId) {
+      setPosts(currentPosts =>
+        currentPosts.map(post => {
+          if (post.id === commentsPostId) {
+            const currentCount = post.comments_count || post.comment_count || 0;
+            return {
+              ...post,
+              comments_count: currentCount + 1,
+              comment_count: currentCount + 1
+            };
+          }
+          return post;
+        })
+      );
+    }
+  }, [commentsPostId]);
+
+  const handleCommentDeleted = useCallback(() => {
+    if (commentsPostId) {
+      setPosts(currentPosts =>
+        currentPosts.map(post => {
+          if (post.id === commentsPostId) {
+            const currentCount = post.comments_count || post.comment_count || 0;
+            const newCount = Math.max(0, currentCount - 1);
+            return {
+              ...post,
+              comments_count: newCount,
+              comment_count: newCount
+            };
+          }
+          return post;
+        })
+      );
+    }
+  }, [commentsPostId]);
 
   const handleShare = async (postId: string) => {
     const post = posts.find(p => p.id === postId);
@@ -970,7 +1056,6 @@ export default function FeedScreen() {
           url: mediaUrl || undefined,
         });
       } catch (error) {
-        // Silently handle share errors
       }
     }
   };
@@ -989,12 +1074,11 @@ export default function FeedScreen() {
       const visibleItem = viewableItems[0];
       const newIndex = visibleItem.index || 0;
       const postId = visibleItem.item?.id;
-      
-      // Add post to batch like status check queue
+
       if (postId) {
         likesManager.onPostVisible(postId);
       }
-      
+
       if (activeVideoRef.current) {
         pauseAllVideosExcept(null);
       }
@@ -1011,20 +1095,11 @@ export default function FeedScreen() {
     minimumViewTime: 100,
   }).current;
 
-  if (loading && posts.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#60a5fa" />
-      </View>
-    );
-  }
-
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" translucent />
-      
-      {/* Header with tabs and search */}
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      <View style={styles.header}>
         <View style={styles.tabsContainer}>
           {FEED_TABS.map((tab) => (
             <TouchableOpacity
@@ -1044,93 +1119,119 @@ export default function FeedScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        
-        <TouchableOpacity 
-          style={styles.searchButton}
-          onPress={() => router.push({ pathname: '/search' as any })}
-        >
-          <Feather name="search" size={24} color="#fff" />
-        </TouchableOpacity>
       </View>
 
-      <MuteContext.Provider value={{ isMuted, setIsMuted }}>
-        <FlatList
-          ref={flatListRef}
-          data={posts}
-          renderItem={({ item, index }) => (
-            <PostItem
-              item={item}
-              index={index}
-              onLike={handleLike}
-              onComment={handleComment}
-              onShare={handleShare}
-              onReport={handleReport}
-              onFollow={handleFollow}
-              onUnfollow={handleUnfollow}
-              isLiked={likedPosts.includes(item.id)}
-              isFollowing={followedUsers.has(item.user?.id || '')}
-              isActive={isScreenFocused && currentIndex === index}
+      {activeTab === 'challenges' ? (
+        <>
+          <ChallengesList 
+            onCreateChallenge={() => setCreateChallengeVisible(true)} 
+            refreshTrigger={challengesRefreshTrigger}
+          />
+          <CreateChallengeModal
+            visible={createChallengeVisible}
+            onClose={() => setCreateChallengeVisible(false)}
+            onCreated={() => {
+              // Trigger refresh of challenges list
+              setChallengesRefreshTrigger(prev => prev + 1);
+            }}
+          />
+        </>
+      ) : (
+        <MuteContext.Provider value={{ isMuted, setIsMuted }}>
+          {loading && posts.length === 0 ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#60a5fa" />
+            </View>
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              data={posts}
+              renderItem={({ item, index }) => (
+                <PostItem
+                  item={item}
+                  index={index}
+                  onLike={handleLike}
+                  onComment={handleComment}
+                  onShare={handleShare}
+                  onReport={handleReport}
+                  onFollow={handleFollow}
+                  onUnfollow={handleUnfollow}
+                  isLiked={likedPosts.includes(item.id)}
+                  isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isActive={isScreenFocused && currentIndex === index}
+                  availableHeight={availableHeight}
+                />
+              )}
+              keyExtractor={(item) => item.id}
+              pagingEnabled
+              showsVerticalScrollIndicator={false}
+              snapToInterval={availableHeight}
+              snapToAlignment="start"
+              decelerationRate="fast"
+              contentContainerStyle={{ paddingBottom: 0 }}
+              scrollEventThrottle={16}
+              disableIntervalMomentum={true}
+              nestedScrollEnabled={false}
+              scrollEnabled={true}
+              bounces={false}
+              windowSize={3}
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
+              updateCellsBatchingPeriod={50}
+              removeClippedSubviews={false}
+              getItemLayout={(data, index) => ({
+                length: availableHeight,
+                offset: availableHeight * index,
+                index,
+              })}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor="#60a5fa"
+                />
+              }
+              onEndReached={loadMorePosts}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={styles.loadMoreContainer}>
+                    <ActivityIndicator size="small" color="#60a5fa" />
+                    <Text style={styles.loadMoreText}>Loading more posts...</Text>
+                  </View>
+                ) : null
+              }
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              ListEmptyComponent={
+                <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
+                  <Feather name={networkError ? "wifi-off" : "video"} size={64} color="#666" />
+                  <Text style={styles.emptyText}>
+                    {networkError ? 'No Internet Connection' : 'No posts available'}
+                  </Text>
+                  <Text style={styles.emptySubtext}>
+                    {networkError
+                      ? 'Please check your internet connection and try again'
+                      : activeTab === 'following' && !user
+                        ? 'Sign in to see posts from people you follow'
+                        : 'Pull down to refresh or check back later'
+                    }
+                  </Text>
+                  {networkError && (
+                    <TouchableOpacity
+                      style={styles.retryButton}
+                      onPress={onRefresh}
+                    >
+                      <Text style={styles.retryButtonText}>Retry</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              }
             />
           )}
-          keyExtractor={(item) => item.id}
-          pagingEnabled
-          showsVerticalScrollIndicator={false}
-          snapToInterval={availableHeight}
-          snapToAlignment="start"
-          decelerationRate="fast"
-          contentContainerStyle={{ paddingBottom: 0 }}
-          // Smooth scrolling optimizations
-          scrollEventThrottle={16}
-          disableIntervalMomentum={true}
-          nestedScrollEnabled={false}
-          scrollEnabled={true}
-          bounces={false}
-          // Lazy loading optimizations for better performance
-          windowSize={3}
-          initialNumToRender={2}
-          maxToRenderPerBatch={2}
-          updateCellsBatchingPeriod={50}
-          removeClippedSubviews={false}
-          getItemLayout={(data, index) => ({
-            length: availableHeight,
-            offset: availableHeight * index,
-            index,
-          })}
-          refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh}
-              tintColor="#60a5fa"
-            />
-          }
-          onEndReached={loadMorePosts}
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={styles.loadMoreContainer}>
-                <ActivityIndicator size="small" color="#60a5fa" />
-                <Text style={styles.loadMoreText}>Loading more posts...</Text>
-              </View>
-            ) : null
-          }
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={viewabilityConfig}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Feather name="video" size={64} color="#666" />
-              <Text style={styles.emptyText}>No posts available</Text>
-              <Text style={styles.emptySubtext}>
-                {activeTab === 'following' && !user 
-                  ? 'Sign in to see posts from people you follow'
-                  : 'Pull down to refresh'
-                }
-              </Text>
-              </View>
-          }
-        />
-      </MuteContext.Provider>
+        </MuteContext.Provider>
+      )}
 
-      {/* Report Modal */}
       <ReportModal
         isVisible={reportModalVisible}
         onClose={() => setReportModalVisible(false)}
@@ -1141,7 +1242,6 @@ export default function FeedScreen() {
         }}
       />
 
-      {/* Comments Modal */}
       <CommentsModal
         visible={commentsModalVisible && !!commentsPostId}
         onClose={() => {
@@ -1153,6 +1253,9 @@ export default function FeedScreen() {
         postId={commentsPostId || ''}
         postTitle={commentsPostTitle}
         postAuthor={commentsPostAuthor}
+        postOwnerId={commentsPostOwnerId}
+        onCommentAdded={handleCommentAdded}
+        onCommentDeleted={handleCommentDeleted}
       />
     </SafeAreaView>
   );
@@ -1171,24 +1274,23 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center', // Centered since search button is gone
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 8,
-    paddingTop: 0, // Will be set inline
+    paddingVertical: 6,
     backgroundColor: 'rgba(0,0,0,0.95)',
     zIndex: 100,
-    minHeight: 52, // Ensure minimum height for content
+    height: 56,
   },
   tabsContainer: {
     flexDirection: 'row',
-    flex: 1,
+    // flex: 1, // No longer needed if we want to center strictly
     justifyContent: 'center',
   },
   tab: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 8,
-    marginHorizontal: 4,
+    marginHorizontal: 6,
   },
   tabActive: {
     borderBottomWidth: 2,
@@ -1196,15 +1298,12 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: '#999',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
   },
   tabTextActive: {
     color: '#fff',
     fontWeight: '600',
-  },
-  searchButton: {
-    padding: 8,
   },
   postContainer: {
     width: '100%',
@@ -1212,13 +1311,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   mediaContainer: {
-    width: '100%',
-    height: '100%',
-    position: 'relative',
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+    flex: 1,
   },
   mediaWrapper: {
     width: '100%',
@@ -1231,27 +1324,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     width: '100%',
     height: '100%',
-    maxWidth: '100%',
-    maxHeight: '100%',
   },
   muteButton: {
     position: 'absolute',
-    top: 24,
+    top: 12,
     right: 12,
     backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: 20,
     padding: 8,
-    zIndex: 10,
+    zIndex: 20,
   },
   rightActions: {
     position: 'absolute',
     right: 12,
     alignItems: 'center',
-    zIndex: 10,
+    zIndex: 999, // Increased zIndex
+    elevation: 10, // Added elevation for Android
+    maxHeight: '50%',
   },
   avatarContainer: {
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   userAvatar: {
     width: 40,
@@ -1273,18 +1366,18 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    marginBottom: 16,
-    minWidth: 50,
-    minHeight: 50,
+    marginBottom: 12,
+    minWidth: 44,
+    minHeight: 44,
     justifyContent: 'center',
-    padding: 8,
-    zIndex: 20,
+    padding: 6,
+    zIndex: 1000, // Ensure individual buttons are clickable
   },
   actionCount: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
-    marginTop: 4,
+    marginTop: 3,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
@@ -1298,40 +1391,40 @@ const styles = StyleSheet.create({
   },
   bottomInfo: {
     position: 'absolute',
-    left: 16,
-    right: 80,
     bottom: 0,
-    zIndex: 10,
-    backgroundColor: 'transparent',
-    paddingBottom: 8,
-    maxHeight: '40%', // Ensure it doesn't take too much space
+    left: 12,
+    right: 84, // leave room for right actions
+    zIndex: 21,
+    elevation: 5, // Added elevation
   },
   bottomInfoContent: {
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    borderRadius: 8,
+    padding: 10,
     marginBottom: 8,
-    maxWidth: '100%',
   },
   username: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 6,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
   },
   caption: {
     color: '#fff',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
     marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   showMoreText: {
     color: '#60a5fa',
-    fontSize: 13,
-    marginTop: 4,
+    fontSize: 12,
+    marginTop: 3,
     fontWeight: '500',
   },
   loadMoreContainer: {
@@ -1351,27 +1444,27 @@ const styles = StyleSheet.create({
   categoryBadge: {
     alignSelf: 'flex-start',
     backgroundColor: 'rgba(96, 165, 250, 0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 6,
     marginTop: 4,
   },
   categoryText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   followButton: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',
   },
   followButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
   },
   emptyContainer: {
@@ -1391,6 +1484,20 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 14,
     textAlign: 'center',
+    paddingHorizontal: 40,
+    lineHeight: 20,
+  },
+  retryButton: {
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 24,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   placeholderContainer: {
     justifyContent: 'center',
@@ -1425,13 +1532,9 @@ const styles = StyleSheet.create({
     paddingLeft: 4,
   },
   progressBarContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 3,
-    zIndex: 15,
-    paddingHorizontal: 0,
+    height: 5,
+    backgroundColor: 'transparent',
+    zIndex: 100,
   },
   progressBarTrack: {
     width: '100%',
@@ -1440,6 +1543,10 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#60a5fa',
+  },
+  root: {
+    flex: 1,
+    position: 'relative',
+    backgroundColor: 'black',
   },
 });

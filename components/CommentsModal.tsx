@@ -171,10 +171,6 @@ export default function CommentsModal({
       return;
     }
     
-    // Also check loading states
-    if (isInitial && loading) return;
-    if (!isInitial && loadingMore) return;
-    
     isFetchingRef.current = true;
     
     try {
@@ -211,13 +207,6 @@ export default function CommentsModal({
           // Ensure we have valid comments array - don't filter, just validate structure
           setComments(newComments);
           console.log('[Comments] Set comments:', newComments.length);
-          if (newComments.length > 0) {
-            console.log('[Comments] Sample comment structure:', {
-              id: newComments[0].id,
-              comment_text: newComments[0].comment_text?.substring(0, 20),
-              user: newComments[0].user?.username,
-            });
-          }
         } else {
           // Deduplicate comments by ID
           setComments(prev => {
@@ -248,7 +237,7 @@ export default function CommentsModal({
         setLoadingMore(false);
       }
     }
-  }, [postId, loading, loadingMore]);
+  }, [postId]);
 
   // Handle visibility changes
   useEffect(() => {
@@ -281,7 +270,7 @@ export default function CommentsModal({
         fetchComments(1, true);
       }
     }
-  }, [visible, postId, fetchComments]);
+  }, [visible, postId]);
 
   // Reset state when modal closes
   useEffect(() => {

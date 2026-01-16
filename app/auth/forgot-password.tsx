@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -458,45 +459,54 @@ export default function ForgotPasswordScreen() {
                   marginBottom: 16,
                   flexDirection: 'row',
                   justifyContent: 'space-between',
+                  paddingHorizontal: 8,
                 }}
               >
-                {Array.from({ length: OTP_LENGTH }).map((_, index) => (
-                  <TextInput
-                    key={index}
-                    ref={(el) => (otpInputRefs.current[index] = el)}
-                    style={[
-                      {
-                        width: 48,
-                        height: 56,
-                        borderRadius: 14,
-                        borderWidth: 1,
-                        textAlign: 'center',
-                        fontSize: 20,
-                        marginHorizontal: 4,
-                        backgroundColor: C.input,
-                        borderColor: C.inputBorder,
-                        color: C.text,
-                      },
-                      {
-                        shadowColor: '#000',
-                        shadowOpacity: 0.25,
-                        shadowRadius: 8,
-                        shadowOffset: { width: 0, height: 4 },
-                        elevation: 4,
-                      }
-                    ]}
-                    value={otpDigits[index]}
-                    onChangeText={(value) => handleOtpChange(index, value)}
-                    onKeyPress={({ nativeEvent }) => handleOtpKeyPress(index, nativeEvent.key)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    placeholder="-"
-                    placeholderTextColor={C.placeholder}
-                    editable={!otpVerifyLoading}
-                  />
-                ))}
+                {Array.from({ length: OTP_LENGTH }).map((_, index) => {
+                  // Calculate responsive width to fit all 6 boxes
+                  const totalMargin = 8 * 2; // Left and right padding
+                  const totalGaps = (OTP_LENGTH - 1) * 8; // Gaps between boxes
+                  const availableWidth = Dimensions.get('window').width - 40 - totalMargin - totalGaps; // 40 for form padding
+                  const boxWidth = Math.floor(availableWidth / OTP_LENGTH);
+                  
+                  return (
+                    <TextInput
+                      key={index}
+                      ref={(el) => (otpInputRefs.current[index] = el)}
+                      style={[
+                        {
+                          width: boxWidth,
+                          height: 56,
+                          borderRadius: 14,
+                          borderWidth: 1,
+                          textAlign: 'center',
+                          fontSize: 20,
+                          marginHorizontal: 4,
+                          backgroundColor: C.input,
+                          borderColor: C.inputBorder,
+                          color: C.text,
+                        },
+                        {
+                          shadowColor: '#000',
+                          shadowOpacity: 0.25,
+                          shadowRadius: 8,
+                          shadowOffset: { width: 0, height: 4 },
+                          elevation: 4,
+                        }
+                      ]}
+                      value={otpDigits[index]}
+                      onChangeText={(value) => handleOtpChange(index, value)}
+                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(index, nativeEvent.key)}
+                      keyboardType="number-pad"
+                      maxLength={1}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      placeholder="-"
+                      placeholderTextColor={C.placeholder}
+                      editable={!otpVerifyLoading}
+                    />
+                  );
+                })}
               </View>
 
               {otpVerifyLoading && (

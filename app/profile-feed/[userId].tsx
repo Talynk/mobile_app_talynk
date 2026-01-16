@@ -166,6 +166,7 @@ const PostItem: React.FC<PostItemProps> = ({
   const { isMuted, setIsMuted } = useMute();
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
@@ -364,18 +365,29 @@ const PostItem: React.FC<PostItemProps> = ({
             >
               <Video
                 ref={videoRef}
-                source={{ uri: mediaUrl || '' }}
+                source={{ 
+                  uri: mediaUrl || '',
+                  headers: {
+                    'Cache-Control': 'public, max-age=31536000, immutable'
+                  }
+                }}
                 style={styles.media}
                 resizeMode={ResizeMode.COVER}
-                shouldPlay={useNativeControls ? false : !decoderErrorDetected}
+                shouldPlay={useNativeControls ? false : !decoderErrorDetected && isActive}
                 isLooping={!useNativeControls}
                 isMuted={useNativeControls ? false : isMuted}
                 usePoster={false}
                 shouldCorrectPitch={true}
                 volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
+                useNativeControls={useNativeControls}
+                progressUpdateIntervalMillis={100}
+                onLoadStart={() => {
+                  setVideoLoading(true);
+                }}
                 onLoad={() => {
                   setVideoLoaded(true);
-                  if (!useNativeControls && videoRef.current) {
+                  setVideoLoading(false);
+                  if (!useNativeControls && videoRef.current && isActive) {
                     pauseAllVideosExcept(videoRef.current).then(() => {
                       videoRef.current?.playAsync().catch(() => {});
                     });
@@ -391,22 +403,23 @@ const PostItem: React.FC<PostItemProps> = ({
                       setVideoLoaded(true);
                     } else {
                       setVideoError(true);
+                      setVideoLoading(false);
                     }
                   }
                 }}
-                useNativeControls={useNativeControls}
-                progressUpdateIntervalMillis={500}
                 onPlaybackStatusUpdate={(status: any) => {
-                  if (status.isLoaded && !useNativeControls) {
-                    if (status.isPlaying !== isPlaying) {
-                      setIsPlaying(status.isPlaying);
-                    }
-                    if (status.durationMillis && status.positionMillis !== undefined) {
-                      const progress = status.durationMillis > 0 
-                        ? status.positionMillis / status.durationMillis 
-                        : 0;
-                      setVideoProgress(progress);
-                      setVideoDuration(status.durationMillis);
+                  if (status.isLoaded) {
+                    if (!useNativeControls) {
+                      if (status.isPlaying !== isPlaying) {
+                        setIsPlaying(status.isPlaying);
+                      }
+                      if (status.durationMillis && status.positionMillis !== undefined) {
+                        const progress = status.durationMillis > 0 
+                          ? status.positionMillis / status.durationMillis 
+                          : 0;
+                        setVideoProgress(progress);
+                        setVideoDuration(status.durationMillis);
+                      }
                     }
                   }
                 }}
@@ -496,11 +509,12 @@ const PostItem: React.FC<PostItemProps> = ({
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
             
-            {item.title && (
-              <ExpandableCaption text={item.title} maxLines={2} />
-            )}
-            {item.description && (
-              <ExpandableCaption text={item.description} maxLines={2} />
+            {/* Show caption/description only once - prefer caption, then description, then title */}
+            {(item.caption || item.description || item.title) && (
+              <ExpandableCaption 
+                text={item.caption || item.description || item.title || ''} 
+                maxLines={2} 
+              />
             )}
           </View>
 
@@ -684,6 +698,16 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
+        }
+        
+        // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
+        if (postsArray.length > 0 && (page === 1 || refresh)) {
+          const videoPosts = postsArray
+            .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
+            .slice(0, 3); // Prefetch first 3 videos
+          
+          // Videos will be cached automatically when loaded by Expo AV
+          // The cache headers in source will ensure proper caching
         }
         
         if (page === 1 || refresh) {

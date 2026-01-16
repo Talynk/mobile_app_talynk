@@ -17,9 +17,11 @@ import { useAuth } from '@/lib/auth-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Modal, FlatList } from 'react-native';
+import { Modal, FlatList, Dimensions } from 'react-native';
 import { authApi, countriesApi } from '@/lib/api';
 import { Country } from '@/types';
+
+const { width: screenWidth } = Dimensions.get('window');
 
 const THEME = {
   background: '#000000',
@@ -549,44 +551,52 @@ export default function RegisterScreen() {
                 We sent a 6-digit code to {email.trim() || 'your email address'} to verify your account.
               </Text>
 
-              <View style={{ marginTop: 16, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between' }}>
-                {Array.from({ length: OTP_LENGTH }).map((_, index) => (
-                  <TextInput
-                    key={index}
-                    ref={(el) => (otpInputRefs.current[index] = el)}
-                    style={[
-                      {
-                        width: 48,
-                        height: 56,
-                        borderRadius: 14,
-                        borderWidth: 1,
-                        textAlign: 'center',
-                        fontSize: 20,
-                        marginHorizontal: 4,
-                        backgroundColor: C.input,
-                        borderColor: C.inputBorder,
-                        color: C.text,
-                      },
-                      {
-                        shadowColor: '#000',
-                        shadowOpacity: 0.25,
-                        shadowRadius: 8,
-                        shadowOffset: { width: 0, height: 4 },
-                        elevation: 4,
-                      },
-                    ]}
-                    value={otpDigits[index]}
-                    onChangeText={(value) => handleOtpChange(index, value)}
-                    onKeyPress={({ nativeEvent }) => handleOtpKeyPress(index, nativeEvent.key)}
-                    keyboardType="number-pad"
-                    maxLength={1}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    placeholder="-"
-                    placeholderTextColor={C.placeholder}
-                    editable={!otpVerifyLoading}
-                  />
-                ))}
+              <View style={{ marginTop: 16, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 8 }}>
+                {Array.from({ length: OTP_LENGTH }).map((_, index) => {
+                  // Calculate responsive width to fit all 6 boxes
+                  const totalMargin = 8 * 2; // Left and right padding
+                  const totalGaps = (OTP_LENGTH - 1) * 8; // Gaps between boxes
+                  const availableWidth = screenWidth - 40 - totalMargin - totalGaps; // 40 for form padding
+                  const boxWidth = Math.floor(availableWidth / OTP_LENGTH);
+                  
+                  return (
+                    <TextInput
+                      key={index}
+                      ref={(el) => (otpInputRefs.current[index] = el)}
+                      style={[
+                        {
+                          width: boxWidth,
+                          height: 56,
+                          borderRadius: 14,
+                          borderWidth: 1,
+                          textAlign: 'center',
+                          fontSize: 20,
+                          marginHorizontal: 4,
+                          backgroundColor: C.input,
+                          borderColor: C.inputBorder,
+                          color: C.text,
+                        },
+                        {
+                          shadowColor: '#000',
+                          shadowOpacity: 0.25,
+                          shadowRadius: 8,
+                          shadowOffset: { width: 0, height: 4 },
+                          elevation: 4,
+                        },
+                      ]}
+                      value={otpDigits[index]}
+                      onChangeText={(value) => handleOtpChange(index, value)}
+                      onKeyPress={({ nativeEvent }) => handleOtpKeyPress(index, nativeEvent.key)}
+                      keyboardType="number-pad"
+                      maxLength={1}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      placeholder="-"
+                      placeholderTextColor={C.placeholder}
+                      editable={!otpVerifyLoading}
+                    />
+                  );
+                })}
               </View>
 
               {otpVerifyLoading && (

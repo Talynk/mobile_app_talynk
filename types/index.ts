@@ -83,7 +83,7 @@ export interface Post {
   shares?: number;
   views?: number;
   comments?: Comment[];
-  status?: 'active' | 'draft' | 'suspended' | 'approved' | 'pending' | 'rejected'; // New statuses + legacy support
+  status?: 'active' | 'draft' | 'Draft' | 'suspended' | 'approved' | 'pending' | 'rejected'; // New statuses + legacy support
   is_featured?: boolean;
   is_frozen?: boolean;
   report_count?: number;

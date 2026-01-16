@@ -1,6 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from './config';
+import { authEventEmitter } from './auth-event-emitter';
 
 // Create axios instance
 export const apiClient = axios.create({
@@ -36,12 +37,15 @@ apiClient.interceptors.response.use(
   },
   async (error) => {
     if (error.response?.status === 401) {
-      // Token expired, clear storage and redirect to login
+      // Token expired, clear storage and notify auth context
+      console.warn('[API] 401 Unauthorized - clearing auth state');
       try {
         await AsyncStorage.removeItem('talynk_token');
         await AsyncStorage.removeItem('talynk_user');
+        // Emit event so auth context can update state
+        authEventEmitter.emitUnauthorized();
       } catch (storageError) {
-        console.error('Error clearing storage:', storageError);
+        console.error('[API] Error clearing storage:', storageError);
       }
     }
     return Promise.reject(error);

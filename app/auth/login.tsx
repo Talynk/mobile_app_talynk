@@ -159,12 +159,12 @@ export default function LoginScreen() {
 
         <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}>
           {/* Username / Email */}
-          <Text style={[styles.label, { color: C.text }]}>Enter your email or username</Text>
+          <Text style={[styles.label, { color: C.text }]}>Enter your email</Text>
           <View style={[styles.inputWrapper, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
             <Ionicons name="mail-outline" size={20} color={C.textSecondary} style={styles.inputIconLeft} />
             <TextInput
               style={[styles.inputField, { color: C.text }]}
-              placeholder="Enter your email or username"
+              placeholder="user@example.com"
               value={username}
               onChangeText={handleUsernameChange}
               autoCapitalize="none"
@@ -178,7 +178,7 @@ export default function LoginScreen() {
           {/* Password */}
           <View style={{ marginTop: 16 }}>
             <View style={styles.labelRow}>
-              <Text style={[styles.label, { color: C.text }]}>Your password</Text>
+              <Text style={[styles.label, { color: C.text }]}>Enter Your password</Text>
               <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
                 <Text style={[styles.forgotText, { color: C.primary }]}>Forgot password?</Text>
               </TouchableOpacity>

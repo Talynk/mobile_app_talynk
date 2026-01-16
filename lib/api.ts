@@ -19,7 +19,7 @@ export const authApi = {
       // Extract username and email from input
       let email: string;
       let username: string | undefined;
-      
+
       if (usernameOrEmail.includes('@')) {
         // Input is an email
         email = usernameOrEmail;
@@ -30,13 +30,13 @@ export const authApi = {
         username = usernameOrEmail;
         email = `${username}@talynk.com`;
       }
-      
+
       // Send both email and username to match Postman request format
-      const response = await apiClient.post('/api/auth/login', { 
-        email, 
-        username, 
-        password, 
-        role: 'user' 
+      const response = await apiClient.post('/api/auth/login', {
+        email,
+        username,
+        password,
+        role: 'user'
       });
       return response.data;
     } catch (error: any) {
@@ -47,7 +47,7 @@ export const authApi = {
         data: error.response?.data,
         url: error.config?.url
       });
-      
+
       return {
         status: 'error',
         message: error.response?.data?.message || error.message || 'Login failed',
@@ -289,14 +289,85 @@ export const postsApi = {
     }
   },
 
-  getFollowing: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+  getFollowing: async (page = 1, limit = 20, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/follows/posts?page=${page}&limit=${limit}${timestamp}`);
-      return response.data;
+      const url = `/api/follows/posts?page=${page}&limit=${limit}${timestamp ? `&t=${timestamp}` : ''}`;
+      const response = await apiClient.get(url);
+      const apiResponse = response.data;
+      
+      // Log response for debugging
+      if (__DEV__) {
+        console.log('📥 [getFollowing] API Response:', {
+          status: apiResponse?.status,
+          hasData: !!apiResponse?.data,
+          postsCount: apiResponse?.data?.posts?.length || 0,
+          pagination: apiResponse?.data?.pagination,
+        });
+      }
+      
+      // Backend returns: { status: 'success', data: { posts: [...], pagination: {...}, filters: {...} } }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const posts = apiResponse.data.posts || [];
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Following posts fetched successfully',
+          data: {
+            posts: posts,
+            pagination: apiResponse.data.pagination || {
+              currentPage: page,
+              totalPages: posts.length > 0 ? Math.ceil((apiResponse.data.pagination?.totalCount || posts.length) / limit) : 0,
+              totalCount: apiResponse.data.pagination?.totalCount || posts.length,
+              hasNext: apiResponse.data.pagination?.hasNext || false,
+              hasPrev: page > 1,
+              limit: limit
+            },
+            filters: apiResponse.data.filters || {}
+          }
+        };
+      }
+      
+      // Fallback structure mapping
+      if (apiResponse?.data?.posts) {
+        return apiResponse;
+      }
+      
+      // Empty result - user follows no one or no posts
+      return {
+        status: 'success',
+        message: 'No posts from following',
+        data: { posts: [], pagination: {}, filters: {} },
+      };
     } catch (error: any) {
+      // Log the actual error for debugging
+      console.error('❌ Error fetching following posts:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        url: error.config?.url,
+      });
+      
+      // Handle 404 or empty following list gracefully
+      if (error.response?.status === 404 || error.response?.status === 400) {
+        return {
+          status: 'success',
+          message: 'No posts from following',
+          data: { posts: [], pagination: {}, filters: {} },
+        };
+      }
+      
+      // Handle 401 Unauthorized - user not logged in
+      if (error.response?.status === 401) {
+        return {
+          status: 'error',
+          message: 'Please log in to see posts from users you follow',
+          data: { posts: [], pagination: {}, filters: {} },
+        };
+      }
+      
       return {
         status: 'error',
-        message: 'Failed to fetch following posts',
+        message: error.response?.data?.message || 'Failed to fetch following posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }
@@ -306,9 +377,9 @@ export const postsApi = {
     try {
       const response = await apiClient.get(`/api/featured?page=${page}&limit=${limit}${timestamp}`);
       const apiResponse = response.data;
-      
+
       console.log('Raw featured API response:', JSON.stringify(apiResponse, null, 2));
-      
+
       // Transform the response: API returns data.featuredPosts array where each item has a 'post' property
       // API structure: { status: "success", data: { featuredPosts: [...], pagination: {...} } }
       if (apiResponse?.status === 'success' && apiResponse?.data?.featuredPosts) {
@@ -319,9 +390,9 @@ export const postsApi = {
           const post = featuredItem.post || featuredItem;
           return post;
         });
-        
+
         console.log(`Transformed ${featuredPosts.length} featured posts to ${posts.length} posts`);
-        
+
         return {
           status: 'success',
           message: apiResponse.message || 'Featured posts fetched successfully',
@@ -344,12 +415,12 @@ export const postsApi = {
           }
         };
       }
-      
+
       // If response already has posts array, return as-is
       if (apiResponse?.data?.posts) {
         return apiResponse;
       }
-      
+
       // Fallback: return empty posts
       console.warn('Unexpected featured posts response structure:', apiResponse);
       return {
@@ -364,7 +435,7 @@ export const postsApi = {
         data: error.response?.data,
         url: error.config?.url
       });
-      
+
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch featured posts',
@@ -414,7 +485,7 @@ export const postsApi = {
         data: error.response?.data,
         url: error.config?.url
       });
-      
+
       // If it's a network error or 404/500, return success for demo purposes
       if (error.code === 'ECONNREFUSED' || error.response?.status >= 400) {
         console.log('Using fallback like response');
@@ -424,7 +495,7 @@ export const postsApi = {
           data: { likeCount: Math.floor(Math.random() * 100) + 1 },
         };
       }
-      
+
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to like post',
@@ -444,7 +515,7 @@ export const postsApi = {
         data: error.response?.data,
         url: error.config?.url
       });
-      
+
       // If it's a network error or 404/500, return success for demo purposes
       if (error.code === 'ECONNREFUSED' || error.response?.status >= 400) {
         console.log('Using fallback unlike response');
@@ -454,7 +525,7 @@ export const postsApi = {
           data: { likeCount: Math.floor(Math.random() * 50) },
         };
       }
-      
+
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to unlike post',
@@ -469,7 +540,7 @@ export const postsApi = {
       return {
         status: response.data.status,
         message: response.data.message,
-        data: { 
+        data: {
           isLiked: response.data.data?.isLiked || false,
           likeCount: response.data.data?.likeCount || 0,
         },
@@ -512,13 +583,38 @@ export const postsApi = {
 
   getComments: async (postId: string, page = 1, limit = 20): Promise<ApiResponse<{ comments: any[]; pagination?: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/${postId}/comments?page=${page}&limit=${limit}`);
+      const url = `/api/posts/${postId}/comments?page=${page}&limit=${limit}`;
+      console.log('[API] Fetching comments from:', url);
+      const response = await apiClient.get(url);
+      console.log('[API] Comments response:', response.status);
       return response.data;
     } catch (error: any) {
-      console.error('Get comments API error:', error);
+      // Try alternative endpoint if first one fails
+      if (error.message === 'Network Error' || error.code === 'NETWORK_ERROR' || error.code === 'ECONNABORTED') {
+        console.log('[API] First comments endpoint failed, trying alternative...');
+        try {
+          const altUrl = `/api/posts/comments?postId=${postId}&page=${page}&limit=${limit}`;
+          const response = await apiClient.get(altUrl);
+          return response.data;
+        } catch (altError: any) {
+          console.error('[API] Alternative comments endpoint also failed:', altError.message);
+        }
+      }
+      
+      console.error('[API] Get comments error:', {
+        message: error.message,
+        code: error.code,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+      });
+      
+      // Return empty comments silently instead of showing error to user
+      // Comments feature may not be fully implemented on backend yet
+      console.log('[API] Comments feature unavailable, returning empty list');
       return {
-        status: 'error',
-        message: error.response?.data?.message || 'Failed to fetch comments',
+        status: 'success',
+        message: 'Comments not available',
         data: { comments: [], pagination: {} },
       };
     }
@@ -550,33 +646,36 @@ export const postsApi = {
       };
     }
   },
+
   addComment: async (postId: string, content: string): Promise<ApiResponse<{ comment: any }>> => {
     try {
       // Validate content before sending
       if (!content || typeof content !== 'string' || content.trim().length === 0) {
-        console.error('addComment: Invalid content provided', { content, type: typeof content, length: content?.length });
         return {
           status: 'error',
           message: 'Comment text is required',
           data: { comment: null },
         };
       }
-      
+
       const trimmedContent = content.trim();
-      console.log('addComment API call:', { postId, contentLength: trimmedContent.length, contentPreview: trimmedContent.substring(0, 50) });
-      
-      // Backend expects 'comment_text' field
-      const response = await apiClient.post(`/api/posts/${postId}/comments`, { comment_text: trimmedContent });
+
+      // Explicitly set headers to avoid any ambiguity
+      const response = await apiClient.post(
+        `/api/posts/${postId}/comments`,
+        { comment_text: trimmedContent },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          }
+        }
+      );
       return response.data;
     } catch (error: any) {
       console.error('Add comment API error:', error);
       const errorMessage = error.response?.data?.message || error.message || 'Failed to add comment';
-      console.error('Add comment error details:', {
-        message: errorMessage,
-        status: error.response?.status,
-        data: error.response?.data,
-        requestData: { postId, content: content?.substring(0, 50) }
-      });
+
       return {
         status: 'error',
         message: errorMessage,
@@ -587,7 +686,14 @@ export const postsApi = {
 
   deleteComment: async (commentId: string): Promise<ApiResponse<null>> => {
     try {
-      const response = await apiClient.delete(`/api/posts/comments/${commentId}`);
+      const response = await apiClient.delete(
+        `/api/posts/comments/${commentId}`,
+        {
+          headers: {
+            'Accept': 'application/json',
+          }
+        }
+      );
       return response.data;
     } catch (error: any) {
       console.error('Delete comment API error:', error);
@@ -641,27 +747,27 @@ export const userApi = {
   updateProfile: async (updateData: any, profileImage?: string): Promise<ApiResponse<User>> => {
     try {
       let response;
-      
+
       if (profileImage) {
         // Create FormData for multipart upload
         const formData = new FormData();
-        
+
         // Add phone numbers
         if (updateData.phone1) formData.append('phone1', updateData.phone1);
         if (updateData.phone2) formData.append('phone2', updateData.phone2);
-        
+
         // Add profile image
         const imageUri = profileImage;
         const filename = imageUri.split('/').pop() || 'profile.jpg';
         const match = /\.(\w+)$/.exec(filename);
         const type = match ? `image/${match[1]}` : 'image/jpeg';
-        
+
         formData.append('user_facial_image', {
           uri: imageUri,
           type,
           name: filename,
         } as any);
-        
+
         response = await apiClient.put('/api/user/profile', formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -671,7 +777,7 @@ export const userApi = {
         // Send JSON data for phone numbers only
         response = await apiClient.put('/api/user/profile', updateData);
       }
-      
+
       return response.data;
     } catch (error: any) {
       return {
@@ -733,13 +839,91 @@ export const userApi = {
 
   getSuggestions: async () => {
     try {
-      const response = await apiClient.get('/api/users/suggestions');
-      return response.data;
+      // Try to get combined suggestions (mutual + discover)
+      // First try the main endpoint, if it doesn't exist, combine mutual and discover
+      try {
+        const response = await apiClient.get('/api/users/suggestions');
+        if (response.data && response.data.status === 'success') {
+          return response.data;
+        }
+      } catch {
+        // If main endpoint doesn't exist, combine mutual and discover
+      }
+      
+      // Combine mutual and discover suggestions
+      const [mutualRes, discoverRes] = await Promise.all([
+        apiClient.get('/api/users/suggestions/mutual').catch(() => ({ data: { status: 'success', data: { suggestions: [] } } })),
+        apiClient.get('/api/users/suggestions/discover').catch(() => ({ data: { status: 'success', data: { suggestions: [] } } }))
+      ]);
+      
+      const mutual = mutualRes.data?.data?.suggestions || [];
+      const discover = discoverRes.data?.data?.suggestions || [];
+      
+      // Combine and deduplicate by id
+      const combined = [...mutual, ...discover];
+      const unique = combined.filter((user, index, self) => 
+        index === self.findIndex((u) => u.id === user.id)
+      );
+      
+      return {
+        status: 'success',
+        data: { suggestions: unique },
+      };
     } catch (error: any) {
       return {
         status: 'error',
         message: 'Failed to fetch user suggestions',
         data: { suggestions: [] },
+      };
+    }
+  },
+
+  search: async (query: string): Promise<ApiResponse<{ users: User[] }>> => {
+    try {
+      const response = await apiClient.get(`/api/users/search?q=${encodeURIComponent(query)}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to search users',
+        data: { users: [] },
+      };
+    }
+  },
+
+  getStatistics: async (): Promise<ApiResponse<{ posts_count: number; followers_count: number; following_count: number; total_likes: number; total_views: number; engagement_rate: number; statistics?: any }>> => {
+    try {
+      const response = await apiClient.get('/api/user/statistics');
+      const apiResponse = response.data;
+      
+      // Backend returns: { status: 'success', data: { statistics: {...} } } or { status: 'success', data: {...} }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const stats = apiResponse.data.statistics || apiResponse.data;
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Statistics fetched successfully',
+          data: {
+            posts_count: stats.posts_count || 0,
+            followers_count: stats.followers_count || 0,
+            following_count: stats.following_count || 0, // Now properly returned from backend
+            total_likes: stats.total_likes || 0,
+            total_views: stats.total_views || stats.total_profile_views || 0,
+            engagement_rate: stats.engagement_rate || 0,
+            statistics: stats, // Include full stats object for flexibility
+          },
+        };
+      }
+      
+      return {
+        status: 'error',
+        message: 'Failed to fetch statistics',
+        data: { posts_count: 0, followers_count: 0, following_count: 0, total_likes: 0, total_views: 0, engagement_rate: 0 },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch statistics',
+        data: { posts_count: 0, followers_count: 0, following_count: 0, total_likes: 0, total_views: 0, engagement_rate: 0 },
       };
     }
   },
@@ -797,16 +981,219 @@ export const notificationsApi = {
       };
     }
   },
+
+  delete: async (notificationId: string): Promise<ApiResponse<null>> => {
+    try {
+      const response = await apiClient.delete(`/api/users/notifications/${notificationId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to delete notification',
+        data: null,
+      };
+    }
+  },
+
+  deleteAll: async (): Promise<ApiResponse<null>> => {
+    try {
+      const response = await apiClient.delete('/api/users/notifications');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to delete all notifications',
+        data: null,
+      };
+    }
+  },
+};
+
+// Challenges API
+export const challengesApi = {
+  getAll: async (status = 'active'): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(`/api/challenges?status=${status}`);
+      const apiResponse = response.data;
+      
+      // Backend returns: { status: 'success', data: [...], pagination: {...} }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const challenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Challenges fetched successfully',
+          data: {
+            challenges: challenges,
+            pagination: apiResponse.pagination || {}
+          }
+        };
+      }
+      
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch challenges',
+        data: { challenges: [], pagination: {} },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch challenges',
+        data: { challenges: [], pagination: {} },
+      };
+    }
+  },
+
+  getMyChallenges: async (): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get('/api/challenges/my-challenges');
+      const apiResponse = response.data;
+      
+      // Backend returns: { status: 'success', data: [...], pagination: {...} }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const challenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+        return {
+          status: 'success',
+          message: apiResponse.message || 'My challenges fetched successfully',
+          data: {
+            challenges: challenges,
+            pagination: apiResponse.pagination || {}
+          }
+        };
+      }
+      
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch my challenges',
+        data: { challenges: [], pagination: {} },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch my challenges',
+        data: { challenges: [], pagination: {} },
+      };
+    }
+  },
+
+  getJoinedChallenges: async (): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get('/api/challenges/joined');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch joined challenges',
+        data: [],
+      };
+    }
+  },
+
+  create: async (data: any): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post('/api/challenges', data);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to create challenge',
+        data: null,
+      };
+    }
+  },
+
+  join: async (challengeId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/challenges/${challengeId}/join`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to join challenge',
+        data: null,
+      };
+    }
+  },
+
+  getById: async (challengeId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(`/api/challenges/${challengeId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch challenge details',
+        data: null,
+      };
+    }
+  },
+
+  getParticipants: async (challengeId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(`/api/challenges/${challengeId}/participants`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch participants',
+        data: [],
+      };
+    }
+  },
+
+  getPosts: async (challengeId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(`/api/challenges/${challengeId}/posts`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch challenge posts',
+        data: [],
+      };
+    }
+  },
+
+  createPost: async (challengeId: string, data: FormData): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/challenges/${challengeId}/posts`, data, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to create challenge post',
+        data: null,
+      };
+    }
+  },
+
+  // Link existing post to a challenge
+  addPostToChallenge: async (challengeId: string, postId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/challenges/${challengeId}/posts/${postId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to add post to challenge',
+        data: null,
+      };
+    }
+  }
 };
 
 // Follow API methods
 export const followsApi = {
-  // Follow a user
+  // Follow a user - Backend expects { userId: string } in body
   follow: async (userId: string) => {
     try {
-      const response = await apiClient.post('/api/follows', { followingId: userId });
+      const response = await apiClient.post('/api/follows', { userId });
       return response.data;
     } catch (error: any) {
+      console.error('Follow API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Cannot follow this user',
@@ -814,12 +1201,16 @@ export const followsApi = {
       };
     }
   },
-  // Unfollow a user
+  // Unfollow a user - Backend expects { userId: string } in body via DELETE
   unfollow: async (userId: string) => {
     try {
-      const response = await apiClient.delete(`/api/follows/${userId}`);
+      // Backend route: DELETE /api/follows/:followingId
+      const response = await apiClient.delete(`/api/follows/${userId}`, {
+        data: { userId }
+      });
       return response.data;
     } catch (error: any) {
+      console.error('Unfollow API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Cannot unfollow this user',
@@ -833,6 +1224,7 @@ export const followsApi = {
       const response = await apiClient.get(`/api/follows/check/${followingId}`);
       return response.data;
     } catch (error: any) {
+      console.error('Check following API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to check follow status',
@@ -840,29 +1232,81 @@ export const followsApi = {
       };
     }
   },
-  // Get followers
-  getFollowers: async (userId: string) => {
+  // Get followers - returns { status: 'success', data: { followers: [...], hasMore: bool, totalCount: number } }
+  getFollowers: async (userId: string, page = 1, limit = 20) => {
     try {
-      const response = await apiClient.get(`/api/users/${userId}/followers`);
-      return response.data;
+      const response = await apiClient.get(`/api/follows/users/${userId}/followers?page=${page}&limit=${limit}`);
+      const apiResponse = response.data;
+      
+      // Backend structure: { status: 'success', data: { followers: [...], hasMore, totalCount } }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Followers fetched successfully',
+          data: {
+            followers: apiResponse.data.followers || [],
+            hasMore: apiResponse.data.hasMore || false,
+            totalCount: apiResponse.data.totalCount || 0,
+            pagination: {
+              page,
+              limit,
+              hasMore: apiResponse.data.hasMore || false,
+              total: apiResponse.data.totalCount || 0
+            }
+          }
+        };
+      }
+      
+      // Fallback
+      return {
+        status: 'success',
+        message: 'No followers found',
+        data: { followers: [], hasMore: false, totalCount: 0, pagination: {} }
+      };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch followers',
-        data: { followers: [] },
+        data: { followers: [], hasMore: false, totalCount: 0, pagination: {} },
       };
     }
   },
-  // Get following
-  getFollowing: async (userId: string) => {
+  // Get following - returns { status: 'success', data: { following: [...], hasMore: bool, totalCount: number } }
+  getFollowingUsers: async (userId: string, page = 1, limit = 20) => {
     try {
-      const response = await apiClient.get(`/api/users/${userId}/following`);
-      return response.data;
+      const response = await apiClient.get(`/api/follows/users/${userId}/following?page=${page}&limit=${limit}`);
+      const apiResponse = response.data;
+      
+      // Backend structure: { status: 'success', data: { following: [...], hasMore, totalCount } }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Following list fetched successfully',
+          data: {
+            following: apiResponse.data.following || [],
+            hasMore: apiResponse.data.hasMore || false,
+            totalCount: apiResponse.data.totalCount || 0,
+            pagination: {
+              page,
+              limit,
+              hasMore: apiResponse.data.hasMore || false,
+              total: apiResponse.data.totalCount || 0
+            }
+          }
+        };
+      }
+      
+      // Fallback
+      return {
+        status: 'success',
+        message: 'No following found',
+        data: { following: [], hasMore: false, totalCount: 0, pagination: {} }
+      };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch following',
-        data: { following: [] },
+        data: { following: [], hasMore: false, totalCount: 0, pagination: {} },
       };
     }
   },
@@ -884,7 +1328,7 @@ export const likesApi = {
     } catch (error: any) {
       const status = error.response?.status;
       const errorMessage = error.response?.data?.message || error.message || 'Failed to toggle like';
-      
+
       // Handle 404 (Post not found) gracefully - don't log as error
       if (status === 404) {
         console.warn('Post not found for like toggle:', postId);
@@ -894,7 +1338,7 @@ export const likesApi = {
           data: { isLiked: false, likeCount: 0 },
         } as any;
       }
-      
+
       // Handle network errors gracefully
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
         console.warn('Network error during like toggle:', postId);
@@ -904,7 +1348,7 @@ export const likesApi = {
           data: { isLiked: false, likeCount: 0 },
         } as any;
       }
-      
+
       // Log other errors
       console.error('Toggle like API error:', {
         message: errorMessage,
@@ -913,7 +1357,7 @@ export const likesApi = {
         url: error.config?.url,
         postId
       });
-      
+
       return {
         status: 'error',
         message: errorMessage,
@@ -921,7 +1365,7 @@ export const likesApi = {
       } as any;
     }
   },
-  
+
   getStatus: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
     try {
       const response = await apiClient.get(`/api/likes/posts/${postId}/status`);
@@ -936,7 +1380,7 @@ export const likesApi = {
     } catch (error: any) {
       const status = error.response?.status;
       const errorMessage = error.response?.data?.message || error.message || 'Failed to get like status';
-      
+
       // Handle 404 (Post not found) gracefully - don't log as error
       if (status === 404) {
         console.warn('Post not found for like status check:', postId);
@@ -946,7 +1390,7 @@ export const likesApi = {
           data: { isLiked: false, likeCount: 0 },
         } as any;
       }
-      
+
       // Handle network errors gracefully
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
         console.warn('Network error during like status check:', postId);
@@ -956,7 +1400,7 @@ export const likesApi = {
           data: { isLiked: false, likeCount: 0 },
         } as any;
       }
-      
+
       console.error('Get like status API error:', error);
       return {
         status: 'error',
@@ -978,7 +1422,7 @@ export const likesApi = {
 
       // Limit to 100 posts per batch (as per backend constraint)
       const batchIds = postIds.slice(0, 100);
-      
+
       const response = await apiClient.post('/api/likes/posts/batch-status', {
         postIds: batchIds,
       });
@@ -994,6 +1438,122 @@ export const likesApi = {
         status: 'error',
         message: error.response?.data?.message || 'Failed to check like statuses',
         data: {},
+      };
+    }
+  },
+
+  getLikers: async (postId: string, page: number = 1, limit: number = 50): Promise<ApiResponse<{ users: User[]; pagination: any; post: { id: string; totalLikes: number } }>> => {
+    try {
+      const response = await apiClient.get(`/api/likes/posts/${postId}/users?page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch likers',
+        data: { users: [], pagination: {}, post: { id: postId, totalLikes: 0 } },
+      };
+    }
+  },
+};
+
+// Search API
+export const searchApi = {
+  search: async (
+    query: string,
+    options?: {
+      type?: 'all' | 'posts' | 'users' | 'challenges';
+      country_id?: number;
+      category_id?: number;
+      start_date?: string;
+      end_date?: string;
+      status?: string;
+      challenge_status?: string;
+      page?: number;
+      limit?: number;
+      sort?: 'relevance' | 'newest' | 'oldest' | 'most_liked' | 'most_viewed';
+    }
+  ): Promise<ApiResponse<{ posts: Post[]; users: User[]; challenges: any[]; pagination: any; filters: any }>> => {
+    try {
+      const params = new URLSearchParams();
+      params.append('q', query);
+      
+      if (options?.type) params.append('type', options.type);
+      if (options?.country_id) params.append('country_id', String(options.country_id));
+      if (options?.category_id) params.append('category_id', String(options.category_id));
+      if (options?.start_date) params.append('start_date', options.start_date);
+      if (options?.end_date) params.append('end_date', options.end_date);
+      if (options?.status) params.append('status', options.status);
+      if (options?.challenge_status) params.append('challenge_status', options.challenge_status);
+      if (options?.page) params.append('page', String(options.page));
+      if (options?.limit) params.append('limit', String(options.limit));
+      if (options?.sort) params.append('sort', options.sort);
+      
+      const response = await apiClient.get(`/api/search?${params.toString()}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to search',
+        data: { posts: [], users: [], challenges: [], pagination: {}, filters: {} },
+      };
+    }
+  },
+};
+
+// Views API
+export const viewsApi = {
+  recordView: async (postId: string, watchTime: number, visibilityPercent: number, sessionId?: string): Promise<ApiResponse<{ viewRecorded: boolean; viewCount: number }>> => {
+    try {
+      const response = await apiClient.post(`/api/views/posts/${postId}`, {
+        sessionId,
+        watchTime,
+        visibilityPercent,
+      });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to record view',
+        data: { viewRecorded: false, viewCount: 0 },
+      };
+    }
+  },
+
+  getViewStats: async (postId: string): Promise<ApiResponse<{ totalViews: number; uniqueUserViews: number; anonymousViews: number; recentViews: any[] }>> => {
+    try {
+      const response = await apiClient.get(`/api/views/posts/${postId}/stats`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch view stats',
+        data: { totalViews: 0, uniqueUserViews: 0, anonymousViews: 0, recentViews: [] },
+      };
+    }
+  },
+
+  getViewMilestones: async (postId: string): Promise<ApiResponse<{ currentViews: number; reachedMilestones: number[]; nextMilestone: number | null; progressToNext: string }>> => {
+    try {
+      const response = await apiClient.get(`/api/views/posts/${postId}/milestones`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch milestones',
+        data: { currentViews: 0, reachedMilestones: [], nextMilestone: null, progressToNext: '0' },
+      };
+    }
+  },
+
+  getTrending: async (period: '1h' | '24h' | '7d' | '30d' = '24h', limit: number = 20): Promise<ApiResponse<{ posts: Post[]; period: string; generatedAt: string }>> => {
+    try {
+      const response = await apiClient.get(`/api/views/trending?period=${period}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch trending posts',
+        data: { posts: [], period, generatedAt: new Date().toISOString() },
       };
     }
   },
@@ -1013,14 +1573,14 @@ export const reportsApi = {
       });
       return response.data;
     } catch (error: any) {
-      const errorMessage = 
-        error.response?.data?.data?.message || 
-        error.response?.data?.message || 
-        error.message || 
+      const errorMessage =
+        error.response?.data?.data?.message ||
+        error.response?.data?.message ||
+        error.message ||
         'Failed to report post';
-      
+
       const isAlreadyReported = errorMessage.toLowerCase().includes('already reported');
-      
+
       return {
         status: 'error',
         message: errorMessage,

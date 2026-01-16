@@ -39,3 +39,7 @@ yarn-error.*
 *.md
 
 md
+# Expo
+.expo
+dist/
+web-build/

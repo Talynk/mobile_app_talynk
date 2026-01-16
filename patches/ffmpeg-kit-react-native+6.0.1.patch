@@ -1,0 +1,31 @@
+diff --git a/node_modules/ffmpeg-kit-react-native/android/build.gradle b/node_modules/ffmpeg-kit-react-native/android/build.gradle
+index 71326b3..8b1c5a4 100644
+--- a/node_modules/ffmpeg-kit-react-native/android/build.gradle
++++ b/node_modules/ffmpeg-kit-react-native/android/build.gradle
+@@ -27,7 +27,7 @@ def safeExtGet(String prop, String fallback) {
+ 
+ android {
+   if (project.android.hasProperty("namespace")) {
+-    namespace 'com.arthenica.ffmpegkit.reactnative'
++    namespace "com.arthenica.ffmpegkit.reactnative"
+   }
+ 
+   compileSdkVersion 33
+@@ -125,5 +125,6 @@ repositories {
+ 
+ dependencies {
+   api 'com.facebook.react:react-native:+'
+-  implementation 'com.arthenica:ffmpeg-kit-' + safePackageName(safeExtGet('ffmpegKitPackage', 'https')) + ':' + safePackageVersion(safeExtGet('ffmpegKitPackage', 'https'))
++  // Using maintained fork with proper binaries
++  implementation 'io.github.maitrungduc1410:ffmpeg-kit-https:6.0.1'
+ }
+diff --git a/node_modules/ffmpeg-kit-react-native/android/src/main/AndroidManifest.xml b/node_modules/ffmpeg-kit-react-native/android/src/main/AndroidManifest.xml
+index b75bc36..9a40236 100644
+--- a/node_modules/ffmpeg-kit-react-native/android/src/main/AndroidManifest.xml
++++ b/node_modules/ffmpeg-kit-react-native/android/src/main/AndroidManifest.xml
+@@ -1,3 +1,3 @@
+-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+-          package="com.arthenica.ffmpegkit.reactnative">
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+ </manifest>

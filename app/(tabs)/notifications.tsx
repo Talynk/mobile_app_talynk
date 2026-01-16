@@ -125,6 +125,36 @@ export default function NotificationsScreen() {
     }
   };
 
+  const deleteNotification = async (notificationId: string) => {
+    if (!user) return;
+    
+    try {
+      const response = await notificationsApi.delete(notificationId);
+      if (response.status === 'success') {
+        setNotifications(prev => prev.filter(n => n.id.toString() !== notificationId));
+        // Refresh badge count
+        refreshCount();
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
+  };
+
+  const deleteAllNotifications = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await notificationsApi.deleteAll();
+      if (response.status === 'success') {
+        setNotifications([]);
+        // Refresh badge count
+        refreshCount();
+      }
+    } catch (error) {
+      console.error('Error deleting all notifications:', error);
+    }
+  };
+
   const getFilteredNotifications = () => {
     if (activeTab === 'unread') {
       return notifications.filter(n => !n.isRead);
@@ -244,32 +274,44 @@ export default function NotificationsScreen() {
     const icon = getNotificationIcon(item.type, item.message);
     
     return (
-      <TouchableOpacity
+      <View
         style={[
           styles.notificationItem,
           !item.isRead && styles.notificationItemUnread
         ]}
-        onPress={() => handleNotificationPress(item)}
-        activeOpacity={0.7}
       >
-        <View style={[styles.notificationIcon, { backgroundColor: icon.bg }]}>
-          <MaterialIcons name={icon.name as any} size={22} color={icon.color} />
-        </View>
+        <TouchableOpacity
+          style={styles.notificationItemContent}
+          onPress={() => handleNotificationPress(item)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.notificationIcon, { backgroundColor: icon.bg }]}>
+            <MaterialIcons name={icon.name as any} size={22} color={icon.color} />
+          </View>
+          
+          <View style={styles.notificationContent}>
+            <Text style={[
+              styles.notificationText,
+              !item.isRead && styles.notificationTextUnread
+            ]}>
+              {item.message}
+            </Text>
+            <Text style={styles.notificationTime}>
+              {formatTimeAgo(item.createdAt)}
+            </Text>
+          </View>
+          
+          {!item.isRead && <View style={styles.unreadDot} />}
+        </TouchableOpacity>
         
-        <View style={styles.notificationContent}>
-          <Text style={[
-            styles.notificationText,
-            !item.isRead && styles.notificationTextUnread
-          ]}>
-            {item.message}
-          </Text>
-          <Text style={styles.notificationTime}>
-            {formatTimeAgo(item.createdAt)}
-          </Text>
-        </View>
-        
-        {!item.isRead && <View style={styles.unreadDot} />}
-      </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => deleteNotification(item.id.toString())}
+          activeOpacity={0.7}
+        >
+          <Feather name="x" size={18} color="#999" />
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -315,12 +357,20 @@ export default function NotificationsScreen() {
             </View>
           )}
         </View>
-        {unreadCount > 0 && (
-          <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
-            <Feather name="check-circle" size={14} color="#60a5fa" />
-            <Text style={styles.markAllText}>Mark all read</Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.headerActions}>
+          {unreadCount > 0 && (
+            <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
+              <Feather name="check-circle" size={14} color="#60a5fa" />
+              <Text style={styles.markAllText}>Mark all read</Text>
+            </TouchableOpacity>
+          )}
+          {notifications.length > 0 && (
+            <TouchableOpacity onPress={deleteAllNotifications} style={styles.deleteAllButton}>
+              <Feather name="trash-2" size={14} color="#ef4444" />
+              <Text style={styles.deleteAllText}>Delete all</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Tabs */}
@@ -511,6 +561,36 @@ const styles = StyleSheet.create({
   },
   notificationItemUnread: {
     backgroundColor: 'rgba(96, 165, 250, 0.05)',
+  },
+  notificationItemContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deleteButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  deleteAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  deleteAllText: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '600',
   },
   notificationIcon: {
     width: 44,

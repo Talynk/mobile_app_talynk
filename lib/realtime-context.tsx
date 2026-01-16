@@ -59,68 +59,71 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
   useEffect(() => {
     const initWebSocket = async () => {
       if (user?.id) {
-        // Get token from storage if not available
+        // Get token from storage if not available (use correct storage key)
         let authToken = token;
         if (!authToken) {
-          authToken = await AsyncStorage.getItem('authToken') || 'token';
+          authToken = await AsyncStorage.getItem('talynk_token');
+          console.log('[Realtime] Retrieved token from storage:', authToken ? 'success' : 'failed');
         }
         
         // Connect to WebSocket when user is authenticated
-        websocketService.connect(user.id, authToken);
-        
-        const handleConnected = () => {
-          setIsConnected(true);
-          setIsAvailable(true);
-        };
+        if (authToken) {
+          websocketService.connect(user.id, authToken);
+          
+          const handleConnected = () => {
+            setIsConnected(true);
+            setIsAvailable(true);
+          };
 
-        const handleDisconnected = () => {
-          setIsConnected(false);
-        };
+          const handleDisconnected = () => {
+            setIsConnected(false);
+          };
 
-        const handleDisabled = () => {
-          // WebSocket is not available on this backend
-          setIsConnected(false);
-          setIsAvailable(false);
-        };
+          const handleDisabled = () => {
+            // WebSocket is not available on this backend
+            setIsConnected(false);
+            setIsAvailable(false);
+          };
 
-        const handlePostUpdate = (update: PostUpdate) => {
-          postUpdateCallbacks.current.forEach(callback => callback(update));
-        };
+          const handlePostUpdate = (update: PostUpdate) => {
+            postUpdateCallbacks.current.forEach(callback => callback(update));
+          };
 
-        const handleNewComment = (update: CommentUpdate) => {
-          commentCallbacks.current.forEach(callback => callback(update));
-        };
+          const handleNewComment = (update: CommentUpdate) => {
+            commentCallbacks.current.forEach(callback => callback(update));
+          };
 
-        const handleNewNotification = (update: NotificationUpdate) => {
-          notificationCallbacks.current.forEach(callback => callback(update));
-        };
+          const handleNewNotification = (update: NotificationUpdate) => {
+            notificationCallbacks.current.forEach(callback => callback(update));
+          };
 
-        const handleLikeUpdate = (update: LikeUpdate) => {
-          // Update cache if it's for the current user
-          if (update.userId === user.id) {
-            updateLikedPosts(update.postId, update.isLiked);
-          }
-          likeUpdateCallbacks.current.forEach(callback => callback(update));
-        };
+          const handleLikeUpdate = (update: LikeUpdate) => {
+            // Update cache if it's for the current user
+            if (update.userId === user.id) {
+              updateLikedPosts(update.postId, update.isLiked);
+            }
+            likeUpdateCallbacks.current.forEach(callback => callback(update));
+          };
 
-        websocketService.on('connected', handleConnected);
-        websocketService.on('disconnected', handleDisconnected);
-        websocketService.on('disabled', handleDisabled);
-        websocketService.on('postUpdate', handlePostUpdate);
-        websocketService.on('newComment', handleNewComment);
-        websocketService.on('newNotification', handleNewNotification);
-        websocketService.on('likeUpdate', handleLikeUpdate);
+          websocketService.on('connected', handleConnected);
+          websocketService.on('disconnected', handleDisconnected);
+          websocketService.on('disabled', handleDisabled);
+          websocketService.on('postUpdate', handlePostUpdate);
+          websocketService.on('newComment', handleNewComment);
+          websocketService.on('newNotification', handleNewNotification);
+          websocketService.on('likeUpdate', handleLikeUpdate);
 
-        return () => {
-          websocketService.off('connected', handleConnected);
-          websocketService.off('disconnected', handleDisconnected);
-          websocketService.off('disabled', handleDisabled);
-          websocketService.off('postUpdate', handlePostUpdate);
-          websocketService.off('newComment', handleNewComment);
-          websocketService.off('newNotification', handleNewNotification);
-          websocketService.off('likeUpdate', handleLikeUpdate);
-          websocketService.disconnect();
-        };
+          return () => {
+            websocketService.off('connected', handleConnected);
+            websocketService.off('disconnected', handleDisconnected);
+            websocketService.off('disabled', handleDisabled);
+            websocketService.off('postUpdate', handlePostUpdate);
+            websocketService.off('newComment', handleNewComment);
+            websocketService.off('newNotification', handleNewNotification);
+            websocketService.off('likeUpdate', handleLikeUpdate);
+            websocketService.disconnect();
+          };
+        }
       }
     };
 

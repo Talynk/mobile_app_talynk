@@ -11,41 +11,76 @@ import {
   Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi } from '@/lib/api';
+import { postsApi, userApi, followsApi } from '@/lib/api';
 import { Post, User } from '@/types';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
+import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
+import { getPostMediaUrl } from '@/lib/utils/file-url';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const SEARCH_TABS = [
-  { key: 'posts', label: 'Posts', icon: 'video' },
-  { key: 'users', label: 'Users', icon: 'users' },
-  { key: 'sounds', label: 'Sounds', icon: 'music' },
+  { key: 'top', label: 'Top', icon: 'trending-up' },
+  { key: 'people', label: 'People', icon: 'users' },
+  { key: 'videos', label: 'Videos', icon: 'video' },
 ];
 
 export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('posts');
+  const [activeTab, setActiveTab] = useState('top');
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [usersResults, setUsersResults] = useState<User[]>([]);
+  const [postsResults, setPostsResults] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const { followedUsers, updateFollowedUsers } = useCache();
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     
     setLoading(true);
     try {
-      if (activeTab === 'posts') {
-        const response = await postsApi.search(searchQuery);
-        if (response.status === 'success') {
-          setSearchResults(response.data);
+      if (activeTab === 'top') {
+        // Top shows both users and posts
+        const [usersRes, postsRes] = await Promise.all([
+          userApi.search(searchQuery).catch(() => ({ status: 'error', data: { users: [] } })),
+          postsApi.search(searchQuery).catch(() => ({ status: 'error', data: [] }))
+        ]);
+        
+        const users = usersRes.status === 'success' ? (usersRes.data.users || []) : [];
+        const posts = postsRes.status === 'success' 
+          ? (postsRes.data.posts || (Array.isArray(postsRes.data) ? postsRes.data : []))
+          : [];
+        
+        setUsersResults(users);
+        setPostsResults(posts);
+        // Combine for display - users first, then posts
+        setSearchResults([...users, ...posts]);
+      } else if (activeTab === 'people') {
+        const res = await userApi.search(searchQuery);
+        if (res.status === 'success') {
+          const users = res.data.users || [];
+          setUsersResults(users);
+          setSearchResults(users);
+        } else {
+          setUsersResults([]);
+          setSearchResults([]);
         }
-      } else if (activeTab === 'users') {
-        // Implement user search
-        setSearchResults([]);
+      } else if (activeTab === 'videos') {
+        const res = await postsApi.search(searchQuery);
+        if (res.status === 'success') {
+          const posts = res.data.posts || (Array.isArray(res.data) ? res.data : []);
+          setPostsResults(posts);
+          setSearchResults(posts);
+        } else {
+          setPostsResults([]);
+          setSearchResults([]);
+        }
       }
       
       // Add to recent searches
@@ -55,10 +90,23 @@ export default function SearchScreen() {
       ].slice(0, 10));
     } catch (error) {
       console.error('Search error:', error);
+      setSearchResults([]);
+      setUsersResults([]);
+      setPostsResults([]);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (searchQuery.trim().length > 0) {
+      handleSearch();
+    } else {
+      setSearchResults([]);
+      setUsersResults([]);
+      setPostsResults([]);
+    }
+  }, [activeTab]);
 
   const renderPostResult = ({ item }: { item: Post }) => {
     const mediaUrl = getPostMediaUrl(item) || '';
@@ -98,30 +146,72 @@ export default function SearchScreen() {
     );
   };
 
-  const renderUserResult = ({ item }: { item: User }) => (
-    <TouchableOpacity 
-      style={styles.userResult}
-      onPress={() => router.push({
-        pathname: '/user/[id]',
-        params: { id: item.id }
-      })}
-    >
-      <Image 
-        source={{ uri: item.profile_picture || 'https://via.placeholder.com/48' }}
-        style={styles.userAvatar}
-      />
-      <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || item.username}</Text>
-        <Text style={styles.userUsername}>@{item.username}</Text>
-        <Text style={styles.userStats}>
-          {formatNumber(item.followers_count || 0)} followers
-        </Text>
-      </View>
-      <TouchableOpacity style={styles.followButton}>
-        <Text style={styles.followButtonText}>Follow</Text>
+  const handleFollow = async (userId: string) => {
+    if (!user) {
+      router.push('/auth/login');
+      return;
+    }
+    updateFollowedUsers(userId, true);
+    try {
+      await followsApi.follow(userId);
+    } catch (error) {
+      updateFollowedUsers(userId, false);
+    }
+  };
+
+  const handleUnfollow = async (userId: string) => {
+    if (!user) return;
+    updateFollowedUsers(userId, false);
+    try {
+      await followsApi.unfollow(userId);
+    } catch (error) {
+      updateFollowedUsers(userId, true);
+    }
+  };
+
+  const renderUserResult = ({ item }: { item: User }) => {
+    const isFollowing = followedUsers.has(item.id);
+    return (
+      <TouchableOpacity 
+        style={styles.userResult}
+        onPress={() => router.push({
+          pathname: '/user/[id]',
+          params: { id: item.id }
+        })}
+      >
+        <Image 
+          source={{ uri: item.profile_picture || 'https://via.placeholder.com/48' }}
+          style={styles.userAvatar}
+        />
+        <View style={styles.userInfo}>
+          <Text style={styles.userName}>{item.name || item.username}</Text>
+          <Text style={styles.userUsername}>@{item.username}</Text>
+          <Text style={styles.userStats}>
+            {formatNumber(item.followers_count || 0)} followers
+          </Text>
+        </View>
+        {user && user.id !== item.id && (
+          <TouchableOpacity 
+            style={[
+              styles.followButton,
+              isFollowing && styles.followingButton
+            ]}
+            onPress={(e) => {
+              e.stopPropagation();
+              isFollowing ? handleUnfollow(item.id) : handleFollow(item.id);
+            }}
+          >
+            <Text style={[
+              styles.followButtonText,
+              isFollowing && styles.followingButtonText
+            ]}>
+              {isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </TouchableOpacity>
-    </TouchableOpacity>
-  );
+    );
+  };
 
   const formatNumber = (num: number): string => {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
@@ -212,13 +302,36 @@ export default function SearchScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#60a5fa" />
         </View>
+      ) : activeTab === 'top' ? (
+        <FlatList
+          data={searchResults}
+          renderItem={({ item }) => {
+            // Check if item is a User or Post
+            if (item.username || item.profile_picture) {
+              return renderUserResult({ item: item as User });
+            } else {
+              return renderPostResult({ item: item as Post });
+            }
+          }}
+          keyExtractor={(item, index) => item.id || `item-${index}`}
+          contentContainerStyle={styles.resultsContainer}
+          ListEmptyComponent={
+            searchQuery.length > 0 ? (
+              <View style={styles.emptyContainer}>
+                <Feather name="search" size={48} color="#666" />
+                <Text style={styles.emptyText}>No results found</Text>
+                <Text style={styles.emptySubtext}>Try searching for something else</Text>
+              </View>
+            ) : null
+          }
+        />
       ) : (
         <FlatList
           key={activeTab}
           data={searchResults}
-          renderItem={activeTab === 'posts' ? renderPostResult : renderUserResult}
+          renderItem={activeTab === 'videos' ? renderPostResult : renderUserResult}
           keyExtractor={(item) => item.id}
-          numColumns={activeTab === 'posts' ? 3 : 1}
+          numColumns={activeTab === 'videos' ? 3 : 1}
           contentContainerStyle={styles.resultsContainer}
           ListEmptyComponent={
             searchQuery.length > 0 ? (
@@ -387,10 +500,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
   },
+  followingButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#666',
+  },
   followButtonText: {
     color: '#000',
     fontSize: 14,
     fontWeight: '600',
+  },
+  followingButtonText: {
+    color: '#666',
   },
   loadingContainer: {
     flex: 1,
