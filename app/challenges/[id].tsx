@@ -129,19 +129,70 @@ export default function ChallengeDetailScreen() {
       return;
     }
     
+    if (!id) {
+      Alert.alert('Error', 'Challenge ID is missing');
+      return;
+    }
+    
     setJoining(true);
     
     try {
+      console.log('[Challenge] Joining challenge:', id);
       const response = await challengesApi.join(id as string);
+      console.log('[Challenge] Join response:', response);
       
       if (response?.status === 'success') {
-        Alert.alert('Success', 'You have joined the challenge!');
-        fetchChallenge(); // Refresh to update is_participant status
+        Alert.alert('Success', response.message || 'You have joined the challenge!', [
+          { text: 'OK', onPress: () => {
+            // Refresh challenge data to update is_participant status
+            fetchChallenge();
+            // Also refresh joined challenges in create screen if needed
+          }}
+        ]);
       } else {
-        Alert.alert('Error', response?.message || 'Failed to join challenge');
+        const errorMessage = response?.message || 'Failed to join challenge';
+        console.error('[Challenge] Join failed:', errorMessage);
+        
+        // Handle specific error messages with user-friendly text
+        let alertTitle = 'Cannot Join Challenge';
+        let alertMessage = errorMessage;
+        
+        if (errorMessage.toLowerCase().includes('not started')) {
+          alertTitle = 'Challenge Not Started';
+          alertMessage = 'This challenge has not started yet. Please wait until the start date to join.';
+        } else if (errorMessage.toLowerCase().includes('already ended') || errorMessage.toLowerCase().includes('has ended')) {
+          alertTitle = 'Challenge Ended';
+          alertMessage = 'This challenge has already ended. You cannot join it anymore.';
+        } else if (errorMessage.toLowerCase().includes('already a participant') || errorMessage.toLowerCase().includes('already joined')) {
+          alertTitle = 'Already Joined';
+          alertMessage = 'You have already joined this challenge.';
+        } else if (errorMessage.toLowerCase().includes('cannot join own challenge') || errorMessage.toLowerCase().includes('organizer')) {
+          alertTitle = 'Cannot Join';
+          alertMessage = 'You cannot join a challenge that you organized.';
+        } else if (errorMessage.toLowerCase().includes('not available')) {
+          alertTitle = 'Challenge Not Available';
+          alertMessage = 'This challenge is not available for joining at this time.';
+        }
+        
+        Alert.alert(alertTitle, alertMessage);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to join challenge');
+      console.error('[Challenge] Join error:', err);
+      const errorMessage = err.response?.data?.message || err.message || 'Failed to join challenge';
+      
+      // Handle specific error messages
+      let alertTitle = 'Error';
+      let alertText = errorMessage;
+      
+      if (errorMessage.toLowerCase().includes('not started')) {
+        alertTitle = 'Challenge Not Started';
+        alertText = 'This challenge has not started yet. Please wait until the start date to join.';
+      } else if (errorMessage.toLowerCase().includes('already ended')) {
+        alertTitle = 'Challenge Ended';
+        alertText = 'This challenge has already ended. You cannot join it anymore.';
+      }
+      
+      Alert.alert(alertTitle, alertText);
     } finally {
       setJoining(false);
     }
@@ -210,6 +261,20 @@ export default function ChallengeDetailScreen() {
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
     return now >= startDate && now <= endDate;
+  };
+
+  const hasStarted = () => {
+    if (!challenge) return false;
+    const now = new Date();
+    const startDate = new Date(challenge.start_date);
+    return now >= startDate;
+  };
+
+  const canJoin = () => {
+    if (!challenge) return false;
+    // Can join if challenge is approved or active, and has started
+    const status = challenge.status;
+    return (status === 'approved' || status === 'active') && hasStarted() && !challenge.is_participant;
   };
 
   const getDateInfo = () => {
@@ -533,20 +598,38 @@ export default function ChallengeDetailScreen() {
           // Non-organizer view - show join/create post buttons
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
-              <TouchableOpacity
-                style={[styles.joinButton, { backgroundColor: C.primary }]}
-                onPress={handleJoinChallenge}
-                disabled={joining || !isActive()}
-              >
-                {joining ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <MaterialIcons name="person-add" size={20} color="#fff" />
-                    <Text style={styles.joinButtonText}>Join Challenge</Text>
-                  </>
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.joinButton, 
+                    { backgroundColor: C.primary },
+                    (!canJoin() || joining) && { opacity: 0.5 }
+                  ]}
+                  onPress={handleJoinChallenge}
+                  disabled={!canJoin() || joining}
+                >
+                  {joining ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <MaterialIcons name="person-add" size={20} color="#fff" />
+                      <Text style={styles.joinButtonText}>
+                        {!hasStarted() 
+                          ? 'Challenge Not Started' 
+                          : 'Join Challenge'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                {!hasStarted() && (
+                  <View style={styles.infoMessage}>
+                    <MaterialIcons name="info-outline" size={16} color={C.textSecondary} />
+                    <Text style={[styles.infoText, { color: C.textSecondary }]}>
+                      This challenge starts on {formatDate(challenge.start_date)}
+                    </Text>
+                  </View>
                 )}
-              </TouchableOpacity>
+              </>
             ) : (
               <View style={styles.participantActions}>
                 <View style={[styles.joinedBadge, { borderColor: C.success }]}>
@@ -1063,5 +1146,20 @@ const styles = StyleSheet.create({
   modalEmptyText: {
     fontSize: 16,
     marginTop: 16,
+  },
+  infoMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(96, 165, 250, 0.1)',
+    borderRadius: 8,
+    gap: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
   },
 });

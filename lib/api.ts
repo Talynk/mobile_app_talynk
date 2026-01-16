@@ -1239,12 +1239,30 @@ export const challengesApi = {
 
   join: async (challengeId: string): Promise<ApiResponse<any>> => {
     try {
+      console.log('[API] Joining challenge:', challengeId);
       const response = await apiClient.post(`/api/challenges/${challengeId}/join`);
+      console.log('[API] Join challenge response:', response.data);
       return response.data;
     } catch (error: any) {
+      console.error('[API] Join challenge error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+        challengeId
+      });
+      
+      // Extract error message from various possible locations
+      let errorMessage = 'Failed to join challenge';
+      if (error.response?.data) {
+        const errorData = error.response.data;
+        errorMessage = errorData.message || errorData.error || errorMessage;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to join challenge',
+        message: errorMessage,
         data: null,
       };
     }

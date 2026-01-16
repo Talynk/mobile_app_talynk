@@ -201,6 +201,65 @@ export default function CreatePostScreen() {
     loadSubs();
   }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
+  // Fetch joined challenges when authenticated
+  useEffect(() => {
+    const fetchJoinedChallenges = async () => {
+      if (!isAuthenticated || authLoading) {
+        return;
+      }
+      
+      try {
+        setLoadingChallenges(true);
+        console.log('[Create] Fetching joined challenges...');
+        const response = await challengesApi.getJoinedChallenges();
+        console.log('[Create] Joined challenges API response:', {
+          status: response.status,
+          dataLength: response.data?.length,
+          data: response.data
+        });
+        
+        if (response.status === 'success' && response.data && Array.isArray(response.data)) {
+          // Extract challenge objects from the response
+          // Each item has a nested 'challenge' property according to the API docs
+          const challenges = response.data
+            .map((item: any) => {
+              // Handle the API response structure: item.challenge contains the challenge object
+              if (item.challenge) {
+                return item.challenge;
+              }
+              // Fallback: if challenge is already at root level
+              return item;
+            })
+            .filter((challenge: any) => challenge && challenge.id && challenge.name);
+          
+          console.log('[Create] Extracted challenges:', challenges.length, challenges);
+          setJoinedChallenges(challenges);
+          
+          // Auto-select challenge if passed via params
+          if (params.challengeId && challenges.some((c: any) => c.id === params.challengeId)) {
+            setSelectedChallengeId(params.challengeId as string);
+            console.log('[Create] Auto-selected challenge:', params.challengeId);
+          }
+        } else {
+          console.warn('[Create] No joined challenges found or invalid response:', response);
+          setJoinedChallenges([]);
+        }
+      } catch (error: any) {
+        console.error('[Create] Error fetching joined challenges:', error);
+        console.error('[Create] Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
+        setJoinedChallenges([]);
+      } finally {
+        setLoadingChallenges(false);
+      }
+    };
+    
+    fetchJoinedChallenges();
+  }, [isAuthenticated, authLoading, params.challengeId]);
+
   // --- CAMERA RECORDING ---
   // Define handleRecordVideo with useCallback so it can be used in useEffect
   const handleRecordVideo = useCallback(async () => {
@@ -921,6 +980,115 @@ export default function CreatePostScreen() {
         fileType
       });
 
+      // If challenge is selected, use challenge-specific API endpoint
+      if (selectedChallengeId) {
+        const formData = new FormData();
+        formData.append('title', caption.trim().substring(0, 50) || 'My Post');
+        formData.append('caption', caption);
+        formData.append('post_category', categoryName);
+        formData.append('file', {
+          uri: mediaUri,
+          name: fileName,
+          type: fileType,
+        } as any);
+        
+        console.log('[Upload] Creating post in challenge:', {
+          challengeId: selectedChallengeId,
+          title: caption.trim().substring(0, 50),
+          categoryName,
+          fileName,
+          fileType
+        });
+        
+        const xhr = new XMLHttpRequest();
+        const apiUrl = `${API_BASE_URL}/api/challenges/${selectedChallengeId}/posts`;
+        
+        xhr.open('POST', apiUrl);
+        xhr.setRequestHeader('Accept', 'application/json');
+        
+        const authToken = await AsyncStorage.getItem('talynk_token');
+        
+        if (!authToken) {
+          setUploading(false);
+          setUploadProgress(0);
+          Alert.alert('Authentication Error', 'Please login again to create posts.');
+          router.push('/auth/login');
+          return;
+        }
+        
+        const cleanToken = authToken.trim();
+        xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
+        
+        let lastLoggedPercent = -10;
+        xhr.upload.onprogress = async (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
+            setUploadProgress(percent);
+            await uploadNotificationService.showUploadProgress(percent, fileName);
+            
+            if (percent - lastLoggedPercent >= 10 || percent === 100) {
+              console.log(`Upload progress: ${percent}%`);
+              lastLoggedPercent = percent;
+            }
+          }
+        };
+        
+        xhr.onload = async () => {
+          setUploading(false);
+          setUploadProgress(0);
+          
+          if (xhr.status === 401) {
+            await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
+            Alert.alert(
+              'Authentication Error',
+              'Authentication failed. Please login again to create posts.',
+              [{ text: 'OK', onPress: () => router.push('/auth/login') }]
+            );
+            return;
+          }
+          
+          try {
+            const response = JSON.parse(xhr.responseText);
+            console.log('[Upload] Challenge post response:', response);
+            
+            if (response.status === 'success') {
+              await uploadNotificationService.showUploadSuccess('Post created in challenge successfully!', fileName);
+              // Reset form
+              setRecordedVideoUri(null);
+              setCapturedImageUri(null);
+              setEditedVideoUri(null);
+              setThumbnailUri(null);
+              setCaption('');
+              setSelectedGroup('');
+              setSelectedCategoryId('');
+              setSelectedChallengeId(null);
+              setIsVideoPlaying(false);
+              // Navigate back or show success
+              router.back();
+            } else {
+              const errorMsg = response.message || 'Failed to create post in challenge';
+              await uploadNotificationService.showUploadError(errorMsg, fileName);
+              Alert.alert('Upload Failed', errorMsg);
+            }
+          } catch (parseError) {
+            console.error('[Upload] Error parsing response:', parseError);
+            await uploadNotificationService.showUploadError('Failed to create post in challenge', fileName);
+            Alert.alert('Upload Error', 'Failed to create post in challenge. Please try again.');
+          }
+        };
+        
+        xhr.onerror = async () => {
+          setUploading(false);
+          setUploadProgress(0);
+          await uploadNotificationService.showUploadError('Network error. Please check your connection.', fileName);
+          Alert.alert('Upload Error', 'Network error. Please check your connection and try again.');
+        };
+        
+        xhr.send(formData);
+        return;
+      }
+      
+      // Regular post upload (no challenge)
       const formData = new FormData();
       // Use first 50 chars of caption as title, or generate one
       const autoTitle = caption.trim().substring(0, 50) || 'My Post';
@@ -933,11 +1101,6 @@ export default function CreatePostScreen() {
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
       formData.append('status', status); // Add status (pending or draft)
-      
-      // Add challenge ID if a challenge is selected
-      if (selectedChallengeId) {
-        formData.append('challenge_id', selectedChallengeId);
-      }
       
       formData.append('file', {
         uri: mediaUri,
@@ -1594,6 +1757,88 @@ export default function CreatePostScreen() {
                     </View>
                 {errors.category && (
                   <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                )}
+              </View>
+            )}
+
+            {/* Challenge Selection - Show after media is captured */}
+            {(recordedVideoUri || capturedImageUri) && (
+              <View style={styles.inputGroup}>
+                {loadingChallenges ? (
+                  <View style={{ paddingVertical: 12 }}>
+                    <ActivityIndicator size="small" color={C.primary} />
+                    <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
+                      Loading challenges...
+                    </Text>
+                  </View>
+                ) : joinedChallenges.length > 0 ? (
+                  <>
+                    <View style={styles.labelRow}>
+                      <Text style={[styles.label, { color: C.text }]}>Post to Challenge 🏆</Text>
+                      <Text style={[styles.labelHint, { color: C.textSecondary }]}>
+                        Optional
+                      </Text>
+                    </View>
+                    <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 12 }]}>
+                      Select a challenge to submit this post to
+                    </Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.pillRow}
+                    >
+                      <TouchableOpacity
+                        style={[
+                          styles.challengePill,
+                          { borderColor: C.border },
+                          !selectedChallengeId && {
+                            backgroundColor: C.primary,
+                            borderColor: C.primary,
+                          },
+                        ]}
+                        onPress={() => setSelectedChallengeId(null)}
+                      >
+                        <Text
+                          style={[
+                            styles.challengePillText,
+                            { color: !selectedChallengeId ? '#fff' : C.text },
+                          ]}
+                        >
+                          No Challenge
+                        </Text>
+                      </TouchableOpacity>
+                      {joinedChallenges.map((challenge: any) => (
+                        <TouchableOpacity
+                          key={challenge.id}
+                          style={[
+                            styles.challengePill,
+                            { borderColor: C.border },
+                            selectedChallengeId === challenge.id && {
+                              backgroundColor: C.primary,
+                              borderColor: C.primary,
+                            },
+                          ]}
+                          onPress={() => setSelectedChallengeId(challenge.id)}
+                        >
+                          <Text
+                            style={[
+                              styles.challengePillText,
+                              { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {challenge.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </>
+                ) : (
+                  <View style={{ paddingVertical: 8 }}>
+                    <Text style={[styles.subLabel, { color: C.textSecondary }]}>
+                      No challenges joined yet. Join a challenge to post in it.
+                    </Text>
+                  </View>
                 )}
               </View>
             )}
@@ -2321,6 +2566,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   subcategoryPillText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  challengePill: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  challengePillText: {
     fontSize: 14,
     fontWeight: '500',
   },
