@@ -17,7 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { postsApi, challengesApi } from '@/lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';

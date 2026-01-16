@@ -357,6 +357,8 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         marginBottom: 12,
+        flexWrap: 'wrap',
+        gap: 8,
     },
     headerContent: {
         flex: 1,
@@ -374,6 +376,8 @@ const styles = StyleSheet.create({
     },
     headerText: {
         flex: 1,
+        minWidth: 0,
+        marginRight: 8,
     },
     title: {
         color: '#fff',
@@ -398,8 +402,13 @@ const styles = StyleSheet.create({
     },
     badgesContainer: {
         flexDirection: 'row',
-        alignItems: 'center',
+        flexWrap: 'wrap',
+        alignItems: 'flex-start',
+        justifyContent: 'flex-end',
         gap: 6,
+        flexShrink: 0,
+        marginTop: 4,
+        width: 150,
     },
     pendingBadge: {
         flexDirection: 'row',
@@ -409,6 +418,8 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
         borderRadius: 8,
         gap: 4,
+        width: 72,
+        maxWidth: 72,
     },
     pendingText: {
         color: '#fff',
@@ -423,6 +434,9 @@ const styles = StyleSheet.create({
         paddingVertical: 4,
         borderRadius: 8,
         gap: 4,
+        flexShrink: 0,
+        width: 72,
+        maxWidth: 72,
     },
     rewardText: {
         color: '#fff',
@@ -433,6 +447,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 8,
+        flexShrink: 0,
+        width: 72,
+        maxWidth: 72,
     },
     statusText: {
         color: '#fff',

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Image,
+  Modal,
 } from 'react-native';
 import { notificationsApi } from '@/lib/api';
 import { router, useFocusEffect } from 'expo-router';
@@ -28,6 +29,8 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
+  const [showMarkAllModal, setShowMarkAllModal] = useState(false);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { isConnected, onNewNotification } = useRealtime();
@@ -155,8 +158,14 @@ export default function NotificationsScreen() {
     loadNotifications();
   };
 
+  const handleMarkAllAsRead = () => {
+    setShowMarkAllModal(true);
+  };
+
   const markAllAsRead = async () => {
     if (!user) return;
+    
+    setShowMarkAllModal(false);
     
     try {
       console.log('[Notifications] 📝 Marking all notifications as read');
@@ -202,8 +211,14 @@ export default function NotificationsScreen() {
     }
   };
 
+  const handleDeleteAll = () => {
+    setShowDeleteAllModal(true);
+  };
+
   const deleteAllNotifications = async () => {
     if (!user) return;
+    
+    setShowDeleteAllModal(false);
     
     try {
       console.log('[Notifications] 🗑️ Deleting all notifications');
@@ -529,15 +544,13 @@ export default function NotificationsScreen() {
         </View>
         <View style={styles.headerActions}>
           {unreadCount > 0 && (
-            <TouchableOpacity onPress={markAllAsRead} style={styles.markAllButton}>
-              <Feather name="check-circle" size={14} color="#60a5fa" />
-              <Text style={styles.markAllText}>Mark all read</Text>
+            <TouchableOpacity onPress={handleMarkAllAsRead} style={styles.markAllButton}>
+              <MaterialIcons name="done-all" size={22} color="#60a5fa" />
             </TouchableOpacity>
           )}
           {notifications.length > 0 && (
-            <TouchableOpacity onPress={deleteAllNotifications} style={styles.deleteAllButton}>
-              <Feather name="trash-2" size={14} color="#ef4444" />
-              <Text style={styles.deleteAllText}>Delete all</Text>
+            <TouchableOpacity onPress={handleDeleteAll} style={styles.deleteAllButton}>
+              <MaterialIcons name="delete-sweep" size={22} color="#ef4444" />
             </TouchableOpacity>
           )}
         </View>
@@ -621,6 +634,76 @@ export default function NotificationsScreen() {
           }
         />
       )}
+
+      {/* Mark All As Read Confirmation Modal */}
+      <Modal
+        visible={showMarkAllModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMarkAllModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <MaterialIcons name="done-all" size={48} color="#60a5fa" />
+            </View>
+            <Text style={styles.modalTitle}>Mark All As Read</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to mark all notifications as read?
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setShowMarkAllModal(false)}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonConfirm]}
+                onPress={markAllAsRead}
+              >
+                <MaterialIcons name="done-all" size={18} color="#fff" />
+                <Text style={styles.modalButtonConfirmText}>Mark All Read</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete All Confirmation Modal */}
+      <Modal
+        visible={showDeleteAllModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteAllModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={[styles.modalIconContainer, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+              <MaterialIcons name="delete-sweep" size={48} color="#ef4444" />
+            </View>
+            <Text style={styles.modalTitle}>Delete All Notifications</Text>
+            <Text style={styles.modalMessage}>
+              Are you sure you want to delete all notifications? This action cannot be undone.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => setShowDeleteAllModal(false)}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonDelete]}
+                onPress={deleteAllNotifications}
+              >
+                <MaterialIcons name="delete-sweep" size={18} color="#fff" />
+                <Text style={styles.modalButtonDeleteText}>Delete All</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -747,20 +830,14 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   deleteAllButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    justifyContent: 'center',
+    width: 40,
+    height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(239, 68, 68, 0.1)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.2)',
-  },
-  deleteAllText: {
-    color: '#ef4444',
-    fontSize: 13,
-    fontWeight: '600',
   },
   notificationIcon: {
     width: 44,
@@ -867,5 +944,85 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  modalMessage: {
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  modalButtonCancel: {
+    backgroundColor: '#2a2a2a',
+    borderWidth: 1,
+    borderColor: '#3a3a3a',
+  },
+  modalButtonCancelText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalButtonConfirm: {
+    backgroundColor: '#60a5fa',
+  },
+  modalButtonConfirmText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalButtonDelete: {
+    backgroundColor: '#ef4444',
+  },
+  modalButtonDeleteText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

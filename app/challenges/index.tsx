@@ -210,21 +210,25 @@ export default function ChallengesScreen() {
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
         >
-          {item.has_rewards && (
-            <View style={styles.rewardBadge}>
-              <MaterialIcons name="emoji-events" size={14} color="#fff" />
-              <Text style={styles.rewardBadgeText}>Rewards: {item.rewards || 'Available'}</Text>
+          <View style={styles.headerContentWrapper}>
+            <Text style={[styles.challengeName, { color: '#fff' }]} numberOfLines={2}>
+              {item.name}
+            </Text>
+            <View style={styles.badgesContainer}>
+              {item.has_rewards && (
+                <View style={styles.rewardBadge}>
+                  <MaterialIcons name="emoji-events" size={14} color="#fff" />
+                  <Text style={styles.rewardBadgeText}>Rewards: {item.rewards || 'Available'}</Text>
+                </View>
+              )}
+              <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                <Text style={styles.statusText}>{status.label}</Text>
+              </View>
             </View>
-          )}
-          <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
-            <Text style={styles.statusText}>{status.label}</Text>
           </View>
         </LinearGradient>
         
         <View style={styles.cardContent}>
-          <Text style={[styles.challengeName, { color: C.text }]} numberOfLines={2}>
-            {item.name}
-          </Text>
           
           {item.description && (
             <Text style={[styles.challengeDescription, { color: C.textSecondary }]} numberOfLines={3}>
@@ -430,11 +434,26 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   cardHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    minHeight: 80,
+  },
+  headerContentWrapper: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  badgesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 4,
+    flexShrink: 0,
+    width: 180,
   },
   rewardBadge: {
     flexDirection: 'row',
@@ -443,6 +462,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
+    flexShrink: 0,
+    width: 87,
+    maxWidth: 87,
   },
   rewardBadgeText: {
     color: '#fff',
@@ -454,6 +476,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    flexShrink: 0,
+    width: 87,
+    maxWidth: 87,
   },
   statusText: {
     color: '#fff',
@@ -466,7 +491,9 @@ const styles = StyleSheet.create({
   challengeName: {
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 8,
+    flex: 1,
+    marginRight: 8,
+    minWidth: 0,
   },
   challengeDescription: {
     fontSize: 14,

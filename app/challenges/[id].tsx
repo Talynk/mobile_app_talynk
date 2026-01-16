@@ -389,21 +389,22 @@ export default function ChallengeDetailScreen() {
           colors={challenge.has_rewards ? ['#f59e0b', '#d97706'] : ['#3b82f6', '#2563eb']}
           style={styles.challengeHeader}
         >
-          <View style={styles.headerBadges}>
-            {challenge.has_rewards && (
-              <View style={styles.rewardBadge}>
-                <MaterialIcons name="emoji-events" size={16} color="#fff" />
-                <Text style={styles.rewardBadgeText}>Has Rewards</Text>
+          <View style={styles.headerContentWrapper}>
+            <Text style={styles.challengeTitle}>{challenge.name}</Text>
+            <View style={styles.badgesContainer}>
+              {challenge.has_rewards && (
+                <View style={styles.rewardBadge}>
+                  <MaterialIcons name="emoji-events" size={16} color="#fff" />
+                  <Text style={styles.rewardBadgeText}>Has Rewards</Text>
+                </View>
+              )}
+              <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                <Text style={styles.statusText}>{status.label}</Text>
               </View>
-            )}
-            <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
-              <Text style={styles.statusText}>{status.label}</Text>
             </View>
           </View>
           
-          <Text style={styles.challengeTitle}>{challenge.name}</Text>
-          
-          <View style={styles.statsRow}>
+          <View style={[styles.statsRow, { marginTop: 20 }]}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{participantCount}</Text>
               <Text style={styles.statLabel}>Participants</Text>
@@ -699,11 +700,23 @@ const styles = StyleSheet.create({
   challengeHeader: {
     padding: 24,
     paddingTop: 20,
+    minHeight: 100,
   },
-  headerBadges: {
+  headerContentWrapper: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  badgesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-start',
+    gap: 8,
+    flexShrink: 0,
+    width: 200,
   },
   rewardBadge: {
     flexDirection: 'row',
@@ -712,6 +725,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
+    flexShrink: 0,
+    width: 96,
+    maxWidth: 96,
   },
   rewardBadgeText: {
     color: '#fff',
@@ -723,6 +739,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
+    flexShrink: 0,
+    width: 96,
+    maxWidth: 96,
   },
   statusText: {
     color: '#fff',
@@ -733,7 +752,9 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 20,
+    flex: 1,
+    marginRight: 12,
+    minWidth: 0,
   },
   statsRow: {
     flexDirection: 'row',
