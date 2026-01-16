@@ -141,9 +141,20 @@ export interface Notification {
   id: number;
   userID: string; // Username, not UUID
   message: string;
-  type?: string; // comment, follow, subscription, post_approved, post_rejected, etc.
+  type?: string; // comment, like, follow, challenge_approved, challenge_rejected, post_status_update, post_approved, post_rejected, post_review, view_milestone, comment_report, etc.
   isRead: boolean;
   createdAt: string;
+  // Metadata field as per API documentation
+  metadata?: {
+    postId?: string;
+    postTitle?: string;
+    challengeId?: string;
+    challengeName?: string;
+    milestone?: number;
+    views?: number;
+    status?: string;
+    reason?: string;
+  };
   // Legacy fields for backward compatibility
   notification_id?: number;
   user_id?: string;

@@ -87,6 +87,7 @@ const timeAgo = (date: string): string => {
 };
 
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { Avatar } from '@/components/Avatar';
 
 const getMediaUrl = (post: Post): string | null => {
   return getPostMediaUrl(post);
@@ -467,8 +468,9 @@ const PostItem: React.FC<PostItemProps> = ({
         <View style={styles.actionsContainer}>
           {/* User avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Image
-              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/40') || 'https://via.placeholder.com/40' }}
+            <Avatar
+              user={item.user}
+              size={40}
               style={styles.avatar}
             />
           </TouchableOpacity>

@@ -22,6 +22,7 @@ import { postsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { Avatar } from './Avatar';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.7;
@@ -548,7 +549,6 @@ export default function CommentsModal({
     const commentUser = item.user || item.User || {};
     const commentContent = item.content || item.comment_text || '';
     const commentDate = item.createdAt || item.created_at || item.comment_date || '';
-    const profilePicture = (commentUser as any).profile_picture || (commentUser as any).avatar || 'https://via.placeholder.com/40';
     const username = (commentUser as any).username || (commentUser as any).name || 'unknown';
     const userId = (commentUser as any).id;
     const commentUserId = item.commentor_id || userId;
@@ -560,8 +560,9 @@ export default function CommentsModal({
           onPress={() => userId && handleUserPress(userId)}
           activeOpacity={0.7}
         >
-          <Image
-            source={{ uri: profilePicture }}
+          <Avatar
+            user={commentUser}
+            size={40}
             style={styles.commentAvatar}
           />
         </TouchableOpacity>
@@ -900,8 +901,9 @@ export default function CommentsModal({
             ]}>
               {user ? (
                 <View style={styles.inputContainer}>
-                  <Image
-                    source={{ uri: user.profile_picture || 'https://via.placeholder.com/36' }}
+                  <Avatar
+                    user={user}
+                    size={36}
                     style={styles.inputAvatar}
                   />
                   <View style={styles.inputFieldWrapper}>

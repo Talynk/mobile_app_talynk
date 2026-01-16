@@ -28,25 +28,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import DotsSpinner from '@/components/DotsSpinner';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { Avatar } from '@/components/Avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_CARD_WIDTH = (screenWidth - 48) / 2; // 2 columns with padding
 
-// Default avatar component with gradient
-const DefaultAvatar = ({ size = 80, name = '' }: { size?: number; name?: string }) => {
-  const initials = name
-    ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    : '?';
-  
-  return (
-    <LinearGradient
-      colors={['#3b82f6', '#8b5cf6']}
-      style={[styles.defaultAvatar, { width: size, height: size, borderRadius: size / 2 }]}
-    >
-      <Text style={[styles.defaultAvatarText, { fontSize: size * 0.35 }]}>{initials}</Text>
-    </LinearGradient>
-  );
-};
 
 // Video thumbnail with teaser playback
 interface VideoThumbnailCardProps {
@@ -697,18 +683,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         <View style={[styles.profileSection, { backgroundColor: C.card, borderBottomColor: C.border }]}>
           <View style={styles.profileHeader}>
             <View style={styles.avatarShadowWrapper}>
-              {profile?.profile_picture ? (
-                <Image
-                  source={{ uri: profile.profile_picture }}
-                  style={styles.avatarLarge}
-                  resizeMode="cover"
-                />
-              ) : (
-                <DefaultAvatar 
-                  size={80} 
-                  name={profile?.name || profile?.username || ''} 
-                />
-              )}
+              <Avatar
+                user={profile}
+                size={80}
+                style={styles.avatarLarge}
+              />
             </View>
             <View style={styles.profileInfo}>
               <Text style={[styles.profileName, { color: C.text }]}>

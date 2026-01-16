@@ -226,11 +226,28 @@ class WebSocketService extends SimpleEventEmitter {
       case 'notification':
       case 'newNotification':
       case 'notification:created': // Per NOTIFICATIONS&REPORTING.md
+        console.log('[WebSocket] 🔔 Received notification event:', {
+          eventType: type,
+          hasData: !!data,
+          dataKeys: data ? Object.keys(data) : [],
+          rawData: data,
+        });
+        
         // Handle both formats from NOTIFICATIONS.md:
         // Format 1: { type: "notification:created", data: { notification: {...} } }
         // Format 2: { type: "notification", data: { notification: {...} } }
         const notificationData = (data as any).notification || data;
+        
+        console.log('[WebSocket] 📋 Extracted notification data:', {
+          id: notificationData?.id,
+          type: notificationData?.type,
+          message: notificationData?.message?.substring(0, 50),
+          hasMetadata: !!notificationData?.metadata,
+          metadata: notificationData?.metadata,
+        });
+        
         this.emit('newNotification', { notification: notificationData } as NotificationUpdate);
+        console.log('[WebSocket] ✅ Emitted newNotification event');
         break;
 
       case 'follow':

@@ -92,6 +92,7 @@ const timeAgo = (date: string): string => {
 };
 
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { Avatar } from '@/components/Avatar';
 
 const getMediaUrl = (post: Post): string | null => {
   return getPostMediaUrl(post);
@@ -552,8 +553,9 @@ const PostItem: React.FC<PostItemProps> = ({
 
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Image
-              source={{ uri: getProfilePictureUrl(item.user, 'https://via.placeholder.com/48') || 'https://via.placeholder.com/48' }}
+            <Avatar
+              user={item.user}
+              size={48}
               style={styles.userAvatar}
             />
             {user && user.id !== item.user?.id && (
@@ -847,11 +849,22 @@ export default function FeedScreen() {
         setHasMore(false);
       }
     } catch (error: any) {
-      console.error('Error loading posts:', error);
-      const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
-      if (page === 1) {
-        setPosts([]);
-        setNetworkError(isNetworkError);
+      const { isNetworkError, getErrorMessage } = require('@/lib/utils/network-error-handler');
+      
+      const isNetwork = isNetworkError(error);
+      const errorMessage = getErrorMessage(error, 'Failed to load posts');
+      
+      if (isNetwork) {
+        console.warn('⚠️ Network error loading posts:', errorMessage);
+        // For network errors, keep existing posts if available, just show warning
+        if (page === 1 && posts.length === 0) {
+          setNetworkError(true);
+        }
+      } else {
+        console.error('❌ Error loading posts:', error);
+        if (page === 1) {
+          setPosts([]);
+        }
       }
       setHasMore(false);
     } finally {

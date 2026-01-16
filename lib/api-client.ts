@@ -1,7 +1,8 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from './config';
 import { authEventEmitter } from './auth-event-emitter';
+import { isNetworkError } from './utils/network-error-handler';
 
 // Create axios instance
 export const apiClient = axios.create({
@@ -35,7 +36,8 @@ apiClient.interceptors.response.use(
   (response) => {
     return response;
   },
-  async (error) => {
+  async (error: AxiosError) => {
+    // Handle 401 Unauthorized
     if (error.response?.status === 401) {
       // Token expired, clear storage and notify auth context
       console.warn('[API] 401 Unauthorized - clearing auth state');
@@ -48,6 +50,16 @@ apiClient.interceptors.response.use(
         console.error('[API] Error clearing storage:', storageError);
       }
     }
+    
+    // Handle network errors - log but don't show alert here (let UI handle it)
+    if (isNetworkError(error)) {
+      console.warn('[API] Network error:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        message: error.message,
+      });
+    }
+    
     return Promise.reject(error);
   }
 );

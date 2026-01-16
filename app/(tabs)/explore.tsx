@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,10 @@ import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Avatar } from '@/components/Avatar';
+import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -286,11 +290,57 @@ export default function ExploreScreen() {
     c.name.toLowerCase().includes(countrySearchQuery.toLowerCase())
   );
 
-  const renderPost = ({ item }: { item: Post }) => {
-    const thumbnailUrl = item.image || (item as any).thumbnail || '';
-    const videoUrl = item.video_url || '';
+  const PostCard = ({ item }: { item: Post }) => {
+    const videoRef = useRef<Video>(null);
+    const [isActive, setIsActive] = useState(false);
+    const [showVideo, setShowVideo] = useState(false);
+    const [isLoaded, setIsLoaded] = useState(false);
+
+    const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
     const isVideo = !!videoUrl;
-    const previewUrl = isVideo ? (thumbnailUrl || videoUrl) : (item.image || '');
+
+    // Get fallback image URL
+    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl(item.image || (item as any).thumbnail || '');
+
+    // Generate thumbnail for videos, use image directly for non-videos
+    const generatedThumbnail = useVideoThumbnail(
+      isVideo ? videoUrl : null,
+      fallbackImageUrl || '',
+      1000 // Extract thumbnail at 1 second
+    );
+
+    // For videos: use generated thumbnail, fallback to provided image
+    // For images: use image directly
+    const staticThumbnailUrl = isVideo
+      ? (generatedThumbnail || fallbackImageUrl)
+      : getPostMediaUrl(item) || '';
+
+    useEffect(() => {
+      if (isActive && isVideo && videoUrl) {
+        // Small delay before showing video to ensure smooth transition
+        const timer = setTimeout(() => {
+          setShowVideo(true);
+        }, 200);
+        return () => clearTimeout(timer);
+      } else {
+        setShowVideo(false);
+        setIsLoaded(false);
+        // Stop video when not active
+        if (videoRef.current) {
+          videoRef.current.pauseAsync().catch(() => { });
+        }
+      }
+    }, [isActive, isVideo, videoUrl]);
+
+    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+      if (status.isLoaded) {
+        setIsLoaded(true);
+        // Loop the teaser after 3 seconds
+        if (status.positionMillis && status.positionMillis > 3000) {
+          videoRef.current?.setPositionAsync(0);
+        }
+      }
+    };
 
     return (
       <TouchableOpacity
@@ -299,17 +349,40 @@ export default function ExploreScreen() {
           pathname: '/post/[id]',
           params: { id: item.id }
         })}
+        onPressIn={() => setIsActive(true)}
+        onPressOut={() => setIsActive(false)}
+        activeOpacity={0.9}
       >
-        {previewUrl ? (
+        {/* Static thumbnail image - always visible in background */}
+        {staticThumbnailUrl ? (
           <Image
-            source={{ uri: previewUrl }}
+            source={{ uri: staticThumbnailUrl }}
             style={styles.postMedia}
             resizeMode="cover"
           />
         ) : (
-          <View style={[styles.postMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
-            <MaterialIcons name="broken-image" size={32} color="#666" />
+          <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
+            {isVideo && !staticThumbnailUrl ? (
+              <ActivityIndicator size="small" color="#60a5fa" />
+            ) : (
+              <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
+            )}
           </View>
+        )}
+
+        {/* Video teaser overlay - only when active */}
+        {showVideo && isVideo && videoUrl && isActive && (
+          <Video
+            ref={videoRef}
+            source={{ uri: videoUrl }}
+            style={[styles.postMedia, styles.teaserVideo]}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={isActive}
+            isLooping={false}
+            isMuted={true}
+            volume={0}
+            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+          />
         )}
 
         <View style={styles.postOverlay}>
@@ -319,12 +392,20 @@ export default function ExploreScreen() {
           </View>
           {isVideo && (
             <View style={styles.playIcon}>
-              <Feather name="play" size={16} color="#fff" />
+              {isActive && showVideo ? (
+                <View style={styles.playingDot} />
+              ) : (
+                <Feather name="play" size={16} color="#fff" />
+              )}
             </View>
           )}
         </View>
       </TouchableOpacity>
     );
+  };
+
+  const renderPost = ({ item }: { item: Post }) => {
+    return <PostCard item={item} />;
   };
 
   const renderUser = ({ item }: { item: User }) => (
@@ -335,8 +416,9 @@ export default function ExploreScreen() {
         params: { id: item.id }
       })}
     >
-      <Image
-        source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
+      <Avatar
+        user={item}
+        size={50}
         style={styles.userAvatar}
       />
       <View style={styles.userInfo}>
@@ -551,7 +633,7 @@ export default function ExploreScreen() {
                     renderItem={({ item }) => (
                       <View style={styles.suggestionCard}>
                         <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: item.id } })}>
-                          <Image source={{ uri: item.profile_picture || 'https://via.placeholder.com/80' }} style={styles.suggestionAvatar} />
+                          <Avatar user={item} size={80} style={styles.suggestionAvatar} />
                           <Text style={styles.suggestionName} numberOfLines={1}>{item.username}</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
@@ -997,6 +1079,18 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  noMediaPlaceholder: {
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  teaserVideo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   postOverlay: {
     position: 'absolute',
     bottom: 0,
@@ -1021,6 +1115,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 8,
     padding: 2,
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
   },
   userRow: {
     flexDirection: 'row',

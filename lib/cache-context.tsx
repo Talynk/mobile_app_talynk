@@ -189,7 +189,15 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
       const { likesApi } = await import("./api");
       const result = await likesApi.batchCheckStatus(postIds);
 
-      if (result.status !== "success") return;
+      if (result.status !== "success") {
+        // Handle network errors gracefully - don't break the app
+        const { isNetworkError } = require("./utils/network-error-handler");
+        if (isNetworkError(result as any)) {
+          console.warn('⚠️ Network error syncing liked posts - using cached data');
+          return; // Use cached data instead
+        }
+        return;
+      }
 
       const serverData = result.data || {};
 

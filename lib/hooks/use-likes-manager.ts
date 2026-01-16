@@ -119,13 +119,23 @@ export const useLikesManager = () => {
             });
           }
         }
-      } catch (error) {
-        console.error('Batch like status fetch error:', error);
-        // Mark all posts in batch as checked to avoid infinite retry loops
-        // They'll be re-checked on refresh anyway
-        batch.forEach(postId => {
-          checkedPostIds.current.add(postId);
-        });
+      } catch (error: any) {
+        const { isNetworkError } = require('@/lib/utils/network-error-handler');
+        
+        const isNetwork = isNetworkError(error);
+        if (isNetwork) {
+          console.warn('⚠️ Network error checking like status - will retry later');
+          // Don't mark as checked for network errors - allow retry
+          // Put posts back in queue for next attempt
+          pendingPostIds.current.push(...batch);
+        } else {
+          console.error('❌ Batch like status fetch error:', error);
+          // Mark all posts in batch as checked to avoid infinite retry loops
+          // They'll be re-checked on refresh anyway
+          batch.forEach(postId => {
+            checkedPostIds.current.add(postId);
+          });
+        }
       }
     }, 400); // Check every 400ms
 

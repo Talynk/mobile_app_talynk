@@ -49,8 +49,23 @@ export default function NotificationsScreen() {
     if (!user) return;
 
     const unsubscribe = onNewNotification((update) => {
+      console.log('[Notifications] 🔔 Received real-time notification update:', {
+        updateKeys: Object.keys(update),
+        hasNotification: !!update.notification,
+        rawUpdate: update,
+      });
+      
       // Handle both "newNotification" and "notification" event types
+      // Per API docs: { userId, userID, notification: { id, type, message, isRead, createdAt, metadata } }
       const notificationData = update.notification || update;
+      
+      console.log('[Notifications] 📋 Processing notification data:', {
+        id: notificationData.id,
+        type: notificationData.type,
+        message: notificationData.message?.substring(0, 50),
+        hasMetadata: !!notificationData.metadata,
+        metadata: notificationData.metadata,
+      });
       
       const newNotification: Notification = {
         id: notificationData.id || Date.now(),
@@ -59,12 +74,28 @@ export default function NotificationsScreen() {
         type: notificationData.type,
         isRead: notificationData.isRead || notificationData.is_read || false,
         createdAt: notificationData.createdAt || notificationData.created_at || new Date().toISOString(),
+        metadata: notificationData.metadata || {},
+        // Extract metadata fields to related_* for backward compatibility
+        related_post_id: notificationData.metadata?.postId,
+        related_user_id: notificationData.related_user_id,
       };
+      
+      console.log('[Notifications] ✨ Created notification object:', {
+        id: newNotification.id,
+        type: newNotification.type,
+        isRead: newNotification.isRead,
+        hasMetadata: Object.keys(newNotification.metadata || {}).length > 0,
+        postId: newNotification.metadata?.postId || newNotification.related_post_id,
+      });
       
       // Add to top of list, avoid duplicates
       setNotifications(prev => {
         const exists = prev.some(n => n.id === newNotification.id);
-        if (exists) return prev;
+        if (exists) {
+          console.log('[Notifications] ⚠️ Duplicate notification ignored:', newNotification.id);
+          return prev;
+        }
+        console.log('[Notifications] ➕ Adding new notification to list. Total count:', prev.length + 1);
         return [newNotification, ...prev];
       });
     });
@@ -76,8 +107,14 @@ export default function NotificationsScreen() {
     if (!user) return;
     
     try {
+      console.log('[Notifications] 📥 Loading notifications for user:', user.username);
       setLoading(true);
       const response = await notificationsApi.getAll();
+      
+      console.log('[Notifications] 📦 API Response:', {
+        status: response.status,
+        notificationCount: response.data?.notifications?.length || 0,
+      });
       
       if (response.status === 'success' && response.data?.notifications) {
         // Normalize notification structure (handle both old and new formats)
@@ -88,15 +125,25 @@ export default function NotificationsScreen() {
           type: n.type,
           isRead: n.isRead !== undefined ? n.isRead : (n.is_read !== undefined ? n.is_read : false),
           createdAt: n.createdAt || n.notification_date || n.created_at || new Date().toISOString(),
-          related_post_id: n.related_post_id,
+          metadata: n.metadata || {},
+          // Extract metadata fields to related_* for backward compatibility
+          related_post_id: n.related_post_id || n.metadata?.postId,
           related_user_id: n.related_user_id,
           related_user: n.related_user,
         }));
         
+        console.log('[Notifications] ✅ Normalized notifications:', {
+          count: normalized.length,
+          unreadCount: normalized.filter(n => !n.isRead).length,
+          types: normalized.map(n => n.type),
+        });
+        
         setNotifications(normalized);
+      } else {
+        console.warn('[Notifications] ⚠️ Unexpected response format:', response);
       }
     } catch (error) {
-      console.error('Error loading notifications:', error);
+      console.error('[Notifications] ❌ Error loading notifications:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -112,16 +159,24 @@ export default function NotificationsScreen() {
     if (!user) return;
     
     try {
+      console.log('[Notifications] 📝 Marking all notifications as read');
       const response = await notificationsApi.markAllAsRead();
+      console.log('[Notifications] 📝 Mark all as read response:', {
+        status: response.status,
+        count: response.data?.count,
+      });
+      
       if (response.status === 'success') {
-        setNotifications(prev =>
-          prev.map(notification => ({ ...notification, isRead: true }))
-        );
+        setNotifications(prev => {
+          const updated = prev.map(notification => ({ ...notification, isRead: true }));
+          console.log('[Notifications] ✅ Marked all as read. Updated count:', updated.length);
+          return updated;
+        });
         // Refresh badge count
         refreshCount();
       }
     } catch (error) {
-      console.error('Error marking all notifications as read:', error);
+      console.error('[Notifications] ❌ Error marking all notifications as read:', error);
     }
   };
 
@@ -129,14 +184,21 @@ export default function NotificationsScreen() {
     if (!user) return;
     
     try {
+      console.log('[Notifications] 🗑️ Deleting notification:', notificationId);
       const response = await notificationsApi.delete(notificationId);
+      console.log('[Notifications] 🗑️ Delete response:', response.status);
+      
       if (response.status === 'success') {
-        setNotifications(prev => prev.filter(n => n.id.toString() !== notificationId));
+        setNotifications(prev => {
+          const filtered = prev.filter(n => n.id.toString() !== notificationId);
+          console.log('[Notifications] ✅ Notification deleted. Remaining count:', filtered.length);
+          return filtered;
+        });
         // Refresh badge count
         refreshCount();
       }
     } catch (error) {
-      console.error('Error deleting notification:', error);
+      console.error('[Notifications] ❌ Error deleting notification:', error);
     }
   };
 
@@ -144,14 +206,21 @@ export default function NotificationsScreen() {
     if (!user) return;
     
     try {
+      console.log('[Notifications] 🗑️ Deleting all notifications');
       const response = await notificationsApi.deleteAll();
+      console.log('[Notifications] 🗑️ Delete all response:', {
+        status: response.status,
+        count: response.data?.count,
+      });
+      
       if (response.status === 'success') {
         setNotifications([]);
+        console.log('[Notifications] ✅ All notifications deleted');
         // Refresh badge count
         refreshCount();
       }
     } catch (error) {
-      console.error('Error deleting all notifications:', error);
+      console.error('[Notifications] ❌ Error deleting all notifications:', error);
     }
   };
 
@@ -166,16 +235,29 @@ export default function NotificationsScreen() {
     const lowerMessage = (message || '').toLowerCase();
     
     switch (type) {
+      // Core notification types from API documentation
       case 'comment':
         return { name: 'chat-bubble', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)' };
+      case 'like':
+        return { name: 'favorite', color: '#ff2d55', bg: 'rgba(255, 45, 85, 0.15)' };
       case 'follow':
         return { name: 'person-add', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
-      case 'subscription':
-        return { name: 'subscriptions', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
+      
+      // Challenge notification types
+      case 'challenge_approved':
+        return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
+      case 'challenge_rejected':
+        return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      
+      // Post status notification types
+      case 'post_status_update':
+        return { name: 'info', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
       case 'post_approved':
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'post_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      case 'post_review':
+        return { name: 'gavel', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
       case 'post_flagged':
         return { name: 'flag', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' };
       case 'post_unfrozen':
@@ -186,11 +268,25 @@ export default function NotificationsScreen() {
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'appeal_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      
+      // View milestone notification
+      case 'view_milestone':
+        return { name: 'trending-up', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
+      
+      // Comment report (admin only)
+      case 'comment_report':
+        return { name: 'report', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      
+      // Legacy/other types
+      case 'subscription':
+        return { name: 'subscriptions', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
       case 'post_featured':
         return { name: 'star', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
       case 'broadcast':
         return { name: 'campaign', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
+      
       default:
+        // Fallback: check message content for like notifications
         if (lowerMessage.includes('liked')) {
           return { name: 'favorite', color: '#ff2d55', bg: 'rgba(255, 45, 85, 0.15)' };
         }
@@ -218,13 +314,71 @@ export default function NotificationsScreen() {
   };
 
   const handleNotificationPress = (item: Notification) => {
-    // Navigate based on notification type per NOTIFICATIONS&REPORTING.md
+    console.log('[Notifications] 👆 Notification pressed:', {
+      id: item.id,
+      type: item.type,
+      isRead: item.isRead,
+      metadata: item.metadata,
+      related_post_id: item.related_post_id,
+      related_user_id: item.related_user_id,
+    });
+    
+    // Mark as read when pressed
+    if (!item.isRead) {
+      console.log('[Notifications] 📝 Marking notification as read:', item.id);
+      notificationsApi.markAsRead(item.id.toString())
+        .then((response) => {
+          console.log('[Notifications] 📝 Mark as read response:', response.status);
+        })
+        .catch((error) => {
+          console.error('[Notifications] ❌ Error marking as read:', error);
+        });
+      setNotifications(prev =>
+        prev.map(n => n.id === item.id ? { ...n, isRead: true } : n)
+      );
+      refreshCount();
+    }
+
+    // Navigate based on notification type per NOTIFICATIONS_API_REVIEWED.md
+    // Use metadata fields first, then fallback to related_* fields
+    const postId = item.metadata?.postId || item.related_post_id;
+    const challengeId = item.metadata?.challengeId;
+    
+    console.log('[Notifications] 🧭 Navigation data:', {
+      type: item.type,
+      postId,
+      challengeId,
+      related_user_id: item.related_user_id,
+    });
+    
     switch (item.type) {
+      // Post-related notifications - navigate to post
+      case 'comment':
+      case 'like':
+      case 'post_approved':
+      case 'post_rejected':
+      case 'post_status_update':
+      case 'post_review':
+      case 'view_milestone':
+        if (postId) {
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: postId }
+          });
+        } else if (user?.id) {
+          // Fallback to user profile if no post ID
+          router.push({
+            pathname: '/user/[id]',
+            params: { id: user.id }
+          });
+        }
+        break;
+      
+      // Post flagging/appeals - navigate to user's posts
       case 'post_flagged':
       case 'appeal_approved':
       case 'appeal_rejected':
       case 'post_unfrozen':
-        // Navigate to user's posts screen (profile)
         if (user?.id) {
           router.push({
             pathname: '/user/[id]',
@@ -233,18 +387,8 @@ export default function NotificationsScreen() {
         }
         break;
       
-      case 'comment':
-        // Navigate to post detail
-        if (item.related_post_id) {
-          router.push({
-            pathname: '/post/[id]',
-            params: { id: item.related_post_id }
-          });
-        }
-        break;
-      
+      // Follow notifications - navigate to user profile
       case 'follow':
-        // Navigate to user profile
         if (item.related_user_id) {
           router.push({
             pathname: '/user/[id]',
@@ -253,12 +397,38 @@ export default function NotificationsScreen() {
         }
         break;
       
-      default:
-        // Default navigation based on related data
-        if (item.related_post_id) {
+      // Challenge notifications - navigate to challenge
+      case 'challenge_approved':
+      case 'challenge_rejected':
+        if (challengeId) {
+          router.push({
+            pathname: '/challenges/[id]',
+            params: { id: challengeId }
+          });
+        }
+        break;
+      
+      // Comment report (admin) - navigate to post
+      case 'comment_report':
+        if (postId) {
           router.push({
             pathname: '/post/[id]',
-            params: { id: item.related_post_id }
+            params: { id: postId }
+          });
+        }
+        break;
+      
+      default:
+        // Default navigation based on available data
+        if (postId) {
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: postId }
+          });
+        } else if (challengeId) {
+          router.push({
+            pathname: '/challenges/[id]',
+            params: { id: challengeId }
           });
         } else if (item.related_user_id) {
           router.push({

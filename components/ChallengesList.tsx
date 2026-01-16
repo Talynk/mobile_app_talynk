@@ -13,6 +13,7 @@ import { Feather } from '@expo/vector-icons';
 import { challengesApi } from '@/lib/api';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
+import { Avatar } from './Avatar';
 
 interface Challenge {
     id: string;
@@ -42,13 +43,17 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
 
     const fetchChallenges = async () => {
         try {
-            // Fetch active/approved challenges
+            // Fetch active challenges (includes approved status automatically)
             const activeResponse = await challengesApi.getAll('active');
             let activeChallenges: Challenge[] = [];
             
             if (activeResponse.status === 'success') {
                 const data = activeResponse.data?.challenges || activeResponse.data || [];
                 activeChallenges = Array.isArray(data) ? data : [];
+                // Ensure we include challenges with 'approved' status as active
+                activeChallenges = activeChallenges.filter((ch: any) => 
+                    ch.status === 'active' || ch.status === 'approved'
+                );
             }
 
             // Also fetch pending challenges created by the current user
@@ -106,60 +111,164 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
         fetchChallenges();
     };
 
-    const renderChallengeItem = ({ item }: { item: Challenge }) => (
-        <TouchableOpacity
-            style={styles.card}
-            onPress={() => {
-                // Navigate to challenge details (to be implemented)
-                // router.push(`/challenge/${item.id}`);
-            }}
-        >
-            <View style={styles.cardHeader}>
-                <View style={styles.iconContainer}>
-                    <Feather name="award" size={24} color="#60a5fa" />
-                </View>
-                <View style={styles.headerText}>
-                    <Text style={styles.title}>{item.name}</Text>
-                    <Text style={styles.organizer}>by {item.organizer_name}</Text>
-                </View>
-                <View style={styles.badgesContainer}>
-                    {item.status === 'pending' && (
-                        <View style={styles.pendingBadge}>
-                            <Feather name="clock" size={12} color="#fff" />
-                            <Text style={styles.pendingText}>Pending</Text>
+    const getChallengeStatus = (challenge: any) => {
+        // Use is_currently_active field from API if available
+        if (challenge.is_currently_active !== undefined) {
+            if (challenge.is_currently_active) {
+                return { label: 'Active', color: '#10b981' };
+            } else {
+                const now = new Date();
+                const startDate = new Date(challenge.start_date);
+                const endDate = new Date(challenge.end_date);
+                
+                if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
+                if (now > endDate) return { label: 'Ended', color: '#666' };
+                return { label: 'Inactive', color: '#666' };
+            }
+        }
+        
+        // Fallback to date-based logic
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+        
+        if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
+        if (now > endDate) return { label: 'Ended', color: '#666' };
+        return { label: 'Active', color: '#10b981' };
+    };
+
+    const getDateInfo = (challenge: any) => {
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+        
+        if (now >= startDate && now <= endDate) {
+            return {
+                label: 'Started on',
+                date: startDate,
+                showEndDate: true,
+                endDate: endDate,
+            };
+        } else if (now < startDate) {
+            return {
+                label: 'Starts on',
+                date: startDate,
+                showEndDate: true,
+                endDate: endDate,
+            };
+        } else {
+            return {
+                label: 'Ended on',
+                date: endDate,
+                showEndDate: false,
+                endDate: endDate,
+            };
+        }
+    };
+
+    const formatDate = (dateString: string) => {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric',
+            year: 'numeric'
+        });
+    };
+
+    const renderChallengeItem = ({ item }: { item: Challenge }) => {
+        const status = getChallengeStatus(item);
+        const dateInfo = getDateInfo(item);
+        const organizer = (item as any).organizer || {};
+        const organizerName = organizer.display_name || organizer.username || item.organizer_name || 'Unknown';
+        const organizerUsername = organizer.username || '';
+        const participantCount = (item as any)._count?.participants || item.participants_count || 0;
+        const postCount = (item as any)._count?.posts || item.posts_count || 0;
+        
+        return (
+            <TouchableOpacity
+                style={styles.card}
+                onPress={() => {
+                    const { router } = require('expo-router');
+                    router.push({
+                        pathname: '/challenges/[id]',
+                        params: { id: item.id }
+                    });
+                }}
+            >
+                <View style={styles.cardHeader}>
+                    <View style={styles.headerContent}>
+                        <View style={styles.iconContainer}>
+                            <Feather name="award" size={24} color="#60a5fa" />
                         </View>
-                    )}
-                {item.has_rewards && (
-                    <View style={styles.rewardBadge}>
-                        <Feather name="gift" size={12} color="#fff" />
-                        <Text style={styles.rewardText}>Rewards</Text>
+                        <View style={styles.headerText}>
+                            <Text style={styles.title}>{item.name}</Text>
+                            {(organizer.id || item.organizer_name) && (
+                                <View style={styles.organizerRow}>
+                                    <Avatar
+                                        user={organizer.id ? organizer : { profile_picture: null, username: item.organizer_name }}
+                                        size={20}
+                                        style={styles.organizerAvatar}
+                                    />
+                                    <Text style={styles.organizer}>
+                                        {organizerName}
+                                        {organizerUsername && ` @${organizerUsername}`}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
                     </View>
-                )}
+                    <View style={styles.badgesContainer}>
+                        <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
+                            <Text style={styles.statusText}>{status.label}</Text>
+                        </View>
+                        {item.status === 'pending' && (
+                            <View style={styles.pendingBadge}>
+                                <Feather name="clock" size={12} color="#fff" />
+                                <Text style={styles.pendingText}>Pending</Text>
+                            </View>
+                        )}
+                        {item.has_rewards && (
+                            <View style={styles.rewardBadge}>
+                                <Feather name="gift" size={12} color="#fff" />
+                                <Text style={styles.rewardText}>
+                                    {item.rewards || 'Rewards'}
+                                </Text>
+                            </View>
+                        )}
+                    </View>
                 </View>
-            </View>
 
-            <Text style={styles.description} numberOfLines={2}>
-                {item.description}
-            </Text>
-
-            <View style={styles.footer}>
-                <View style={styles.stat}>
-                    <Feather name="users" size={14} color="#666" />
-                    <Text style={styles.statText}>{item.participants_count || 0} joined</Text>
-                </View>
-                <View style={styles.stat}>
-                    <Feather name="image" size={14} color="#666" />
-                    <Text style={styles.statText}>{item.posts_count || 0} posts</Text>
-                </View>
-                <View style={styles.dateContainer}>
-                    <Feather name="clock" size={14} color="#666" />
-                    <Text style={styles.dateText}>
-                        Ends {new Date(item.end_date).toLocaleDateString()}
+                {item.description && (
+                    <Text style={styles.description} numberOfLines={3}>
+                        {item.description}
                     </Text>
+                )}
+
+                <View style={styles.footer}>
+                    <View style={styles.stat}>
+                        <Feather name="users" size={14} color="#666" />
+                        <Text style={styles.statText}>{participantCount} {participantCount === 1 ? 'participant' : 'participants'}</Text>
+                    </View>
+                    <View style={styles.stat}>
+                        <Feather name="image" size={14} color="#666" />
+                        <Text style={styles.statText}>{postCount} {postCount === 1 ? 'post' : 'posts'}</Text>
+                    </View>
                 </View>
-            </View>
-        </TouchableOpacity>
-    );
+                
+                <View style={styles.dateContainer}>
+                    <Feather name="calendar" size={14} color="#666" />
+                    <Text style={styles.dateText}>
+                        {dateInfo.label} {formatDate(dateInfo.date.toISOString())}
+                    </Text>
+                    {dateInfo.showEndDate && (
+                        <Text style={styles.dateText}>
+                            {' • '}Ends {formatDate(dateInfo.endDate.toISOString())}
+                        </Text>
+                    )}
+                </View>
+            </TouchableOpacity>
+        );
+    };
 
     if (loading) {
         return (
@@ -245,8 +354,14 @@ const styles = StyleSheet.create({
     },
     cardHeader: {
         flexDirection: 'row',
-        alignItems: 'center',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
         marginBottom: 12,
+    },
+    headerContent: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
     },
     iconContainer: {
         width: 40,
@@ -265,6 +380,17 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         marginBottom: 2,
+    },
+    organizerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    organizerAvatar: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        marginRight: 6,
     },
     organizer: {
         color: '#666',
@@ -299,6 +425,16 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     rewardText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    statusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    statusText: {
         color: '#fff',
         fontSize: 10,
         fontWeight: '700',

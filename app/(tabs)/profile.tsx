@@ -29,25 +29,11 @@ import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/sli
 import { LinearGradient } from 'expo-linear-gradient';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { getFileUrl, getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { Avatar } from '@/components/Avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
 
-// Default avatar component
-const DefaultAvatar = ({ size = 100, name = '' }: { size?: number; name?: string }) => {
-  const initials = name
-    ? name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    : '?';
-
-  return (
-    <LinearGradient
-      colors={['#3b82f6', '#8b5cf6']}
-      style={[styles.defaultAvatar, { width: size, height: size, borderRadius: size / 2 }]}
-    >
-      <Text style={[styles.defaultAvatarText, { fontSize: size * 0.4 }]}>{initials}</Text>
-    </LinearGradient>
-  );
-};
 
 // Video thumbnail component with teaser playback
 interface VideoThumbnailProps {
@@ -1068,14 +1054,11 @@ export default function ProfileScreen() {
       >
         {/* Profile Info */}
         <View style={styles.profileSection}>
-          {getProfilePictureUrl(profile) ? (
-            <Image
-              source={{ uri: getProfilePictureUrl(profile)! }}
-              style={styles.avatar}
-            />
-          ) : (
-            <DefaultAvatar size={100} name={profile.username || profile.name || ''} />
-          )}
+          <Avatar
+            user={profile}
+            size={100}
+            style={styles.avatar}
+          />
           <Text style={styles.username}>@{profile.username}</Text>
           {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
 
@@ -1305,8 +1288,9 @@ export default function ProfileScreen() {
                       }
                     }}
                   >
-                    <Image
-                      source={{ uri: item.user?.profile_picture || 'https://via.placeholder.com/50' }}
+                    <Avatar
+                      user={item.user}
+                      size={50}
                       style={styles.modalUserAvatar}
                     />
                     <View style={styles.modalUserInfo}>
@@ -1368,8 +1352,9 @@ export default function ProfileScreen() {
                       }
                     }}
                   >
-                    <Image
-                      source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
+                    <Avatar
+                      user={item}
+                      size={50}
                       style={styles.modalUserAvatar}
                     />
                     <View style={styles.modalUserInfo}>

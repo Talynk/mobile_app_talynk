@@ -19,6 +19,7 @@ import { Video, ResizeMode } from 'expo-av';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
+import { Avatar } from '@/components/Avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -179,8 +180,9 @@ export default function SearchScreen() {
           params: { id: item.id }
         })}
       >
-        <Image 
-          source={{ uri: item.profile_picture || 'https://via.placeholder.com/48' }}
+        <Avatar
+          user={item}
+          size={48}
           style={styles.userAvatar}
         />
         <View style={styles.userInfo}>

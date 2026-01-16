@@ -15,6 +15,7 @@ import { userApi, followsApi } from '@/lib/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Avatar } from '@/components/Avatar';
 
 const COLORS = {
   light: {
@@ -224,8 +225,9 @@ export default function FollowersScreen() {
         onPress={() => navigateToProfile(item.id)}
         activeOpacity={0.7}
       >
-        <Image
-          source={{ uri: item.profile_picture || 'https://via.placeholder.com/50' }}
+        <Avatar
+          user={item}
+          size={50}
           style={styles.userAvatar}
         />
         <View style={styles.userInfo}>

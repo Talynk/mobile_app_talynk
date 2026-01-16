@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
-import { postsApi } from '@/lib/api';
+import { postsApi, challengesApi } from '@/lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { uploadNotificationService } from '@/lib/notification-service';
@@ -69,6 +69,7 @@ const COLORS = {
 };
 
 export default function CreatePostScreen() {
+  const params = useLocalSearchParams();
   const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
@@ -109,6 +110,9 @@ export default function CreatePostScreen() {
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
+  const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [loadingChallenges, setLoadingChallenges] = useState(false);
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -929,6 +933,11 @@ export default function CreatePostScreen() {
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
       formData.append('status', status); // Add status (pending or draft)
+      
+      // Add challenge ID if a challenge is selected
+      if (selectedChallengeId) {
+        formData.append('challenge_id', selectedChallengeId);
+      }
       
       formData.append('file', {
         uri: mediaUri,

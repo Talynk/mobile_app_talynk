@@ -16,6 +16,7 @@ import { useAuth } from '@/lib/auth-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Avatar } from '@/components/Avatar';
 
 const COLORS = {
   light: {
@@ -84,6 +85,13 @@ export default function ChallengesScreen() {
           challengesList = response.data.map((item: any) => item.challenge || item);
         }
         
+        // When showing 'all' tab, ensure we include both 'active' and 'approved' statuses
+        if (activeTab === 'all') {
+          challengesList = challengesList.filter((ch: any) => 
+            ch.status === 'active' || ch.status === 'approved'
+          );
+        }
+        
         setChallenges(challengesList);
       } else {
         setError(response?.message || 'Failed to fetch challenges');
@@ -121,6 +129,22 @@ export default function ChallengesScreen() {
   };
 
   const getChallengeStatus = (challenge: any) => {
+    // Use is_currently_active field from API if available
+    if (challenge.is_currently_active !== undefined) {
+      if (challenge.is_currently_active) {
+        return { label: 'Active', color: C.success };
+      } else {
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+        
+        if (now < startDate) return { label: 'Upcoming', color: C.warning };
+        if (now > endDate) return { label: 'Ended', color: C.textSecondary };
+        return { label: 'Inactive', color: C.textSecondary };
+      }
+    }
+    
+    // Fallback to date-based logic if is_currently_active not available
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
@@ -130,10 +154,46 @@ export default function ChallengesScreen() {
     return { label: 'Active', color: C.success };
   };
 
+  const getDateInfo = (challenge: any) => {
+    const now = new Date();
+    const startDate = new Date(challenge.start_date);
+    const endDate = new Date(challenge.end_date);
+    
+    if (now >= startDate && now <= endDate) {
+      // Challenge has started
+      return {
+        label: 'Started on',
+        date: startDate,
+        showEndDate: true,
+        endDate: endDate,
+      };
+    } else if (now < startDate) {
+      // Challenge hasn't started yet
+      return {
+        label: 'Starts on',
+        date: startDate,
+        showEndDate: true,
+        endDate: endDate,
+      };
+    } else {
+      // Challenge has ended
+      return {
+        label: 'Ended on',
+        date: endDate,
+        showEndDate: false,
+        endDate: endDate,
+      };
+    }
+  };
+
   const renderChallenge = ({ item }: { item: any }) => {
     const status = getChallengeStatus(item);
+    const dateInfo = getDateInfo(item);
     const participantCount = item._count?.participants || item.participant_count || 0;
     const postCount = item._count?.posts || item.post_count || 0;
+    const organizer = item.organizer || {};
+    const organizerName = organizer.display_name || organizer.username || item.organizer_name || 'Unknown';
+    const organizerUsername = organizer.username || '';
     
     return (
       <TouchableOpacity
@@ -153,7 +213,7 @@ export default function ChallengesScreen() {
           {item.has_rewards && (
             <View style={styles.rewardBadge}>
               <MaterialIcons name="emoji-events" size={14} color="#fff" />
-              <Text style={styles.rewardBadgeText}>Rewards</Text>
+              <Text style={styles.rewardBadgeText}>Rewards: {item.rewards || 'Available'}</Text>
             </View>
           )}
           <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
@@ -167,7 +227,7 @@ export default function ChallengesScreen() {
           </Text>
           
           {item.description && (
-            <Text style={[styles.challengeDescription, { color: C.textSecondary }]} numberOfLines={2}>
+            <Text style={[styles.challengeDescription, { color: C.textSecondary }]} numberOfLines={3}>
               {item.description}
             </Text>
           )}
@@ -176,34 +236,62 @@ export default function ChallengesScreen() {
             <View style={styles.metaItem}>
               <MaterialIcons name="people" size={16} color={C.textSecondary} />
               <Text style={[styles.metaText, { color: C.textSecondary }]}>
-                {participantCount} participants
+                {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
               </Text>
             </View>
             <View style={styles.metaItem}>
               <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
               <Text style={[styles.metaText, { color: C.textSecondary }]}>
-                {postCount} posts
+                {postCount} {postCount === 1 ? 'post' : 'posts'}
               </Text>
             </View>
           </View>
           
+          {/* Date Information */}
           <View style={styles.dateRow}>
             <MaterialIcons name="event" size={14} color={C.textSecondary} />
-            <Text style={[styles.dateText, { color: C.textSecondary }]}>
-              {formatDate(item.start_date)} - {formatDate(item.end_date)}
-            </Text>
+            <View style={styles.dateInfo}>
+              <Text style={[styles.dateLabel, { color: C.textSecondary }]}>
+                {dateInfo.label} {formatDate(dateInfo.date.toISOString())}
+              </Text>
+              {dateInfo.showEndDate && (
+                <Text style={[styles.dateText, { color: C.textSecondary }]}>
+                  Ends {formatDate(dateInfo.endDate.toISOString())}
+                </Text>
+              )}
+            </View>
           </View>
           
-          {item.organizer && (
-            <View style={styles.organizerRow}>
-              <Image
-                source={{ uri: item.organizer.profile_picture || 'https://via.placeholder.com/24' }}
+          {/* Organizer Information */}
+          {(item.organizer || item.organizer_name) && (
+            <TouchableOpacity
+              style={styles.organizerRow}
+              onPress={() => {
+                if (organizer.id) {
+                  router.push({
+                    pathname: '/user/[id]',
+                    params: { id: organizer.id }
+                  });
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Avatar
+                user={item.organizer || { profile_picture: null, username: item.organizer_name }}
+                size={28}
                 style={styles.organizerAvatar}
               />
-              <Text style={[styles.organizerText, { color: C.textSecondary }]}>
-                by {item.organizer.username || item.organizer_name}
-              </Text>
-            </View>
+              <View style={styles.organizerInfo}>
+                <Text style={[styles.organizerName, { color: C.text }]} numberOfLines={1}>
+                  {organizerName}
+                </Text>
+                {organizerUsername && (
+                  <Text style={[styles.organizerUsername, { color: C.textSecondary }]} numberOfLines={1}>
+                    @{organizerUsername}
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
           )}
         </View>
       </TouchableOpacity>

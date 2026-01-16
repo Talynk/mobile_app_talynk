@@ -338,7 +338,23 @@ export const postsApi = {
         data: { posts: [], pagination: {}, filters: {} },
       };
     } catch (error: any) {
-      // Log the actual error for debugging
+      const { isNetworkError, getErrorMessage } = require('./utils/network-error-handler');
+      
+      const isNetwork = isNetworkError(error);
+      const errorMessage = getErrorMessage(error, 'Failed to fetch following posts');
+      
+      // Handle network errors gracefully - return empty result instead of error
+      if (isNetwork) {
+        console.warn('⚠️ Network error fetching following posts:', errorMessage);
+        // Return empty result for network errors so UI doesn't break
+        return {
+          status: 'success',
+          message: 'Unable to load posts. Please check your connection.',
+          data: { posts: [], pagination: {}, filters: {} },
+        };
+      }
+      
+      // Log non-network errors for debugging
       console.error('❌ Error fetching following posts:', {
         message: error.message,
         status: error.response?.status,
@@ -367,7 +383,7 @@ export const postsApi = {
       
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to fetch following posts',
+        message: errorMessage,
         data: { posts: [], pagination: {}, filters: {} },
       };
     }
@@ -937,9 +953,18 @@ export const notificationsApi = {
    */
   getAll: async (): Promise<ApiResponse<{ notifications: Notification[] }>> => {
     try {
+      console.log('[Notifications API] 📥 GET /api/users/notifications');
       const response = await apiClient.get('/api/users/notifications');
+      console.log('[Notifications API] ✅ Response received:', {
+        status: response.data?.status,
+        count: response.data?.data?.notifications?.length || 0,
+      });
       return response.data;
     } catch (error: any) {
+      console.error('[Notifications API] ❌ Error fetching notifications:', {
+        status: error.response?.status,
+        message: error.response?.data?.message || error.message,
+      });
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch notifications',
@@ -966,27 +991,67 @@ export const notificationsApi = {
   },
 
   /**
+   * Mark a single notification as read
+   * PUT /api/users/notifications/:notificationId/read
+   */
+  markAsRead: async (notificationId: string): Promise<ApiResponse<{ notification: Notification }>> => {
+    try {
+      console.log('[Notifications API] 📝 PUT /api/users/notifications/' + notificationId + '/read');
+      const response = await apiClient.put(`/api/users/notifications/${notificationId}/read`);
+      console.log('[Notifications API] ✅ Mark as read response:', response.data?.status);
+      return response.data;
+    } catch (error: any) {
+      console.error('[Notifications API] ❌ Error marking notification as read:', {
+        notificationId,
+        status: error.response?.status,
+        message: error.response?.data?.message || error.message,
+      });
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to mark notification as read',
+        data: { notification: {} as Notification },
+      };
+    }
+  },
+
+  /**
    * Mark all notifications as read
    * PUT /api/users/notifications/read-all
    */
-  markAllAsRead: async (): Promise<ApiResponse<any>> => {
+  markAllAsRead: async (): Promise<ApiResponse<{ count?: number }>> => {
     try {
+      console.log('[Notifications API] 📝 PUT /api/users/notifications/read-all');
       const response = await apiClient.put('/api/users/notifications/read-all');
+      console.log('[Notifications API] ✅ Mark all as read response:', {
+        status: response.data?.status,
+        count: response.data?.data?.count,
+      });
       return response.data;
     } catch (error: any) {
+      console.error('[Notifications API] ❌ Error marking all as read:', {
+        status: error.response?.status,
+        message: error.response?.data?.message || error.message,
+      });
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to mark all notifications as read',
-        data: {},
+        data: { count: 0 },
       };
     }
   },
 
   delete: async (notificationId: string): Promise<ApiResponse<null>> => {
     try {
+      console.log('[Notifications API] 🗑️ DELETE /api/users/notifications/' + notificationId);
       const response = await apiClient.delete(`/api/users/notifications/${notificationId}`);
+      console.log('[Notifications API] ✅ Delete response:', response.data?.status);
       return response.data;
     } catch (error: any) {
+      console.error('[Notifications API] ❌ Error deleting notification:', {
+        notificationId,
+        status: error.response?.status,
+        message: error.response?.data?.message || error.message,
+      });
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to delete notification',
@@ -995,15 +1060,24 @@ export const notificationsApi = {
     }
   },
 
-  deleteAll: async (): Promise<ApiResponse<null>> => {
+  deleteAll: async (): Promise<ApiResponse<{ count?: number }>> => {
     try {
+      console.log('[Notifications API] 🗑️ DELETE /api/users/notifications');
       const response = await apiClient.delete('/api/users/notifications');
+      console.log('[Notifications API] ✅ Delete all response:', {
+        status: response.data?.status,
+        count: response.data?.data?.count,
+      });
       return response.data;
     } catch (error: any) {
+      console.error('[Notifications API] ❌ Error deleting all notifications:', {
+        status: error.response?.status,
+        message: error.response?.data?.message || error.message,
+      });
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to delete all notifications',
-        data: null,
+        data: { count: 0 },
       };
     }
   },
@@ -1013,7 +1087,69 @@ export const notificationsApi = {
 export const challengesApi = {
   getAll: async (status = 'active'): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.get(`/api/challenges?status=${status}`);
+      // When fetching 'active' challenges, also include 'approved' status
+      // because approved challenges should be treated as active
+      let statusParam = status;
+      if (status === 'active') {
+        // Fetch both active and approved challenges
+        // Handle errors gracefully - if one fails, still return the other
+        let activeChallenges: any[] = [];
+        let approvedChallenges: any[] = [];
+        let pagination: any = {};
+        
+        try {
+          const response = await apiClient.get(`/api/challenges?status=active`);
+          const apiResponse = response.data;
+          if (apiResponse?.status === 'success' && apiResponse?.data) {
+            activeChallenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+            pagination = apiResponse.pagination || {};
+          }
+        } catch (error: any) {
+          console.warn('⚠️ Error fetching active challenges:', error.message);
+        }
+        
+        try {
+          const approvedResponse = await apiClient.get(`/api/challenges?status=approved`);
+          const approvedApiResponse = approvedResponse.data;
+          if (approvedApiResponse?.status === 'success' && approvedApiResponse?.data) {
+            approvedChallenges = Array.isArray(approvedApiResponse.data) ? approvedApiResponse.data : [];
+            // Use approved pagination if active didn't have one
+            if (!pagination || Object.keys(pagination).length === 0) {
+              pagination = approvedApiResponse.pagination || {};
+            }
+          }
+        } catch (error: any) {
+          console.warn('⚠️ Error fetching approved challenges:', error.message);
+        }
+        
+        // Combine and remove duplicates
+        const allChallenges = [...activeChallenges, ...approvedChallenges];
+        const uniqueChallenges = allChallenges.filter((challenge, index, self) =>
+          index === self.findIndex((c) => c.id === challenge.id)
+        );
+        
+        // Return success if we got any challenges, even if one request failed
+        if (uniqueChallenges.length > 0 || (activeChallenges.length === 0 && approvedChallenges.length === 0)) {
+          return {
+            status: 'success',
+            message: 'Challenges fetched successfully',
+            data: {
+              challenges: uniqueChallenges,
+              pagination: pagination
+            }
+          };
+        }
+        
+        // If both failed, return error
+        return {
+          status: 'error',
+          message: 'Failed to fetch challenges',
+          data: { challenges: [], pagination: {} },
+        };
+      }
+      
+      // For other statuses, fetch normally
+      const response = await apiClient.get(`/api/challenges?status=${statusParam}`);
       const apiResponse = response.data;
       
       // Backend returns: { status: 'success', data: [...], pagination: {...} }
@@ -1140,15 +1276,37 @@ export const challengesApi = {
     }
   },
 
-  getPosts: async (challengeId: string): Promise<ApiResponse<any>> => {
+  getPosts: async (challengeId: string, page = 1, limit = 20): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.get(`/api/challenges/${challengeId}/posts`);
-      return response.data;
+      const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
+      const apiResponse = response.data;
+      
+      // Backend returns: { status: 'success', data: [...], pagination: {...} }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const posts = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+        // Extract post from challengePost wrapper if needed
+        const normalizedPosts = posts.map((item: any) => item.post || item);
+        
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Challenge posts fetched successfully',
+          data: {
+            posts: normalizedPosts,
+            pagination: apiResponse.pagination || {}
+          }
+        };
+      }
+      
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch challenge posts',
+        data: { posts: [], pagination: {} },
+      };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch challenge posts',
-        data: [],
+        data: { posts: [], pagination: {} },
       };
     }
   },
@@ -1433,12 +1591,27 @@ export const likesApi = {
         data: response.data.data || {},
       };
     } catch (error: any) {
-      console.error('Batch check like status API error:', error);
-      return {
-        status: 'error',
-        message: error.response?.data?.message || 'Failed to check like statuses',
-        data: {},
-      };
+      const { isNetworkError, getErrorMessage } = require('./utils/network-error-handler');
+      
+      const isNetwork = isNetworkError(error);
+      const errorMessage = getErrorMessage(error, 'Failed to check like statuses');
+      
+      if (isNetwork) {
+        console.warn('⚠️ Network error checking like status:', errorMessage);
+        // Return empty data for network errors - UI will work with cached/default values
+        return {
+          status: 'error',
+          message: errorMessage,
+          data: {},
+        };
+      } else {
+        console.error('❌ Batch check like status API error:', error);
+        return {
+          status: 'error',
+          message: errorMessage,
+          data: {},
+        };
+      }
     }
   },
 

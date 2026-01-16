@@ -21,23 +21,13 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode } from 'expo-av';
+import { Avatar } from '@/components/Avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 const COLORS = {
-  light: {
-    background: '#f5f5f5',
-    card: '#fff',
-    border: '#e5e7eb',
-    text: '#222',
-    textSecondary: '#666',
-    primary: '#007AFF',
-    success: '#10b981',
-    warning: '#f59e0b',
-    error: '#ef4444',
-  },
   dark: {
-    background: '#0a0a0a',
+    background: '#000000',
     card: '#1a1a1a',
     border: '#2a2a2a',
     text: '#f3f4f6',
@@ -46,14 +36,17 @@ const COLORS = {
     success: '#34d399',
     warning: '#fbbf24',
     error: '#f87171',
+    inputBg: '#232326',
+    inputBorder: '#27272a',
+    buttonBg: '#60a5fa',
+    buttonText: '#fff',
   },
 };
 
 export default function ChallengeDetailScreen() {
   const { id } = useLocalSearchParams();
   const { user, isAuthenticated } = useAuth();
-  const colorScheme = useColorScheme() || 'dark';
-  const C = COLORS[colorScheme];
+  const C = COLORS.dark; // Always use dark mode
   
   const [challenge, setChallenge] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
@@ -94,12 +87,10 @@ export default function ChallengeDetailScreen() {
     setPostsLoading(true);
     
     try {
-      const response = await challengesApi.getPosts(id as string);
+      const response = await challengesApi.getPosts(id as string, 1, 20);
       
       if (response?.status === 'success') {
-        const postsList = Array.isArray(response.data) 
-          ? response.data 
-          : response.data?.posts || [];
+        const postsList = response.data?.posts || [];
         // Extract post from challengePost wrapper if needed
         const normalizedPosts = postsList.map((item: any) => item.post || item);
         setPosts(normalizedPosts);
@@ -181,6 +172,22 @@ export default function ChallengeDetailScreen() {
   const getChallengeStatus = () => {
     if (!challenge) return { label: 'Unknown', color: C.textSecondary };
     
+    // Use is_currently_active field from API if available
+    if (challenge.is_currently_active !== undefined) {
+      if (challenge.is_currently_active) {
+        return { label: 'Active', color: C.success };
+      } else {
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+        
+        if (now < startDate) return { label: 'Upcoming', color: C.warning };
+        if (now > endDate) return { label: 'Ended', color: C.textSecondary };
+        return { label: 'Inactive', color: C.textSecondary };
+      }
+    }
+    
+    // Fallback to date-based logic
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
@@ -192,10 +199,48 @@ export default function ChallengeDetailScreen() {
 
   const isActive = () => {
     if (!challenge) return false;
+    
+    // Use is_currently_active field from API if available
+    if (challenge.is_currently_active !== undefined) {
+      return challenge.is_currently_active;
+    }
+    
+    // Fallback to date-based logic
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
     return now >= startDate && now <= endDate;
+  };
+
+  const getDateInfo = () => {
+    if (!challenge) return null;
+    
+    const now = new Date();
+    const startDate = new Date(challenge.start_date);
+    const endDate = new Date(challenge.end_date);
+    
+    if (now >= startDate && now <= endDate) {
+      return {
+        label: 'Started on',
+        date: startDate,
+        showEndDate: true,
+        endDate: endDate,
+      };
+    } else if (now < startDate) {
+      return {
+        label: 'Starts on',
+        date: startDate,
+        showEndDate: true,
+        endDate: endDate,
+      };
+    } else {
+      return {
+        label: 'Ended on',
+        date: endDate,
+        showEndDate: false,
+        endDate: endDate,
+      };
+    }
   };
 
   const isOrganizer = challenge?.organizer_id === user?.id;
@@ -209,8 +254,12 @@ export default function ChallengeDetailScreen() {
       <TouchableOpacity
         style={[styles.postCard, { backgroundColor: C.card, borderColor: C.border }]}
         onPress={() => router.push({
-          pathname: '/post/[id]',
-          params: { id: item.id }
+          pathname: '/challenges/[id]/posts',
+          params: { 
+            id: id as string,
+            initialPostId: item.id,
+            initialIndex: index.toString()
+          }
         })}
         activeOpacity={0.8}
       >
@@ -242,8 +291,9 @@ export default function ChallengeDetailScreen() {
           
           {item.user && (
             <View style={styles.postUser}>
-              <Image
-                source={{ uri: item.user.profile_picture || 'https://via.placeholder.com/20' }}
+              <Avatar
+                user={item.user}
+                size={20}
                 style={styles.postUserAvatar}
               />
               <Text style={[styles.postUsername, { color: C.textSecondary }]}>
@@ -377,7 +427,18 @@ export default function ChallengeDetailScreen() {
           <View style={styles.detailBlock}>
             <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Duration</Text>
             <Text style={[styles.detailText, { color: C.text }]}>
-              {formatDate(challenge.start_date)} - {formatDate(challenge.end_date)}
+              {(() => {
+                const dateInfo = getDateInfo();
+                if (!dateInfo) return null;
+                return (
+                  <>
+                    <Text>{dateInfo.label} {formatDate(dateInfo.date.toISOString())}</Text>
+                    {dateInfo.showEndDate && (
+                      <Text> • Ends {formatDate(dateInfo.endDate.toISOString())}</Text>
+                    )}
+                  </>
+                );
+              })()}
             </Text>
           </View>
           
@@ -405,8 +466,9 @@ export default function ChallengeDetailScreen() {
                   params: { id: challenge.organizer.id }
                 })}
               >
-                <Image
-                  source={{ uri: challenge.organizer.profile_picture || 'https://via.placeholder.com/40' }}
+                <Avatar
+                  user={challenge.organizer}
+                  size={40}
                   style={styles.organizerAvatar}
                 />
                 <View>
@@ -425,7 +487,7 @@ export default function ChallengeDetailScreen() {
         {/* Action Buttons */}
         {isOrganizer ? (
           // Organizer view - show organizer-specific actions
-          <View style={[styles.actionsSection, { backgroundColor: C.card }]}>
+          <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             <View style={styles.organizerActions}>
               <TouchableOpacity
                 style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
@@ -466,20 +528,20 @@ export default function ChallengeDetailScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        ) : isActive() && (
+        ) : (
           // Non-organizer view - show join/create post buttons
-          <View style={[styles.actionsSection, { backgroundColor: C.card }]}>
+          <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
               <TouchableOpacity
                 style={[styles.joinButton, { backgroundColor: C.primary }]}
                 onPress={handleJoinChallenge}
-                disabled={joining}
+                disabled={joining || !isActive()}
               >
                 {joining ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <MaterialIcons name="add" size={20} color="#fff" />
+                    <MaterialIcons name="person-add" size={20} color="#fff" />
                     <Text style={styles.joinButtonText}>Join Challenge</Text>
                   </>
                 )}
@@ -575,8 +637,9 @@ export default function ChallengeDetailScreen() {
                         }
                       }}
                     >
-                      <Image
-                        source={{ uri: participantUser.profile_picture || 'https://via.placeholder.com/50' }}
+                      <Avatar
+                        user={participantUser}
+                        size={50}
                         style={styles.modalUserAvatar}
                       />
                       <View style={styles.modalUserInfo}>

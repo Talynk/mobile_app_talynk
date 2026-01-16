@@ -10,13 +10,13 @@ import {
   Platform,
   useColorScheme,
   ActivityIndicator,
-  Image,
   ScrollView,
   Dimensions,
   Modal,
 } from 'react-native';
 import { formatDistanceToNow } from 'date-fns';
 import { Surface, TextInput as PaperInput, Button, Divider } from 'react-native-paper';
+import { Avatar } from './Avatar';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -132,8 +132,9 @@ export default function CommentsOverlay({
     
     return (
     <View style={styles.commentItem}>
-      <Image
-          source={{ uri: commentUser.avatar || 'https://via.placeholder.com/32' }}
+      <Avatar
+        user={commentUser}
+        size={32}
         style={styles.commentAvatar}
       />
       <View style={styles.commentContent}>

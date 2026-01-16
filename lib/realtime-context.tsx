@@ -94,7 +94,19 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
           };
 
           const handleNewNotification = (update: NotificationUpdate) => {
-            notificationCallbacks.current.forEach(callback => callback(update));
+            console.log('[Realtime] 🔔 Handling new notification:', {
+              hasNotification: !!update.notification,
+              notificationId: update.notification?.id,
+              notificationType: update.notification?.type,
+              callbackCount: notificationCallbacks.current.size,
+            });
+            notificationCallbacks.current.forEach(callback => {
+              try {
+                callback(update);
+              } catch (error) {
+                console.error('[Realtime] ❌ Error in notification callback:', error);
+              }
+            });
           };
 
           const handleLikeUpdate = (update: LikeUpdate) => {

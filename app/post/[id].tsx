@@ -24,6 +24,7 @@ import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
 import { getPostMediaUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { Avatar } from '@/components/Avatar';
 
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -218,11 +219,6 @@ export default function PostDetailScreen() {
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
   
-  // Get avatar URL with validation
-  const getAvatarUrl = (user: any) => {
-    return getProfilePictureUrl(user) || 'https://via.placeholder.com/32';
-  };
-
   return (
     <KeyboardAvoidingView 
       style={styles.container}
@@ -236,8 +232,9 @@ export default function PostDetailScreen() {
         </TouchableOpacity>
         
         <View style={styles.headerUserInfo}>
-          <Image
-            source={{ uri: getAvatarUrl(post.user) }}
+          <Avatar
+            user={post.user}
+            size={32}
             style={styles.headerAvatar}
           />
           <Text style={styles.headerUsername}>@{post.user?.username || post.user?.name || 'unknown'}</Text>
@@ -261,9 +258,22 @@ export default function PostDetailScreen() {
           )}
         </View>
         
-        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerMenu}>
-          <Feather name="more-vertical" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Report Button - Directly visible */}
+          {user && user.id !== post.user?.id && (
+            <TouchableOpacity 
+              onPress={() => setReportModalVisible(true)} 
+              style={styles.reportButton}
+            >
+              <Feather name="flag" size={20} color="#ef4444" />
+            </TouchableOpacity>
+          )}
+          
+          {/* Menu Button */}
+          <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerMenu}>
+            <Feather name="more-vertical" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Media */}
@@ -276,11 +286,19 @@ export default function PostDetailScreen() {
                 style={styles.media}
                 resizeMode={ResizeMode.CONTAIN}
                 useNativeControls
-                shouldPlay
-                isLooping
+                shouldPlay={false}
+                isLooping={false}
+                isMuted={false}
               />
             ) : (
-              <Image source={{ uri: mediaUrl! }} style={styles.media} resizeMode="contain" />
+              <Image 
+                source={{ uri: mediaUrl! }} 
+                style={styles.media} 
+                resizeMode="contain"
+                onError={() => {
+                  console.error('[Post Detail] Failed to load image:', mediaUrl);
+                }}
+              />
             )}
           </View>
         ) : (
@@ -351,8 +369,9 @@ export default function PostDetailScreen() {
           {comments.length > 0 ? (
             comments.map((item, index) => (
               <View key={item.comment_id?.toString() || `comment-${index}`} style={styles.commentItem}>
-                <Image
-                  source={{ uri: getAvatarUrl(item.User || item.user) }}
+                <Avatar
+                  user={item.User || item.user}
+                  size={32}
                   style={styles.commentAvatar}
                 />
                 <View style={styles.commentContent}>
@@ -519,6 +538,18 @@ const styles = StyleSheet.create({
   followButtonText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reportButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   headerMenu: {
     padding: 8,
