@@ -442,12 +442,22 @@ export default function ChallengePostsScreen() {
           <View style={styles.postInfo}>
             {item.user && (
               <View style={styles.userSection}>
-                <Avatar user={item.user} size={44} style={styles.avatar} />
+                <Avatar 
+                  user={{
+                    ...item.user,
+                    // Ensure profile_picture is undefined if null, to satisfy Avatar type
+                    profile_picture: item.user.profile_picture ?? undefined, 
+                  }} 
+                  size={44} 
+                  style={styles.avatar} 
+                />
                 <View style={styles.userDetails}>
                   <Text style={styles.username}>{item.user.username || 'Unknown'}</Text>
-                  {item.user.display_name && (
-                    <Text style={styles.displayName}>{item.user.display_name}</Text>
+                  {/* Use name as display name fallback, because display_name does not exist */}
+                  {(item.user.name || item.user.username) && (
+                    <Text style={styles.displayName}>{item.user.name ?? item.user.username}</Text>
                   )}
+                  ){'}'}
                 </View>
               </View>
             )}
@@ -477,7 +487,9 @@ export default function ChallengePostsScreen() {
               </View>
               <View style={styles.statItem}>
                 <Feather name="message-circle" size={16} color={C.primary} />
-                <Text style={styles.statText}>{item.comments || 0}</Text>
+                <Text style={styles.statText}>
+                  {Array.isArray(item.comments) ? item.comments.length : (item.comments ?? 0)}
+                </Text>
               </View>
             </View>
           </View>
@@ -590,7 +602,6 @@ export default function ChallengePostsScreen() {
               <FullscreenPostViewer item={item} index={index} />
             )}
             keyExtractor={(item) => item.id}
-            vertical
             pagingEnabled
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={true}

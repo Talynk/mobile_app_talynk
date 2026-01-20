@@ -8,9 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
-  useColorScheme,
   Alert,
-  ScrollView,
   Dimensions,
   Modal,
   StatusBar,
@@ -29,7 +27,7 @@ import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth } = Dimensions.get('window');
-const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
+const POST_ITEM_SIZE = (screenWidth - 4) / 3;
 
 const COLORS = {
   dark: {
@@ -52,7 +50,7 @@ const COLORS = {
 export default function ChallengeDetailScreen() {
   const { id } = useLocalSearchParams();
   const { user, isAuthenticated } = useAuth();
-  const C = COLORS.dark; // Always use dark mode
+  const C = COLORS.dark;
   
   const [challenge, setChallenge] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
@@ -61,7 +59,6 @@ export default function ChallengeDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
-  const [activePostIndex, setActivePostIndex] = useState(0);
   const [participantsModalVisible, setParticipantsModalVisible] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
@@ -104,7 +101,6 @@ export default function ChallengeDetailScreen() {
       
       if (response?.status === 'success') {
         const postsList = response.data?.posts || [];
-        // Extract post from challengePost wrapper if needed
         const normalizedPosts = postsList.map((item: any) => item.post || item);
         setPosts(normalizedPosts);
       }
@@ -125,7 +121,6 @@ export default function ChallengeDetailScreen() {
       
       if (response?.status === 'success') {
         const participantsList = response.data || [];
-        // Handle both array and object with participants property
         const normalizedParticipants = Array.isArray(participantsList) 
           ? participantsList 
           : (participantsList.participants || []);
@@ -188,23 +183,14 @@ export default function ChallengeDetailScreen() {
     setJoining(true);
     
     try {
-      console.log('[Challenge] Joining challenge:', id);
       const response = await challengesApi.join(id as string);
-      console.log('[Challenge] Join response:', response);
       
       if (response?.status === 'success') {
         Alert.alert('Success', response.message || 'You have joined the challenge!', [
-          { text: 'OK', onPress: () => {
-            // Refresh challenge data to update is_participant status
-            fetchChallenge();
-            // Also refresh joined challenges in create screen if needed
-          }}
+          { text: 'OK', onPress: () => fetchChallenge() }
         ]);
       } else {
         const errorMessage = response?.message || 'Failed to join challenge';
-        console.error('[Challenge] Join failed:', errorMessage);
-        
-        // Handle specific error messages with user-friendly text
         let alertTitle = 'Cannot Join Challenge';
         let alertMessage = errorMessage;
         
@@ -228,10 +214,7 @@ export default function ChallengeDetailScreen() {
         Alert.alert(alertTitle, alertMessage);
       }
     } catch (err: any) {
-      console.error('[Challenge] Join error:', err);
       const errorMessage = err.response?.data?.message || err.message || 'Failed to join challenge';
-      
-      // Handle specific error messages
       let alertTitle = 'Error';
       let alertText = errorMessage;
       
@@ -255,7 +238,6 @@ export default function ChallengeDetailScreen() {
       return;
     }
     
-    // Navigate to create post with challenge context
     router.push({
       pathname: '/(tabs)/create',
       params: { challengeId: id as string, challengeName: challenge.name }
@@ -274,7 +256,6 @@ export default function ChallengeDetailScreen() {
   const getChallengeStatus = () => {
     if (!challenge) return { label: 'Unknown', color: C.textSecondary };
     
-    // Use is_currently_active field from API if available
     if (challenge.is_currently_active !== undefined) {
       if (challenge.is_currently_active) {
         return { label: 'Active', color: C.success };
@@ -289,7 +270,6 @@ export default function ChallengeDetailScreen() {
       }
     }
     
-    // Fallback to date-based logic
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
@@ -302,12 +282,10 @@ export default function ChallengeDetailScreen() {
   const isActive = () => {
     if (!challenge) return false;
     
-    // Use is_currently_active field from API if available
     if (challenge.is_currently_active !== undefined) {
       return challenge.is_currently_active;
     }
     
-    // Fallback to date-based logic
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
@@ -323,7 +301,6 @@ export default function ChallengeDetailScreen() {
 
   const canJoin = () => {
     if (!challenge) return false;
-    // Can join if challenge is approved or active, and has started
     const status = challenge.status;
     return (status === 'approved' || status === 'active') && hasStarted() && !challenge.is_participant;
   };
@@ -361,10 +338,7 @@ export default function ChallengeDetailScreen() {
 
   const isOrganizer = challenge?.organizer_id === user?.id;
 
-  // Grid post card component - must be a proper component to use hooks
-
   const GridPostCard = ({ item, index }: { item: any; index: number }) => {
-    // Use utility function to get media URL
     const mediaUrl = getPostMediaUrl(item) || '';
     const isVideo =
       item.type === 'video' ||
@@ -374,9 +348,7 @@ export default function ChallengeDetailScreen() {
          mediaUrl.toLowerCase().includes('.mov') ||
          mediaUrl.toLowerCase().includes('.webm')));
 
-    // Get thumbnail for videos - ensure we have proper full URL
     const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    // Ensure videoUrl is a full URL if it exists
     const videoUrl = isVideo && mediaUrl ? (mediaUrl.startsWith('http') ? mediaUrl : getFileUrl(mediaUrl)) : null;
     const generatedThumbnail = useVideoThumbnail(
       isVideo && videoUrl ? videoUrl : null,
@@ -424,11 +396,6 @@ export default function ChallengeDetailScreen() {
     );
   };
 
-  const renderPost = ({ item, index }: { item: any; index: number }) => {
-    return <GridPostCard item={item} index={index} />;
-  };
-
-  // Fullscreen post viewer component - matches feed style
   const FullscreenPostViewer = ({ item, index, insets, C }: { item: any; index: number; insets: any; C: any }) => {
     const videoRef = useRef<Video>(null);
     const [isLoaded, setIsLoaded] = useState(false);
@@ -436,7 +403,6 @@ export default function ChallengeDetailScreen() {
     const [videoProgress, setVideoProgress] = useState(0);
     const [videoDuration, setVideoDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
-    const progressBarRef = useRef<View>(null);
     const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
     const mediaUrl = getPostMediaUrl(item) || '';
@@ -463,7 +429,6 @@ export default function ChallengeDetailScreen() {
 
     useEffect(() => {
       if (isVideo && videoUrl && videoRef.current) {
-        // Auto-play when component mounts
         videoRef.current.playAsync().catch(() => {});
       }
       return () => {
@@ -493,7 +458,7 @@ export default function ChallengeDetailScreen() {
       }
     };
 
-    const availableHeight = screenHeight - 80; // Full screen minus header
+    const availableHeight = screenHeight - 80;
 
     return (
       <View style={[styles.fullscreenPostViewer, { height: availableHeight, width: screenWidth }]}>
@@ -563,10 +528,8 @@ export default function ChallengeDetailScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Progress bar at bottom - only for videos */}
           {isVideo && isLoaded && videoDuration > 0 && (
             <View
-              ref={progressBarRef}
               style={[
                 styles.progressBarContainerFullscreen,
                 {
@@ -592,7 +555,6 @@ export default function ChallengeDetailScreen() {
           )}
         </View>
 
-        {/* Post info at bottom */}
         <View style={[styles.fullscreenPostInfo, { bottom: insets.bottom + 20 }]}>
           <View style={styles.fullscreenPostInfoContent}>
             {item.user && (
@@ -625,69 +587,16 @@ export default function ChallengeDetailScreen() {
     );
   };
 
-  if (loading) {
+  // Render header component - all the content above posts/participants
+  const renderHeader = () => {
+    if (!challenge) return null;
+
+    const status = getChallengeStatus();
+    const participantCount = challenge._count?.participants || 0;
+    const postCount = challenge._count?.posts || posts.length || 0;
+
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={C.primary} />
-          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading challenge...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (error || !challenge) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
-        <View style={[styles.header, { borderBottomColor: C.border }]}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <MaterialIcons name="arrow-back" size={24} color={C.text} />
-          </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: C.text }]}>Challenge</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-        <View style={styles.errorContainer}>
-          <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
-          <Text style={[styles.errorText, { color: C.textSecondary }]}>{error || 'Challenge not found'}</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={fetchChallenge}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const status = getChallengeStatus();
-  const participantCount = challenge._count?.participants || 0;
-  const postCount = challenge._count?.posts || posts.length || 0;
-
-  return (
-    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
-      {/* Header */}
-      <View style={[styles.header, { borderBottomColor: C.border }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <MaterialIcons name="arrow-back" size={24} color={C.text} />
-        </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: C.text }]} numberOfLines={1}>
-          {challenge.name}
-        </Text>
-        <View style={styles.headerSpacer} />
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={C.primary}
-            colors={[C.primary]}
-          />
-        }
-      >
+      <>
         {/* Challenge Header */}
         <LinearGradient
           colors={challenge.has_rewards ? ['#f59e0b', '#d97706'] : ['#3b82f6', '#2563eb']}
@@ -791,7 +700,6 @@ export default function ChallengeDetailScreen() {
 
         {/* Action Buttons */}
         {isOrganizer ? (
-          // Organizer view - show organizer-specific actions
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             <View style={styles.organizerActions}>
               <TouchableOpacity
@@ -822,7 +730,6 @@ export default function ChallengeDetailScreen() {
               <TouchableOpacity
                 style={[styles.organizerActionButton, { backgroundColor: C.success }]}
                 onPress={() => {
-                  // Posts are already shown below, but we can scroll to them or highlight
                   Alert.alert('Challenge Posts', `There are ${posts.length} posts in this challenge`, [
                     { text: 'OK' }
                   ]);
@@ -834,7 +741,6 @@ export default function ChallengeDetailScreen() {
             </View>
           </View>
         ) : (
-          // Non-organizer view - show join/create post buttons
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
               <>
@@ -887,7 +793,7 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
-        {/* Tabs for Posts and Participants */}
+        {/* Tabs */}
         <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
           <View style={styles.tabsContainer}>
             <TouchableOpacity
@@ -931,112 +837,172 @@ export default function ChallengeDetailScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </>
+    );
+  };
 
-        {/* Posts Section */}
-        {activeTab === 'posts' && (
-          <View style={[styles.postsSection, { backgroundColor: C.background }]}>
-            {postsLoading ? (
-              <View style={styles.postsLoading}>
-                <ActivityIndicator size="small" color={C.primary} />
-              </View>
-            ) : posts.length === 0 ? (
-              <View style={styles.emptyPosts}>
-                <MaterialIcons name="video-library" size={48} color={C.textSecondary} />
-                <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                  No posts yet
-                </Text>
-                {challenge.is_participant && isActive() && (
-                  <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                    Be the first to post!
-                  </Text>
-                )}
-              </View>
-            ) : (
-              <FlatList
-                data={posts}
-                renderItem={renderPost}
-                keyExtractor={(item) => item.id}
-                numColumns={3}
-                scrollEnabled={false}
-                contentContainerStyle={styles.postsGrid}
-              />
+  // Render item for the main FlatList
+  const renderItem = ({ item, index }: { item: any; index: number }) => {
+    if (activeTab === 'posts') {
+      // Render posts in grid - 3 columns
+      return <GridPostCard item={item} index={index} />;
+    } else {
+      // Render participant
+      const participantUser = item.user || item;
+      const postCount = item.post_count || 0;
+      const joinedAt = item.joined_at || item.createdAt;
+      
+      return (
+        <TouchableOpacity
+          style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
+          onPress={() => {
+            if (participantUser.id || item.user_id) {
+              router.push({
+                pathname: '/user/[id]',
+                params: { id: participantUser.id || item.user_id }
+              });
+            }
+          }}
+        >
+          <Avatar
+            user={participantUser}
+            size={50}
+            style={styles.participantAvatar}
+          />
+          <View style={styles.participantInfo}>
+            <Text style={[styles.participantName, { color: C.text }]}>
+              {participantUser.display_name || participantUser.username || 'Unknown'}
+            </Text>
+            <Text style={[styles.participantUsername, { color: C.textSecondary }]}>
+              @{participantUser.username || 'unknown'}
+            </Text>
+            {joinedAt && (
+              <Text style={[styles.participantJoined, { color: C.textSecondary }]}>
+                Joined {new Date(joinedAt).toLocaleDateString()}
+              </Text>
             )}
           </View>
-        )}
-
-        {/* Participants Section */}
-        {activeTab === 'participants' && (
-          <View style={[styles.participantsSection, { backgroundColor: C.background }]}>
-            {loadingAllParticipants ? (
-              <View style={styles.participantsLoading}>
-                <ActivityIndicator size="small" color={C.primary} />
-              </View>
-            ) : allParticipants.length === 0 ? (
-              <View style={styles.emptyParticipants}>
-                <MaterialIcons name="people-outline" size={48} color={C.textSecondary} />
-                <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                  No participants yet
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={allParticipants}
-                keyExtractor={(item) => item.user?.id || item.user_id || item.id || Math.random().toString()}
-                renderItem={({ item }) => {
-                  const participantUser = item.user || item;
-                  const postCount = item.post_count || 0;
-                  const joinedAt = item.joined_at || item.createdAt;
-                  
-                  return (
-                    <TouchableOpacity
-                      style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
-                      onPress={() => {
-                        if (participantUser.id || item.user_id) {
-                          router.push({
-                            pathname: '/user/[id]',
-                            params: { id: participantUser.id || item.user_id }
-                          });
-                        }
-                      }}
-                    >
-                      <Avatar
-                        user={participantUser}
-                        size={50}
-                        style={styles.participantAvatar}
-                      />
-                      <View style={styles.participantInfo}>
-                        <Text style={[styles.participantName, { color: C.text }]}>
-                          {participantUser.display_name || participantUser.username || 'Unknown'}
-                        </Text>
-                        <Text style={[styles.participantUsername, { color: C.textSecondary }]}>
-                          @{participantUser.username || 'unknown'}
-                        </Text>
-                        {joinedAt && (
-                          <Text style={[styles.participantJoined, { color: C.textSecondary }]}>
-                            Joined {new Date(joinedAt).toLocaleDateString()}
-                          </Text>
-                        )}
-                      </View>
-                      <View style={styles.participantStats}>
-                        <View style={styles.participantStat}>
-                          <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
-                          <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
-                            {postCount}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                }}
-                contentContainerStyle={styles.participantsList}
-              />
-            )}
+          <View style={styles.participantStats}>
+            <View style={styles.participantStat}>
+              <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
+              <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                {postCount}
+              </Text>
+            </View>
           </View>
-        )}
-        
-        {/* Add noticeable margin below content */}
-        <View style={{ height: 100, backgroundColor: C.background }} />
-      </ScrollView>
+        </TouchableOpacity>
+      );
+    }
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={C.primary} />
+          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading challenge...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Error state
+  if (error || !challenge) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+        <View style={[styles.header, { borderBottomColor: C.border }]}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <MaterialIcons name="arrow-back" size={24} color={C.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: C.text }]}>Challenge</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
+          <Text style={[styles.errorText, { color: C.textSecondary }]}>{error || 'Challenge not found'}</Text>
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: C.primary }]}
+            onPress={fetchChallenge}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Determine data source based on active tab
+  const data = activeTab === 'posts' ? posts : allParticipants;
+  const isLoading = activeTab === 'posts' ? postsLoading : loadingAllParticipants;
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: C.border }]}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <MaterialIcons name="arrow-back" size={24} color={C.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: C.text }]} numberOfLines={1}>
+          {challenge.name}
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      {/* Main Content - Single FlatList */}
+      <FlatList
+        data={data}
+        renderItem={renderItem}
+        keyExtractor={(item, index) => {
+          if (activeTab === 'posts') {
+            return item.id || `post-${index}`;
+          } else {
+            return item.user?.id || item.user_id || item.id || `participant-${index}`;
+          }
+        }}
+        numColumns={activeTab === 'posts' ? 3 : 1}
+        key={activeTab} // Force re-render when switching tabs
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={
+          isLoading ? (
+            <View style={styles.postsLoading}>
+              <ActivityIndicator size="small" color={C.primary} />
+            </View>
+          ) : (
+            <View style={activeTab === 'posts' ? styles.emptyPosts : styles.emptyParticipants}>
+              <MaterialIcons 
+                name={activeTab === 'posts' ? "video-library" : "people-outline"} 
+                size={48} 
+                color={C.textSecondary} 
+              />
+              <Text style={[styles.emptyText, { color: C.textSecondary }]}>
+                {activeTab === 'posts' ? 'No posts yet' : 'No participants yet'}
+              </Text>
+              {activeTab === 'posts' && challenge.is_participant && isActive() && (
+                <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
+                  Be the first to post!
+                </Text>
+              )}
+            </View>
+          )
+        }
+        contentContainerStyle={
+          data.length === 0 
+            ? { flex: 1 } 
+            : activeTab === 'posts' 
+              ? styles.postsGrid 
+              : styles.participantsList
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={C.primary}
+            colors={[C.primary]}
+          />
+        }
+        ListFooterComponent={<View style={{ height: 100 }} />}
+      />
 
       {/* Fullscreen Post Viewer Modal */}
       <Modal
@@ -1188,9 +1154,6 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 44,
-  },
-  scrollView: {
-    flex: 1,
   },
   challengeHeader: {
     padding: 20,
@@ -1363,8 +1326,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
   },
-  postsSection: {
-    padding: 20,
+  tabsSection: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2a2a2a',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  tab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: '#60a5fa',
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   postsGrid: {
     padding: 1,
@@ -1396,51 +1384,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  tabsSection: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#2a2a2a',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 6,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabActive: {
-    borderBottomColor: '#60a5fa',
-  },
-  tabText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  postsLoading: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  participantsSection: {
-    padding: 20,
-  },
-  participantsLoading: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
   participantsList: {
+    padding: 20,
     gap: 12,
   },
   participantItem: {
@@ -1483,84 +1428,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
   },
+  postsLoading: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyPosts: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
   emptyParticipants: {
     alignItems: 'center',
     paddingVertical: 60,
   },
-  postsList: {
-    paddingBottom: 20,
-    gap: 12,
+  emptyText: {
+    marginTop: 12,
+    fontSize: 16,
   },
-  postCard: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    height: 280,
-    flexDirection: 'column',
-  },
-  postMediaContainer: {
-    flex: 1,
-    width: '100%',
-    position: 'relative',
-    backgroundColor: '#000',
-  },
-  postImage: {
-    width: '100%',
-    height: '100%',
-  },
-  playOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-  },
-  postInfo: {
-    padding: 14,
-    backgroundColor: 'transparent',
-    gap: 10,
-  },
-  postUserRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  postUserAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 10,
-  },
-  postUserDetails: {
-    flex: 1,
-  },
-  postUsername: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  postUserDisplayName: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  postTitle: {
+  emptySubtext: {
+    marginTop: 6,
     fontSize: 14,
-    fontWeight: '500',
-    lineHeight: 20,
-  },
-  postStats: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  postStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  postStatText: {
-    fontSize: 12,
   },
   loadingContainer: {
     flex: 1,
@@ -1592,18 +1478,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  emptyPosts: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyText: {
-    marginTop: 12,
-    fontSize: 16,
-  },
-  emptySubtext: {
-    marginTop: 6,
-    fontSize: 14,
   },
   modalOverlay: {
     flex: 1,
@@ -1685,7 +1559,6 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  // Fullscreen Post Viewer Styles
   fullscreenContainer: {
     flex: 1,
     backgroundColor: '#000',
