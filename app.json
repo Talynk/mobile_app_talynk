@@ -1,28 +1,28 @@
 {
   "expo": {
     "name": "Talentix",
-    "slug": "mobile-app-talynk",
+    "slug": "talentix-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/mobile-app-logo.png",
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
+    "splash": { 
       "image": "./assets/images/mobile-app-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ihirwe.talynksocial"
+      "bundleIdentifier": "com.ihirwe.talentix"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mobile-app-logo.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.ihirwe.talynksocial",
+      "package": "com.ihirwe.talentix",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -88,7 +88,7 @@
         "origin": false
       },
       "eas": {
-        
+        "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"
       }
     }
   }
