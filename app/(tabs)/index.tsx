@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -40,11 +40,8 @@ import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
-import ChallengesList from '@/components/ChallengesList';
+import ChallengesTabView from '@/components/ChallengesTabView';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
-
-const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => { } });
-const useMute = () => useContext(MuteContext);
 
 const activeVideoRef = { current: null as Video | null };
 const pauseAllVideosExcept = async (currentVideo: Video | null) => {
@@ -76,23 +73,10 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
-const timeAgo = (date: string): string => {
-  const now = new Date();
-  const postDate = new Date(date);
-  const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
-
-  if (diffInSeconds < 60) return `${diffInSeconds}s`;
-  const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60) return `${diffInMinutes}m`;
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours}h`;
-  const diffInDays = Math.floor(diffInHours / 24);
-  if (diffInDays < 7) return `${diffInDays}d`;
-  return postDate.toLocaleDateString();
-};
 
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
+import { timeAgo } from '@/lib/utils/time-ago';
 
 const getMediaUrl = (post: Post): string | null => {
   return getPostMediaUrl(post);
@@ -178,7 +162,7 @@ const PostItem: React.FC<PostItemProps> = ({
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const { isMuted, setIsMuted } = useMute();
+  const [isMuted, setIsMuted] = useState(true); // Local mute state for this post
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -245,8 +229,12 @@ const PostItem: React.FC<PostItemProps> = ({
     });
   }
 
-  const isVideo = item.type === 'video' || !!item.video_url ||
-    (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+  const isVideo =
+    item.type === 'video' ||
+    (mediaUrl !== null &&
+      (mediaUrl.includes('.mp4') ||
+        mediaUrl.includes('.mov') ||
+        mediaUrl.includes('.webm')));
 
   useEffect(() => {
     if (isActive && isVideo) {
@@ -554,7 +542,7 @@ const PostItem: React.FC<PostItemProps> = ({
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Avatar
-              user={item.user}
+              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
               size={48}
               style={styles.userAvatar}
             />
@@ -626,6 +614,12 @@ const PostItem: React.FC<PostItemProps> = ({
                 text={item.caption || item.description || item.title || ''} 
                 maxLines={2} 
               />
+            )}
+            {/* Timestamp */}
+            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
+              <Text style={styles.timestamp}>
+                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
+              </Text>
             )}
           </View>
 
@@ -806,7 +800,7 @@ export default function FeedScreen() {
           syncLikedPostsFromServer(postIds).catch(console.error);
           
           // Fetch actual follow status for all unique users in posts
-          const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))];
+          const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))] as string[];
           const followStatusPromises = uniqueUserIds.map(async (userId: string) => {
             try {
               const response = await followsApi.checkFollowing(userId);
@@ -1136,7 +1130,7 @@ export default function FeedScreen() {
 
       {activeTab === 'challenges' ? (
         <>
-          <ChallengesList 
+          <ChallengesTabView 
             onCreateChallenge={() => setCreateChallengeVisible(true)} 
             refreshTrigger={challengesRefreshTrigger}
           />
@@ -1150,7 +1144,7 @@ export default function FeedScreen() {
           />
         </>
       ) : (
-        <MuteContext.Provider value={{ isMuted, setIsMuted }}>
+        <>
           {loading && posts.length === 0 ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#60a5fa" />
@@ -1242,7 +1236,7 @@ export default function FeedScreen() {
               }
             />
           )}
-        </MuteContext.Provider>
+        </>
       )}
 
       <ReportModal
@@ -1439,6 +1433,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 3,
     fontWeight: '500',
+  },
+  timestamp: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 11,
+    marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   loadMoreContainer: {
     paddingVertical: 20,

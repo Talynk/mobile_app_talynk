@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Image,
   useColorScheme,
+  Modal,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { challengesApi } from '@/lib/api';
@@ -17,6 +18,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
+import CreateChallengeModal from '@/components/CreateChallengeModal';
 
 const COLORS = {
   light: {
@@ -41,10 +43,10 @@ const COLORS = {
   },
 };
 
-const TABS = [
-  { key: 'all', label: 'All' },
+const TABS: Array<{ key: 'my' | 'joined' | 'not_joined'; label: string }> = [
+  { key: 'my', label: 'Created by Me' },
   { key: 'joined', label: 'Joined' },
-  { key: 'my', label: 'My Challenges' },
+  { key: 'not_joined', label: 'Not Joined' },
 ];
 
 export default function ChallengesScreen() {
@@ -52,50 +54,71 @@ export default function ChallengesScreen() {
   const colorScheme = useColorScheme() || 'dark';
   const C = COLORS[colorScheme];
   
-  const [activeTab, setActiveTab] = useState('all');
-  const [challenges, setChallenges] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'my' | 'joined' | 'not_joined'>('not_joined');
+  const [allChallenges, setAllChallenges] = useState<any[]>([]);
+  const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
+  const [myChallenges, setMyChallenges] = useState<any[]>([]);
+  const [notJoinedChallenges, setNotJoinedChallenges] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [participantsModalVisible, setParticipantsModalVisible] = useState(false);
+  const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
+
+  const normalizeChallenges = (response: any) => {
+    if (!response) return [];
+    if (Array.isArray(response.data)) return response.data;
+    if (response.data?.challenges) return response.data.challenges;
+    if (Array.isArray(response)) return response;
+    if (response.data) return response.data;
+    return [];
+  };
 
   const fetchChallenges = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      let response;
-      
-      if (activeTab === 'all') {
-        response = await challengesApi.getAll('active');
-      } else if (activeTab === 'joined') {
-        response = await challengesApi.getJoinedChallenges();
-      } else if (activeTab === 'my') {
-        response = await challengesApi.getMyChallenges();
+      const [allRes, joinedRes, myRes] = await Promise.all([
+        challengesApi.getAll('active'),
+        isAuthenticated ? challengesApi.getJoinedChallenges() : Promise.resolve(null),
+        isAuthenticated ? challengesApi.getMyChallenges() : Promise.resolve(null),
+      ]);
+
+      if (allRes?.status !== 'success') {
+        setError(allRes?.message || 'Failed to fetch challenges');
+        setLoading(false);
+        return;
       }
-      
-      if (response?.status === 'success') {
-        let challengesList = [];
-        
-        if (Array.isArray(response.data)) {
-          challengesList = response.data;
-        } else if (response.data?.challenges) {
-          challengesList = response.data.challenges;
-        } else if (Array.isArray(response.data)) {
-          // For joined challenges, extract challenge from participation
-          challengesList = response.data.map((item: any) => item.challenge || item);
-        }
-        
-        // When showing 'all' tab, ensure we include both 'active' and 'approved' statuses
-        if (activeTab === 'all') {
-          challengesList = challengesList.filter((ch: any) => 
-            ch.status === 'active' || ch.status === 'approved'
-          );
-        }
-        
-        setChallenges(challengesList);
-      } else {
-        setError(response?.message || 'Failed to fetch challenges');
-      }
+
+      const allListRaw = normalizeChallenges(allRes);
+      const allList = allListRaw.filter((ch: any) => ch.status === 'active' || ch.status === 'approved');
+
+      const joinedListRaw = joinedRes?.status === 'success' ? normalizeChallenges(joinedRes) : [];
+      const joinedList = joinedListRaw.map((item: any) => item.challenge || item);
+
+      const myListRaw = myRes?.status === 'success' ? normalizeChallenges(myRes) : [];
+      const myList = myListRaw.map((item: any) => item.challenge || item);
+
+      const joinedIds = new Set(joinedList.map((c: any) => c.id));
+      const myIds = new Set([
+        ...myList.map((c: any) => c.id),
+        ...allList
+          .filter((c: any) => c.organizer_id === user?.id || c.organizer?.id === user?.id)
+          .map((c: any) => c.id),
+      ]);
+
+      const notJoined = allList.filter(
+        (c: any) => !joinedIds.has(c.id) && !myIds.has(c.id)
+      );
+
+      setAllChallenges(allList);
+      setJoinedChallenges(joinedList);
+      setMyChallenges(myList);
+      setNotJoinedChallenges(notJoined);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch challenges');
     } finally {
@@ -105,18 +128,42 @@ export default function ChallengesScreen() {
 
   useEffect(() => {
     fetchChallenges();
-  }, [activeTab]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       fetchChallenges();
-    }, [activeTab])
+    }, [])
   );
+
+  const visibleChallenges = useMemo(() => {
+    if (activeTab === 'joined') return joinedChallenges;
+    if (activeTab === 'my') return myChallenges;
+    return notJoinedChallenges;
+  }, [activeTab, joinedChallenges, myChallenges, notJoinedChallenges]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await fetchChallenges();
     setRefreshing(false);
+  };
+
+  const loadParticipants = async (challengeId: string) => {
+    setLoadingParticipants(true);
+    try {
+      const response = await challengesApi.getParticipants(challengeId);
+      if (response.status === 'success') {
+        const participantsList = Array.isArray(response.data) ? response.data : [];
+        setParticipants(participantsList.map((p: any) => p.user || p));
+      } else {
+        setParticipants([]);
+      }
+    } catch (err) {
+      console.error('Error loading participants:', err);
+      setParticipants([]);
+    } finally {
+      setLoadingParticipants(false);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -205,7 +252,7 @@ export default function ChallengesScreen() {
         activeOpacity={0.8}
       >
         <LinearGradient
-          colors={item.has_rewards ? ['#f59e0b', '#d97706'] : ['#3b82f6', '#2563eb']}
+          colors={item.has_rewards ? ['#8b5cf6', '#7c3aed'] : ['#3b82f6', '#2563eb']}
           style={styles.cardHeader}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
@@ -218,11 +265,13 @@ export default function ChallengesScreen() {
               {item.has_rewards && (
                 <View style={styles.rewardBadge}>
                   <MaterialIcons name="emoji-events" size={14} color="#fff" />
-                  <Text style={styles.rewardBadgeText}>Rewards: {item.rewards || 'Available'}</Text>
+                  <Text style={styles.rewardBadgeText} numberOfLines={1}>
+                    {item.rewards || 'Rewards'}
+                  </Text>
                 </View>
               )}
               <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
-                <Text style={styles.statusText}>{status.label}</Text>
+                <Text style={styles.statusText} numberOfLines={1}>{status.label}</Text>
               </View>
             </View>
           </View>
@@ -237,12 +286,20 @@ export default function ChallengesScreen() {
           )}
           
           <View style={styles.challengeMeta}>
-            <View style={styles.metaItem}>
+            <TouchableOpacity 
+              style={styles.metaItem}
+              onPress={() => {
+                setSelectedChallengeId(item.id);
+                setParticipantsModalVisible(true);
+                loadParticipants(item.id);
+              }}
+              activeOpacity={0.7}
+            >
               <MaterialIcons name="people" size={16} color={C.textSecondary} />
               <Text style={[styles.metaText, { color: C.textSecondary }]}>
                 {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
               </Text>
-            </View>
+            </TouchableOpacity>
             <View style={styles.metaItem}>
               <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
               <Text style={[styles.metaText, { color: C.textSecondary }]}>
@@ -313,7 +370,17 @@ export default function ChallengesScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Tabs */}
+      {/* Create + Tabs */}
+      <View style={[styles.actionRow, { borderBottomColor: C.border, backgroundColor: C.card }]}>
+        <TouchableOpacity
+          style={[styles.createButton, { backgroundColor: C.primary }]}
+          onPress={() => setCreateModalVisible(true)}
+          activeOpacity={0.85}
+        >
+          <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
+          <Text style={styles.createButtonText}>Create Challenge</Text>
+        </TouchableOpacity>
+      </View>
       <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
         {TABS.map((tab) => (
           <TouchableOpacity
@@ -353,7 +420,7 @@ export default function ChallengesScreen() {
         </View>
       ) : (
         <FlatList
-          data={challenges}
+          data={visibleChallenges}
           renderItem={renderChallenge}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContainer}
@@ -373,17 +440,95 @@ export default function ChallengesScreen() {
                   ? "You haven't joined any challenges yet"
                   : activeTab === 'my'
                     ? "You haven't created any challenges"
-                    : "No challenges available"}
+                    : "No challenges available to join"}
               </Text>
-              {activeTab === 'all' && (
-                <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                  Check back later for new challenges!
-                </Text>
-              )}
             </View>
           }
         />
       )}
+
+      {/* Participants Modal */}
+      <Modal
+        visible={participantsModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setParticipantsModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.modalContainer, { backgroundColor: C.background }]} edges={['top']}>
+          <View style={[styles.modalHeader, { borderBottomColor: C.border }]}>
+            <Text style={[styles.modalTitle, { color: C.text }]}>Participants</Text>
+            <TouchableOpacity
+              onPress={() => setParticipantsModalVisible(false)}
+              style={styles.modalCloseButton}
+            >
+              <MaterialIcons name="close" size={24} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
+          {loadingParticipants ? (
+            <View style={styles.modalLoadingContainer}>
+              <ActivityIndicator size="large" color={C.primary} />
+            </View>
+          ) : participants.length === 0 ? (
+            <View style={styles.modalEmptyContainer}>
+              <MaterialIcons name="people-outline" size={64} color={C.textSecondary} />
+              <Text style={[styles.modalEmptyText, { color: C.textSecondary }]}>
+                No participants yet
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              data={participants}
+              keyExtractor={(item) => item.id || item.user_id}
+              renderItem={({ item }) => {
+                const participant = item.user || item;
+                return (
+                  <TouchableOpacity
+                    style={[styles.participantItem, { borderBottomColor: C.border }]}
+                    onPress={() => {
+                      setParticipantsModalVisible(false);
+                      router.push({
+                        pathname: '/user/[id]',
+                        params: { id: participant.id }
+                      });
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Avatar user={participant} size={48} style={styles.participantAvatar} />
+                    <View style={styles.participantInfo}>
+                      <Text style={[styles.participantName, { color: C.text }]} numberOfLines={1}>
+                        {participant.display_name || participant.username || 'Unknown'}
+                      </Text>
+                      {participant.username && (
+                        <Text style={[styles.participantUsername, { color: C.textSecondary }]} numberOfLines={1}>
+                          @{participant.username}
+                        </Text>
+                      )}
+                    </View>
+                    {item.post_count !== undefined && (
+                      <View style={styles.participantStats}>
+                        <Text style={[styles.participantPostCount, { color: C.textSecondary }]}>
+                          {item.post_count} {item.post_count === 1 ? 'post' : 'posts'}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+              contentContainerStyle={styles.modalListContainer}
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
+
+      <CreateChallengeModal
+        visible={createModalVisible}
+        onClose={() => setCreateModalVisible(false)}
+        onCreated={() => {
+          setCreateModalVisible(false);
+          fetchChallenges();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -410,6 +555,29 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  createButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  createButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
   tabBar: {
     flexDirection: 'row',
@@ -462,23 +630,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    flexShrink: 0,
-    width: 87,
-    maxWidth: 87,
+    flexShrink: 1,
+    maxWidth: '100%',
   },
   rewardBadgeText: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     marginLeft: 4,
+    maxWidth: 100,
   },
   statusBadge: {
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     flexShrink: 0,
-    width: 87,
-    maxWidth: 87,
+    alignSelf: 'flex-start',
   },
   statusText: {
     color: '#fff',
@@ -518,6 +685,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  dateLabel: {
+    fontSize: 13,
+    marginLeft: 6,
+  },
+  dateInfo: {
+    marginLeft: 6,
+  },
   dateText: {
     fontSize: 13,
     marginLeft: 6,
@@ -527,10 +701,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   organizerAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     marginRight: 8,
+  },
+  organizerInfo: {
+    flex: 1,
+  },
+  organizerName: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  organizerUsername: {
+    fontSize: 12,
   },
   organizerText: {
     fontSize: 13,
@@ -581,5 +766,67 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     textAlign: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalEmptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  modalEmptyText: {
+    fontSize: 16,
+    marginTop: 16,
+  },
+  modalListContainer: {
+    padding: 16,
+  },
+  participantItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  participantAvatar: {
+    marginRight: 12,
+  },
+  participantInfo: {
+    flex: 1,
+  },
+  participantName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  participantUsername: {
+    fontSize: 14,
+  },
+  participantStats: {
+    marginLeft: 12,
+  },
+  participantPostCount: {
+    fontSize: 14,
   },
 });

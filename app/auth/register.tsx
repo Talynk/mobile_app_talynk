@@ -44,15 +44,15 @@ const THEME = {
 
 // Minimal country data. Extend as needed.
 const COUNTRIES = [
-  { id: 1, name: 'Rwanda', code: 'RW', dialCode: '+250' },
-  { id: 2, name: 'Kenya', code: 'KE', dialCode: '+254' },
-  { id: 3, name: 'Uganda', code: 'UG', dialCode: '+256' },
-  { id: 4, name: 'Tanzania', code: 'TZ', dialCode: '+255' },
-  { id: 5, name: 'Nigeria', code: 'NG', dialCode: '+234' },
-  { id: 6, name: 'Ghana', code: 'GH', dialCode: '+233' },
-  { id: 7, name: 'South Africa', code: 'ZA', dialCode: '+27' },
-  { id: 8, name: 'United States', code: 'US', dialCode: '+1' },
-  { id: 9, name: 'United Kingdom', code: 'GB', dialCode: '+44' },
+  { id: 1, name: '🇷🇼 Rwanda', code: 'RW', dialCode: '+250' },
+  { id: 2, name: '🇰🇪 Kenya', code: 'KE', dialCode: '+254' },
+  { id: 3, name: '🇺🇬 Uganda', code: 'UG', dialCode: '+256' },
+  { id: 4, name: '🇹🇿 Tanzania', code: 'TZ', dialCode: '+255' },
+  { id: 5, name: '🇳🇬 Nigeria', code: 'NG', dialCode: '+234' },
+  { id: 6, name: '🇬🇭 Ghana', code: 'GH', dialCode: '+233' },
+  { id: 7, name: '🇿🇦 South Africa', code: 'ZA', dialCode: '+27' },
+  { id: 8, name: '🇺🇸 United States', code: 'US', dialCode: '+1' },
+  { id: 9, name: '🇬🇧 United Kingdom', code: 'GB', dialCode: '+44' },
 ];
 
 const OTP_LENGTH = 6;
@@ -83,6 +83,8 @@ export default function RegisterScreen() {
   const [countryModalOpen, setCountryModalOpen] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // Default Rwanda
   const [countries, setCountries] = useState<Country[]>(COUNTRIES);
+  const [filteredCountries, setFilteredCountries] = useState<Country[]>(COUNTRIES);
+  const [countrySearchQuery, setCountrySearchQuery] = useState('');
   const [loadingCountries, setLoadingCountries] = useState(false);
   const [otpRequested, setOtpRequested] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
@@ -110,10 +112,20 @@ export default function RegisterScreen() {
             ...fc,
             dialCode: (byCode[fc.code] && (byCode[fc.code] as any).dialCode) || '+000',
           })) as any[];
+          
+          // Store ALL countries (for reference), but only display valid ones
           setCountries(merged as any);
-          // If current selected not in list, default to Rwanda if present else first
-          const foundRw = merged.find((c: any) => c.code === 'RW');
-          setSelectedCountry(foundRw || merged[0]);
+          
+          // Set filtered countries to only show those with valid dial codes (backend-configured)
+          const validCountries = merged.filter((c: any) => {
+            const dialCode = (c.dialCode || '').trim();
+            return dialCode && dialCode !== '+000';
+          });
+          setFilteredCountries(validCountries as any);
+          
+          // If current selected not in valid list, default to Rwanda if present else first valid
+          const foundRw = validCountries.find((c: any) => c.code === 'RW');
+          setSelectedCountry(foundRw || validCountries[0]);
         }
       } catch {}
       finally {
@@ -122,6 +134,29 @@ export default function RegisterScreen() {
     };
     loadCountries();
   }, []);
+
+  // Filter countries based on search query - ONLY show countries configured in backend (with valid dial codes)
+  useEffect(() => {
+    // First, filter out countries with +000 (not configured in backend)
+    const validCountries = countries.filter((country: any) => {
+      const dialCode = (country.dialCode || '').trim();
+      return dialCode && dialCode !== '+000'; // Only show countries with valid dial codes
+    });
+
+    if (!countrySearchQuery.trim()) {
+      setFilteredCountries(validCountries);
+      return;
+    }
+    
+    const query = countrySearchQuery.toLowerCase().trim();
+    const filtered = validCountries.filter((country: any) => {
+      const name = (country.name || '').toLowerCase();
+      const code = (country.code || '').toLowerCase();
+      const dialCode = ((country.dialCode || '') as string).toLowerCase();
+      return name.includes(query) || code.includes(query) || dialCode.includes(query);
+    });
+    setFilteredCountries(filtered);
+  }, [countrySearchQuery, countries]);
 
   // Reset verification when email changes
   useEffect(() => {
@@ -466,11 +501,18 @@ export default function RegisterScreen() {
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: C.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <StatusBar style="light" backgroundColor="#000000" />
-      <ScrollView style={{ backgroundColor: C.background }} contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+      <ScrollView 
+        style={{ backgroundColor: C.background }} 
+        contentContainerStyle={styles.scrollContainer} 
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Back button */}
-        <View style={[styles.navRow, { marginTop: insets.top + 4 }]}>
+        <View style={[{ flexDirection: 'row', alignItems: 'center', marginTop: insets.top + 4 }]}>
           <TouchableOpacity
             onPress={() => {
               if (router.canGoBack()) {
@@ -479,7 +521,16 @@ export default function RegisterScreen() {
                 router.replace('/auth/login');
               }
             }}
-            style={[styles.backButton, { borderColor: C.border }]}
+            style={[
+              {
+                borderColor: C.border,
+                borderWidth: 1,
+                borderRadius: 8,
+                padding: 6,
+                marginLeft: 8,
+                marginBottom: 4,
+              }
+            ]}
           >
             <Ionicons name="chevron-back" size={26} color={C.text} />
           </TouchableOpacity>
@@ -562,7 +613,9 @@ export default function RegisterScreen() {
                   return (
                     <TextInput
                       key={index}
-                      ref={(el) => (otpInputRefs.current[index] = el)}
+                      ref={(el) => {
+                        otpInputRefs.current[index] = el;
+                      }}
                       style={[
                         {
                           width: boxWidth,
@@ -904,31 +957,76 @@ export default function RegisterScreen() {
         transparent
         visible={countryModalOpen}
         animationType="fade"
-        onRequestClose={() => setCountryModalOpen(false)}
+        onRequestClose={() => {
+          setCountryModalOpen(false);
+          setCountrySearchQuery('');
+        }}
       >
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={[styles.modalCard, { backgroundColor: C.card, borderColor: C.border }]}>
             <Text style={[styles.modalTitle, { color: C.text }]}>Select Country</Text>
+            
+            {/* Search Input */}
+            <View style={[styles.searchInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+              <Ionicons name="search" size={20} color={C.textSecondary} style={{ marginRight: 8 }} />
+              <TextInput
+                style={[styles.searchInput, { color: C.text }]}
+                placeholder="Search country..."
+                placeholderTextColor={C.placeholder}
+                value={countrySearchQuery}
+                onChangeText={setCountrySearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {countrySearchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setCountrySearchQuery('')}>
+                  <Ionicons name="close-circle" size={20} color={C.textSecondary} />
+                </TouchableOpacity>
+              )}
+            </View>
+
             <FlatList
-              data={countries as any}
+              data={filteredCountries as any}
               keyExtractor={(item) => String(item.id)}
               ItemSeparatorComponent={() => <View style={[styles.separator, { backgroundColor: C.border }]} />}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.countryRow}
-                  onPress={() => { setSelectedCountry(item as any); setCountryModalOpen(false); }}
+                  onPress={() => { 
+                    setSelectedCountry(item as any); 
+                    setCountryModalOpen(false);
+                    setCountrySearchQuery('');
+                  }}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.countryName, { color: C.text }]}>{item.name}</Text>
-                  <Text style={[styles.countryDial, { color: C.textSecondary }]}>{(item as any).dialCode || ''}</Text>
+                  <View style={styles.countryRowContent}>
+                    <Text style={[styles.countryName, { color: C.text }]}>{item.name}</Text>
+                    <Text style={[styles.countryDial, { color: C.textSecondary }]}>{(item as any).dialCode || ''}</Text>
+                  </View>
                 </TouchableOpacity>
               )}
+              ListEmptyComponent={
+                <View style={styles.emptyCountryList}>
+                  <Text style={[styles.emptyCountryText, { color: C.textSecondary }]}>
+                    No countries found
+                  </Text>
+                </View>
+              }
             />
-            <TouchableOpacity onPress={() => setCountryModalOpen(false)} style={[styles.navButton, { borderColor: C.border, marginTop: 12 }]}>
+            <TouchableOpacity 
+              onPress={() => {
+                setCountryModalOpen(false);
+                setCountrySearchQuery('');
+              }} 
+              style={[styles.navButton, { borderColor: C.border, marginTop: 12 }]}
+            >
               <Text style={{ color: C.text }}>Close</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -1121,14 +1219,38 @@ const styles = StyleSheet.create({
   },
   countryRow: {
     paddingVertical: 12,
+  },
+  countryRowContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   countryName: {
     fontSize: 16,
+    flex: 1,
   },
   countryDial: {
+    fontSize: 14,
+    marginLeft: 12,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+  },
+  emptyCountryList: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyCountryText: {
     fontSize: 14,
   },
   separator: {

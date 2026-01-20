@@ -28,9 +28,13 @@ export const useUnreadNotifications = () => {
         const notifications = response.data.notifications as Notification[];
         const unread = notifications.filter(n => !n.isRead).length;
         setUnreadCount(unread);
+      } else {
+        // If error or no notifications, set to 0
+        setUnreadCount(0);
       }
     } catch (error) {
-      console.error('Error fetching unread notifications:', error);
+      // Silently handle errors - don't log 401 errors (expected when not authenticated)
+      setUnreadCount(0);
     } finally {
       setLoading(false);
     }

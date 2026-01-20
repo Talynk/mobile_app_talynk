@@ -34,7 +34,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>exp+talentix</string>
+          <string>exp+mobile-app-talynk</string>
         </array>
       </dict>
     </array>
@@ -52,11 +52,11 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>The app accesses your camera to let you take photos and share them with your friends.</string>
+    <string>Allow Talentix to access your camera to record videos and take photos.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone to record audio with videos.</string>
+    <string>Allow Talentix to access your microphone to record audio with your videos.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>The app accesses your photos to let you share them with your friends.</string>
+    <string>Allow $(PRODUCT_NAME) to access your photos</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

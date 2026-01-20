@@ -29,6 +29,7 @@ import DotsSpinner from '@/components/DotsSpinner';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { Avatar } from '@/components/Avatar';
+import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_CARD_WIDTH = (screenWidth - 48) / 2; // 2 columns with padding
@@ -151,6 +152,11 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
         <Text style={[styles.postCaption, { color: '#fff' }]} numberOfLines={2}>
           {post.title || post.description || ''}
         </Text>
+        {(post.createdAt || post.uploadDate || (post as any).created_at) && (
+          <Text style={[styles.postTimestamp, { color: '#999' }]}>
+            {timeAgo(post.createdAt || post.uploadDate || (post as any).created_at)}
+          </Text>
+        )}
         <View style={styles.postFooterActions}>
           <View style={styles.postAction}>
             <Feather 
@@ -433,7 +439,32 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const posts = Array.isArray(response.data) 
           ? response.data 
           : (response.data as any)?.posts || [];
-        setApprovedPosts(posts);
+        // Normalize backend shapes so UI always has `user`, `fullUrl`, and consistent fields
+        const normalized = (posts as any[]).map((p: any) => {
+          const userFromPost = p.user;
+          const authorName = p.authorName || p.username || userFromPost?.username;
+          const authorProfilePicture =
+            p.authorProfilePicture || userFromPost?.profile_picture || p.profile_picture;
+
+          const video_url = p.video_url || p.videoUrl || '';
+          const fullUrl = p.fullUrl || video_url || p.mediaUrl || '';
+
+          return {
+            ...p,
+            video_url,
+            fullUrl,
+            type: p.type || p.mediaType || (video_url ? 'video' : 'image'),
+            comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
+            likes: p.likes ?? p.likesCount ?? 0,
+            user: userFromPost || {
+              id: (profile as any)?.id || p.user_id || p.userId,
+              username: authorName,
+              profile_picture: authorProfilePicture,
+            },
+          };
+        });
+
+        setApprovedPosts(normalized);
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }
@@ -466,7 +497,31 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             setProfile(profileResponse.data);
           }
           if (postsResponse.status === 'success' && postsResponse.data) {
-            setApprovedPosts(postsResponse.data);
+            const posts = Array.isArray(postsResponse.data) 
+              ? postsResponse.data 
+              : (postsResponse.data as any)?.posts || [];
+            const normalized = (posts as any[]).map((p: any) => {
+              const userFromPost = p.user;
+              const authorName = p.authorName || p.username || userFromPost?.username;
+              const authorProfilePicture =
+                p.authorProfilePicture || userFromPost?.profile_picture || p.profile_picture;
+              const video_url = p.video_url || p.videoUrl || '';
+              const fullUrl = p.fullUrl || video_url || p.mediaUrl || '';
+              return {
+                ...p,
+                video_url,
+                fullUrl,
+                type: p.type || p.mediaType || (video_url ? 'video' : 'image'),
+                comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
+                likes: p.likes ?? p.likesCount ?? 0,
+                user: userFromPost || {
+                  id: (profileResponse.data as any)?.id || p.user_id || p.userId,
+                  username: authorName,
+                  profile_picture: authorProfilePicture,
+                },
+              };
+            });
+            setApprovedPosts(normalized);
           }
         }
       } catch (err: any) {
@@ -1066,7 +1121,12 @@ const styles = StyleSheet.create({
   },
   postCaption: {
     fontSize: 12,
+    marginBottom: 4,
+  },
+  postTimestamp: {
+    fontSize: 10,
     marginBottom: 8,
+    opacity: 0.7,
   },
   postFooterActions: {
     flexDirection: 'row',

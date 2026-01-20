@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,17 +13,23 @@ import {
   ScrollView,
   Dimensions,
   Modal,
+  StatusBar,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { challengesApi, postsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Avatar } from '@/components/Avatar';
+import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth } = Dimensions.get('window');
+const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
 
 const COLORS = {
   dark: {
@@ -59,6 +65,13 @@ export default function ChallengeDetailScreen() {
   const [participantsModalVisible, setParticipantsModalVisible] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
+  const insets = useSafeAreaInsets();
+  const [fullscreenIndex, setFullscreenIndex] = useState(0);
+  const [showFullscreen, setShowFullscreen] = useState(false);
+  const fullscreenListRef = useRef<FlatList>(null);
+  const [activeTab, setActiveTab] = useState<'posts' | 'participants'>('posts');
+  const [allParticipants, setAllParticipants] = useState<any[]>([]);
+  const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
 
   const fetchChallenge = async () => {
     if (!id) return;
@@ -102,21 +115,59 @@ export default function ChallengeDetailScreen() {
     }
   };
 
+  const fetchParticipants = async () => {
+    if (!id) return;
+    
+    setLoadingAllParticipants(true);
+    
+    try {
+      const response = await challengesApi.getParticipants(id as string);
+      
+      if (response?.status === 'success') {
+        const participantsList = response.data || [];
+        // Handle both array and object with participants property
+        const normalizedParticipants = Array.isArray(participantsList) 
+          ? participantsList 
+          : (participantsList.participants || []);
+        setAllParticipants(normalizedParticipants);
+      } else {
+        setAllParticipants([]);
+      }
+    } catch (err: any) {
+      console.error('Error fetching challenge participants:', err);
+      setAllParticipants([]);
+    } finally {
+      setLoadingAllParticipants(false);
+    }
+  };
+
   useEffect(() => {
     fetchChallenge();
-    fetchPosts();
-  }, [id]);
+    if (activeTab === 'posts') {
+      fetchPosts();
+    } else if (activeTab === 'participants') {
+      fetchParticipants();
+    }
+  }, [id, activeTab]);
 
   useFocusEffect(
     useCallback(() => {
       fetchChallenge();
-      fetchPosts();
-    }, [id])
+      if (activeTab === 'posts') {
+        fetchPosts();
+      } else if (activeTab === 'participants') {
+        fetchParticipants();
+      }
+    }, [id, activeTab])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([fetchChallenge(), fetchPosts()]);
+    if (activeTab === 'posts') {
+      await Promise.all([fetchChallenge(), fetchPosts()]);
+    } else {
+      await Promise.all([fetchChallenge(), fetchParticipants()]);
+    }
     setRefreshing(false);
   };
 
@@ -310,79 +361,267 @@ export default function ChallengeDetailScreen() {
 
   const isOrganizer = challenge?.organizer_id === user?.id;
 
-  const renderPost = ({ item, index }: { item: any; index: number }) => {
-    const videoUrl = item.video_url || item.videoUrl || '';
-    const imageUrl = item.image || item.imageUrl || item.thumbnail_url || '';
-    const isVideo = !!videoUrl;
-    
+  // Grid post card component - must be a proper component to use hooks
+
+  const GridPostCard = ({ item, index }: { item: any; index: number }) => {
+    // Use utility function to get media URL
+    const mediaUrl = getPostMediaUrl(item) || '';
+    const isVideo =
+      item.type === 'video' ||
+      (mediaUrl !== null &&
+        mediaUrl !== '' &&
+        (mediaUrl.toLowerCase().includes('.mp4') ||
+         mediaUrl.toLowerCase().includes('.mov') ||
+         mediaUrl.toLowerCase().includes('.webm')));
+
+    // Get thumbnail for videos - ensure we have proper full URL
+    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
+    // Ensure videoUrl is a full URL if it exists
+    const videoUrl = isVideo && mediaUrl ? (mediaUrl.startsWith('http') ? mediaUrl : getFileUrl(mediaUrl)) : null;
+    const generatedThumbnail = useVideoThumbnail(
+      isVideo && videoUrl ? videoUrl : null,
+      fallbackImageUrl || '',
+      1000
+    );
+    const staticThumbnailUrl = isVideo
+      ? (generatedThumbnail || fallbackImageUrl || mediaUrl || getFileUrl(mediaUrl))
+      : (mediaUrl || fallbackImageUrl);
+
     return (
       <TouchableOpacity
-        style={[styles.postCard, { backgroundColor: C.card, borderColor: C.border }]}
-        onPress={() => router.push({
-          pathname: '/challenges/[id]/posts',
-          params: { 
-            id: id as string,
-            initialPostId: item.id,
-            initialIndex: index.toString()
-          }
-        })}
-        activeOpacity={0.8}
+        style={styles.gridPostCard}
+        activeOpacity={0.9}
+        onPress={() => {
+          setFullscreenIndex(index);
+          setShowFullscreen(true);
+          setTimeout(() => {
+            fullscreenListRef.current?.scrollToIndex({ index, animated: false });
+          }, 100);
+        }}
       >
-        <View style={styles.postMedia}>
-          {isVideo ? (
-            <>
-              <Image
-                source={{ uri: imageUrl || 'https://via.placeholder.com/200' }}
-                style={styles.postImage}
-                resizeMode="cover"
-              />
-              <View style={styles.playOverlay}>
-                <MaterialIcons name="play-circle-outline" size={40} color="#fff" />
-              </View>
-            </>
-          ) : (
+        {staticThumbnailUrl ? (
+          <Image
+            source={{ uri: staticThumbnailUrl }}
+            style={styles.gridPostImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.gridPostImage, styles.noMediaPlaceholder]}>
+            <MaterialIcons
+              name={isVideo ? 'video-library' : 'image'}
+              size={28}
+              color={C.textSecondary}
+            />
+          </View>
+        )}
+
+        {isVideo && (
+          <View style={styles.gridPlayBadge}>
+            <Feather name="play" size={14} color="#fff" />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  const renderPost = ({ item, index }: { item: any; index: number }) => {
+    return <GridPostCard item={item} index={index} />;
+  };
+
+  // Fullscreen post viewer component - matches feed style
+  const FullscreenPostViewer = ({ item, index, insets, C }: { item: any; index: number; insets: any; C: any }) => {
+    const videoRef = useRef<Video>(null);
+    const [isLoaded, setIsLoaded] = useState(false);
+    const [isMuted, setIsMuted] = useState(true);
+    const [videoProgress, setVideoProgress] = useState(0);
+    const [videoDuration, setVideoDuration] = useState(0);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const progressBarRef = useRef<View>(null);
+    const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
+
+    const mediaUrl = getPostMediaUrl(item) || '';
+    const isVideo =
+      item.type === 'video' ||
+      (mediaUrl !== null &&
+        mediaUrl !== '' &&
+        (mediaUrl.toLowerCase().includes('.mp4') ||
+          mediaUrl.toLowerCase().includes('.mov') ||
+          mediaUrl.toLowerCase().includes('.webm')));
+
+    const videoUrl = isVideo ? mediaUrl : null;
+    const imageUrl = !isVideo ? mediaUrl : null;
+    const fallbackImageUrl =
+      getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
+    const generatedThumbnail = useVideoThumbnail(
+      isVideo && videoUrl ? videoUrl : null,
+      fallbackImageUrl || '',
+      1000
+    );
+    const staticThumbnailUrl = isVideo
+      ? (generatedThumbnail || fallbackImageUrl || mediaUrl)
+      : (imageUrl || mediaUrl || fallbackImageUrl);
+
+    useEffect(() => {
+      if (isVideo && videoUrl && videoRef.current) {
+        // Auto-play when component mounts
+        videoRef.current.playAsync().catch(() => {});
+      }
+      return () => {
+        if (videoRef.current) {
+          videoRef.current.pauseAsync().catch(() => {});
+        }
+      };
+    }, [isVideo, videoUrl]);
+
+    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+      if (status.isLoaded) {
+        setIsLoaded(true);
+        setIsPlaying(status.isPlaying);
+        if (status.durationMillis && status.positionMillis !== undefined) {
+          const progress = status.durationMillis > 0
+            ? status.positionMillis / status.durationMillis
+            : 0;
+          setVideoProgress(progress);
+          setVideoDuration(status.durationMillis);
+        }
+      }
+    };
+
+    const handleVideoPress = () => {
+      if (isVideo) {
+        setIsMuted(prev => !prev);
+      }
+    };
+
+    const availableHeight = screenHeight - 80; // Full screen minus header
+
+    return (
+      <View style={[styles.fullscreenPostViewer, { height: availableHeight, width: screenWidth }]}>
+        <View style={styles.fullscreenMediaWrapper}>
+          {!isVideo && imageUrl ? (
             <Image
-              source={{ uri: imageUrl || 'https://via.placeholder.com/200' }}
-              style={styles.postImage}
+              source={{ uri: imageUrl }}
+              style={styles.fullscreenMediaImage}
+              resizeMode="contain"
+            />
+          ) : isVideo && staticThumbnailUrl && !isLoaded ? (
+            <Image
+              source={{ uri: staticThumbnailUrl }}
+              style={styles.fullscreenMediaImage}
               resizeMode="cover"
             />
+          ) : !isVideo ? (
+            <View style={[styles.fullscreenMediaImage, styles.noMediaPlaceholder]}>
+              <MaterialIcons name="image" size={48} color="#444" />
+            </View>
+          ) : null}
+
+          {isVideo && videoUrl && (
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={handleVideoPress}
+              style={styles.fullscreenVideoWrapper}
+            >
+              <Video
+                ref={videoRef}
+                source={{ 
+                  uri: videoUrl,
+                  headers: {
+                    'Cache-Control': 'public, max-age=31536000, immutable'
+                  }
+                }}
+                style={styles.fullscreenMediaVideo}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay={true}
+                isLooping={true}
+                isMuted={isMuted}
+                usePoster={false}
+                shouldCorrectPitch={true}
+                volume={isMuted ? 0 : 1}
+                useNativeControls={false}
+                progressUpdateIntervalMillis={100}
+                onLoadStart={() => {
+                  setIsLoaded(false);
+                }}
+                onLoad={() => {
+                  setIsLoaded(true);
+                  videoRef.current?.playAsync().catch(() => {});
+                }}
+                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+                onError={(error) => {
+                  console.error('❌ [Video] Playback error:', error);
+                }}
+              />
+              
+              {isMuted && (
+                <View style={styles.muteIndicatorOverlay}>
+                  <View style={styles.muteIndicatorBadge}>
+                    <Feather name="volume-x" size={32} color="rgba(255,255,255,0.8)" />
+                  </View>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Progress bar at bottom - only for videos */}
+          {isVideo && isLoaded && videoDuration > 0 && (
+            <View
+              ref={progressBarRef}
+              style={[
+                styles.progressBarContainerFullscreen,
+                {
+                  position: 'absolute',
+                  bottom: 60 + insets.bottom - 48,
+                  left: 0,
+                  right: 0,
+                },
+              ]}
+            >
+              <View style={styles.progressBarTrack}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${videoProgress * 100}%`,
+                      backgroundColor: '#60a5fa',
+                    }
+                  ]}
+                />
+              </View>
+            </View>
           )}
         </View>
-        
-        <View style={styles.postInfo}>
-          <Text style={[styles.postTitle, { color: C.text }]} numberOfLines={2}>
-            {item.title || item.description || 'Untitled'}
-          </Text>
-          
-          {item.user && (
-            <View style={styles.postUser}>
-              <Avatar
-                user={item.user}
-                size={20}
-                style={styles.postUserAvatar}
-              />
-              <Text style={[styles.postUsername, { color: C.textSecondary }]}>
-                {item.user.username}
+
+        {/* Post info at bottom */}
+        <View style={[styles.fullscreenPostInfo, { bottom: insets.bottom + 20 }]}>
+          <View style={styles.fullscreenPostInfoContent}>
+            {item.user && (
+              <TouchableOpacity onPress={() => {
+                if (item.user?.id) {
+                  router.push({
+                    pathname: '/user/[id]',
+                    params: { id: item.user.id }
+                  });
+                }
+              }}>
+                <Text style={styles.fullscreenUsername}>@{item.user?.username || 'unknown'}</Text>
+              </TouchableOpacity>
+            )}
+
+            {(item.caption || item.description || item.title) && (
+              <Text style={styles.fullscreenCaption} numberOfLines={2}>
+                {item.caption || item.description || item.title || ''}
               </Text>
-            </View>
-          )}
-          
-          <View style={styles.postStats}>
-            <View style={styles.postStat}>
-              <Feather name="heart" size={12} color={C.textSecondary} />
-              <Text style={[styles.postStatText, { color: C.textSecondary }]}>
-                {item.likes || item._count?.postLikes || 0}
+            )}
+
+            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
+              <Text style={styles.fullscreenTimestamp}>
+                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
               </Text>
-            </View>
-            <View style={styles.postStat}>
-              <Feather name="message-circle" size={12} color={C.textSecondary} />
-              <Text style={[styles.postStatText, { color: C.textSecondary }]}>
-                {item.comments_count || item._count?.comments || 0}
-              </Text>
-            </View>
+            )}
           </View>
         </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 
@@ -648,41 +887,204 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
-        {/* Posts Section */}
-        <View style={[styles.postsSection, { backgroundColor: C.background }]}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>
-            Challenge Posts ({posts.length})
-          </Text>
-          
-          {postsLoading ? (
-            <View style={styles.postsLoading}>
-              <ActivityIndicator size="small" color={C.primary} />
-            </View>
-          ) : posts.length === 0 ? (
-            <View style={styles.emptyPosts}>
-              <MaterialIcons name="video-library" size={48} color={C.textSecondary} />
-              <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                No posts yet
+        {/* Tabs for Posts and Participants */}
+        <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity
+              style={[
+                styles.tab,
+                activeTab === 'posts' && styles.tabActive
+              ]}
+              onPress={() => setActiveTab('posts')}
+            >
+              <MaterialIcons 
+                name="video-library" 
+                size={18} 
+                color={activeTab === 'posts' ? C.primary : C.textSecondary} 
+              />
+              <Text style={[
+                styles.tabText,
+                { color: activeTab === 'posts' ? C.primary : C.textSecondary }
+              ]}>
+                Posts ({postCount})
               </Text>
-              {challenge.is_participant && isActive() && (
-                <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
-                  Be the first to post!
-                </Text>
-              )}
-            </View>
-          ) : (
-            <FlatList
-              data={posts}
-              renderItem={renderPost}
-              keyExtractor={(item) => item.id}
-              numColumns={2}
-              columnWrapperStyle={styles.postsRow}
-              scrollEnabled={false}
-              contentContainerStyle={styles.postsGrid}
-            />
-          )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.tab,
+                activeTab === 'participants' && styles.tabActive
+              ]}
+              onPress={() => setActiveTab('participants')}
+            >
+              <MaterialIcons 
+                name="people" 
+                size={18} 
+                color={activeTab === 'participants' ? C.primary : C.textSecondary} 
+              />
+              <Text style={[
+                styles.tabText,
+                { color: activeTab === 'participants' ? C.primary : C.textSecondary }
+              ]}>
+                Participants ({participantCount})
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Posts Section */}
+        {activeTab === 'posts' && (
+          <View style={[styles.postsSection, { backgroundColor: C.background }]}>
+            {postsLoading ? (
+              <View style={styles.postsLoading}>
+                <ActivityIndicator size="small" color={C.primary} />
+              </View>
+            ) : posts.length === 0 ? (
+              <View style={styles.emptyPosts}>
+                <MaterialIcons name="video-library" size={48} color={C.textSecondary} />
+                <Text style={[styles.emptyText, { color: C.textSecondary }]}>
+                  No posts yet
+                </Text>
+                {challenge.is_participant && isActive() && (
+                  <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
+                    Be the first to post!
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <FlatList
+                data={posts}
+                renderItem={renderPost}
+                keyExtractor={(item) => item.id}
+                numColumns={3}
+                scrollEnabled={false}
+                contentContainerStyle={styles.postsGrid}
+              />
+            )}
+          </View>
+        )}
+
+        {/* Participants Section */}
+        {activeTab === 'participants' && (
+          <View style={[styles.participantsSection, { backgroundColor: C.background }]}>
+            {loadingAllParticipants ? (
+              <View style={styles.participantsLoading}>
+                <ActivityIndicator size="small" color={C.primary} />
+              </View>
+            ) : allParticipants.length === 0 ? (
+              <View style={styles.emptyParticipants}>
+                <MaterialIcons name="people-outline" size={48} color={C.textSecondary} />
+                <Text style={[styles.emptyText, { color: C.textSecondary }]}>
+                  No participants yet
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                data={allParticipants}
+                keyExtractor={(item) => item.user?.id || item.user_id || item.id || Math.random().toString()}
+                renderItem={({ item }) => {
+                  const participantUser = item.user || item;
+                  const postCount = item.post_count || 0;
+                  const joinedAt = item.joined_at || item.createdAt;
+                  
+                  return (
+                    <TouchableOpacity
+                      style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
+                      onPress={() => {
+                        if (participantUser.id || item.user_id) {
+                          router.push({
+                            pathname: '/user/[id]',
+                            params: { id: participantUser.id || item.user_id }
+                          });
+                        }
+                      }}
+                    >
+                      <Avatar
+                        user={participantUser}
+                        size={50}
+                        style={styles.participantAvatar}
+                      />
+                      <View style={styles.participantInfo}>
+                        <Text style={[styles.participantName, { color: C.text }]}>
+                          {participantUser.display_name || participantUser.username || 'Unknown'}
+                        </Text>
+                        <Text style={[styles.participantUsername, { color: C.textSecondary }]}>
+                          @{participantUser.username || 'unknown'}
+                        </Text>
+                        {joinedAt && (
+                          <Text style={[styles.participantJoined, { color: C.textSecondary }]}>
+                            Joined {new Date(joinedAt).toLocaleDateString()}
+                          </Text>
+                        )}
+                      </View>
+                      <View style={styles.participantStats}>
+                        <View style={styles.participantStat}>
+                          <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
+                          <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                            {postCount}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                }}
+                contentContainerStyle={styles.participantsList}
+              />
+            )}
+          </View>
+        )}
+        
+        {/* Add noticeable margin below content */}
+        <View style={{ height: 100, backgroundColor: C.background }} />
       </ScrollView>
+
+      {/* Fullscreen Post Viewer Modal */}
+      <Modal
+        visible={showFullscreen}
+        animationType="fade"
+        transparent={false}
+        onRequestClose={() => setShowFullscreen(false)}
+      >
+        <SafeAreaView style={[styles.fullscreenContainer, { backgroundColor: C.background }]} edges={['top']}>
+          <StatusBar barStyle="light-content" />
+          <View style={styles.fullscreenHeader}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowFullscreen(false)}
+            >
+              <Feather name="x" size={28} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.positionText}>
+              {fullscreenIndex + 1} / {posts.length}
+            </Text>
+          </View>
+
+          <FlatList
+            ref={fullscreenListRef}
+            data={posts}
+            renderItem={({ item, index }) => (
+              <FullscreenPostViewer item={item} index={index} insets={insets} C={C} />
+            )}
+            keyExtractor={(item) => item.id}
+            pagingEnabled
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(
+                event.nativeEvent.contentOffset.y /
+                  event.nativeEvent.layoutMeasurement.height
+              );
+              setFullscreenIndex(index);
+            }}
+            initialScrollIndex={fullscreenIndex}
+            getItemLayout={(data, index) => ({
+              length: Dimensions.get('window').height - 80,
+              offset: (Dimensions.get('window').height - 80) * index,
+              index,
+            })}
+          />
+        </SafeAreaView>
+      </Modal>
 
       {/* Participants Modal */}
       <Modal visible={participantsModalVisible} transparent animationType="slide">
@@ -761,70 +1163,71 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
+    backgroundColor: '#000',
+    zIndex: 10,
   },
   backButton: {
-    padding: 8,
+    padding: 10,
+    marginLeft: 0,
+    borderRadius: 8,
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
     textAlign: 'center',
+    paddingHorizontal: 16,
   },
   headerSpacer: {
-    width: 40,
+    width: 44,
   },
   scrollView: {
     flex: 1,
   },
   challengeHeader: {
-    padding: 24,
-    paddingTop: 20,
-    minHeight: 100,
+    padding: 20,
+    paddingTop: 16,
+    paddingBottom: 16,
   },
   headerContentWrapper: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    flexWrap: 'wrap',
     gap: 12,
+    marginBottom: 12,
   },
   badgesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    alignItems: 'flex-start',
     gap: 8,
-    flexShrink: 0,
-    width: 200,
+    alignItems: 'flex-start',
   },
   rewardBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    flexShrink: 0,
-    width: 96,
-    maxWidth: 96,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
+    gap: 4,
   },
   rewardBadgeText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
-    marginLeft: 6,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    flexShrink: 0,
-    width: 96,
-    maxWidth: 96,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
   statusText: {
     color: '#fff',
@@ -832,27 +1235,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   challengeTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     color: '#fff',
     flex: 1,
-    marginRight: 12,
-    minWidth: 0,
   },
   statsRow: {
     flexDirection: 'row',
+    gap: 24,
   },
   statItem: {
-    marginRight: 32,
+    alignItems: 'center',
   },
   statValue: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
     color: '#fff',
   },
   statLabel: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
     marginTop: 2,
   },
   detailsSection: {
@@ -964,32 +1366,143 @@ const styles = StyleSheet.create({
   postsSection: {
     padding: 20,
   },
+  postsGrid: {
+    padding: 1,
+  },
+  gridPostCard: {
+    width: POST_ITEM_SIZE,
+    height: POST_ITEM_SIZE,
+    margin: 1,
+    backgroundColor: '#1a1a1a',
+    position: 'relative',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  gridPostImage: {
+    width: '100%',
+    height: '100%',
+  },
+  noMediaPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+  },
+  gridPlayBadge: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
   },
+  tabsSection: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#2a2a2a',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  tab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: '#60a5fa',
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
   postsLoading: {
     paddingVertical: 40,
     alignItems: 'center',
   },
-  postsRow: {
-    justifyContent: 'space-between',
+  participantsSection: {
+    padding: 20,
   },
-  postsGrid: {
+  participantsLoading: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  participantsList: {
+    gap: 12,
+  },
+  participantItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+  },
+  participantAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  participantInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  participantName: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  participantUsername: {
+    fontSize: 14,
+  },
+  participantJoined: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  participantStats: {
+    alignItems: 'flex-end',
+  },
+  participantStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  participantStatText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  emptyParticipants: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  postsList: {
     paddingBottom: 20,
+    gap: 12,
   },
   postCard: {
-    width: (screenWidth - 52) / 2,
-    borderRadius: 12,
-    marginBottom: 12,
-    borderWidth: 1,
+    borderRadius: 16,
     overflow: 'hidden',
+    borderWidth: 1,
+    height: 280,
+    flexDirection: 'column',
   },
-  postMedia: {
+  postMediaContainer: {
+    flex: 1,
     width: '100%',
-    height: 140,
     position: 'relative',
+    backgroundColor: '#000',
   },
   postImage: {
     width: '100%',
@@ -1003,41 +1516,51 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.2)',
   },
   postInfo: {
-    padding: 12,
+    padding: 14,
+    backgroundColor: 'transparent',
+    gap: 10,
   },
-  postTitle: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  postUser: {
+  postUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
   },
   postUserAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    marginRight: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 10,
+  },
+  postUserDetails: {
+    flex: 1,
   },
   postUsername: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  postUserDisplayName: {
     fontSize: 12,
+    marginTop: 2,
+  },
+  postTitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
   },
   postStats: {
     flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
   },
   postStat: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
+    gap: 4,
   },
   postStatText: {
-    fontSize: 11,
-    marginLeft: 4,
+    fontSize: 12,
   },
   loadingContainer: {
     flex: 1,
@@ -1161,5 +1684,116 @@ const styles = StyleSheet.create({
     fontSize: 13,
     flex: 1,
     lineHeight: 18,
+  },
+  // Fullscreen Post Viewer Styles
+  fullscreenContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  fullscreenHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a2a',
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  positionText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fullscreenPostViewer: {
+    backgroundColor: '#000',
+  },
+  fullscreenMediaWrapper: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullscreenMediaImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fullscreenMediaVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  fullscreenVideoWrapper: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  muteIndicatorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  muteIndicatorBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 40,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  progressBarContainerFullscreen: {
+    height: 4,
+    paddingHorizontal: 0,
+    justifyContent: 'center',
+  },
+  progressBarTrack: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    width: '100%',
+    borderRadius: 2,
+  },
+  progressBarFill: {
+    height: 4,
+    borderRadius: 2,
+  },
+  fullscreenPostInfo: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  fullscreenPostInfoContent: {
+    gap: 4,
+  },
+  fullscreenUsername: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  fullscreenCaption: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  fullscreenTimestamp: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 4,
   },
 });

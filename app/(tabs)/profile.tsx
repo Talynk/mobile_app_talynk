@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
-import { userApi, postsApi, likesApi, viewsApi } from '@/lib/api';
+import { userApi, postsApi, likesApi } from '@/lib/api';
+// import { viewsApi } from '@/lib/api'; // COMMENTED OUT - Will implement later
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -30,6 +31,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { getFileUrl, getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
+import { useVideoMute } from '@/lib/hooks/use-video-mute';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -148,8 +150,8 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           <Text style={styles.postStatText}>{formatNumber(post.likes || 0)}</Text>
         </View>
         
-        {/* Views count button */}
-        {onViewsPress && (
+        {/* Views count button - COMMENTED OUT - Will implement later */}
+        {/* {onViewsPress && (
           <TouchableOpacity
             style={styles.postStats}
             onPress={(e) => {
@@ -161,7 +163,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
             <Feather name="eye" size={12} color="#fff" />
             <Text style={styles.postStatText}>{formatNumber((post as any).views || (post as any).view_count || 0)}</Text>
           </TouchableOpacity>
-        )}
+        )} */}
 
         {/* Status indicator */}
         <View style={[
@@ -313,10 +315,11 @@ export default function ProfileScreen() {
   // Video teaser playback state
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
-  const [viewsModalVisible, setViewsModalVisible] = useState(false);
-  const [viewsModalPostId, setViewsModalPostId] = useState<string | null>(null);
-  const [viewsData, setViewsData] = useState<any[]>([]);
-  const [loadingViews, setLoadingViews] = useState(false);
+  // COMMENTED OUT - Will implement later
+  // const [viewsModalVisible, setViewsModalVisible] = useState(false);
+  // const [viewsModalPostId, setViewsModalPostId] = useState<string | null>(null);
+  // const [viewsData, setViewsData] = useState<any[]>([]);
+  // const [loadingViews, setLoadingViews] = useState(false);
   const [likesModalVisible, setLikesModalVisible] = useState(false);
   const [likesData, setLikesData] = useState<any[]>([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
@@ -552,6 +555,13 @@ export default function ProfileScreen() {
         }
 
         setPosts(filteredPosts);
+
+        // Update profile posts_count to only show published posts (exclude drafts)
+        const publishedPostsCount = response.data.posts.filter((p: any) => p.status !== 'draft').length;
+        setProfile(prevProfile => ({
+          ...prevProfile,
+          posts_count: publishedPostsCount,
+        }));
 
         // Calculate total likes
         const likes = filteredPosts.reduce((sum: number, post: any) => {
@@ -968,25 +978,27 @@ export default function ProfileScreen() {
             }
           });
         }}
-        onViewsPress={async () => {
-          setViewsModalPostId(item.id);
-          setViewsModalVisible(true);
-          setLoadingViews(true);
-          try {
-            const response = await viewsApi.getViewStats(item.id);
-            if (response.status === 'success' && response.data?.recentViews) {
-              setViewsData(response.data.recentViews);
-            } else {
-              setViewsData([]);
-            }
-          } catch (error) {
-            console.error('Error loading views:', error);
-            setViewsData([]);
-            Alert.alert('Error', 'Failed to load views');
-          } finally {
-            setLoadingViews(false);
-          }
-        }}
+        onViewsPress={undefined}
+        // COMMENTED OUT - Will implement later
+        // onViewsPress={async () => {
+        //   setViewsModalPostId(item.id);
+        //   setViewsModalVisible(true);
+        //   setLoadingViews(true);
+        //   try {
+        //     const response = await viewsApi.getViewStats(item.id);
+        //     if (response.status === 'success' && response.data?.recentViews) {
+        //       setViewsData(response.data.recentViews);
+        //     } else {
+        //       setViewsData([]);
+        //     }
+        //   } catch (error) {
+        //     console.error('Error loading views:', error);
+        //     setViewsData([]);
+        //     Alert.alert('Error', 'Failed to load views');
+        //   } finally {
+        //     setLoadingViews(false);
+        //   }
+        // }}
         onOptionsPress={() => {
           if (__DEV__) {
             console.log('⚙️ [renderPost] Options pressed for post:', {
@@ -1253,8 +1265,8 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Views Modal */}
-      <Modal visible={viewsModalVisible} transparent animationType="slide">
+      {/* Views Modal - COMMENTED OUT - Will implement later */}
+      {/* <Modal visible={viewsModalVisible} transparent animationType="slide">
         <TouchableOpacity
           style={styles.menuOverlay}
           onPress={() => setViewsModalVisible(false)}
@@ -1315,7 +1327,7 @@ export default function ProfileScreen() {
             )}
           </View>
         </TouchableOpacity>
-      </Modal>
+      </Modal> */}
 
       {/* Likes Modal */}
       <Modal visible={likesModalVisible} transparent animationType="slide">

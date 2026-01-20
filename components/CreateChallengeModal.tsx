@@ -168,20 +168,20 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
 
                         <View style={styles.row}>
                             <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                                <Text style={styles.label}>Start Date (YYYY-MM-DD)</Text>
+                                <Text style={styles.label} numberOfLines={1}>Start Date</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="2024-01-01"
+                                    placeholder="YYYY-MM-DD"
                                     placeholderTextColor="#666"
                                     value={formData.start_date}
                                     onChangeText={(text) => updateField('start_date', text)}
                                 />
                             </View>
                             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                                <Text style={styles.label}>End Date (YYYY-MM-DD)</Text>
+                                <Text style={styles.label} numberOfLines={1}>End Date</Text>
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="2024-02-01"
+                                    placeholder="YYYY-MM-DD"
                                     placeholderTextColor="#666"
                                     value={formData.end_date}
                                     onChangeText={(text) => updateField('end_date', text)}

@@ -33,9 +33,10 @@ interface Challenge {
 interface ChallengesListProps {
     onCreateChallenge: () => void;
     refreshTrigger?: number;
+    activeTab?: 'created' | 'joined' | 'not-joined';
 }
 
-export default function ChallengesList({ onCreateChallenge, refreshTrigger }: ChallengesListProps) {
+export default function ChallengesList({ onCreateChallenge, refreshTrigger, activeTab = 'created' }: ChallengesListProps) {
     const [challenges, setChallenges] = useState<Challenge[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -43,59 +44,86 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
 
     const fetchChallenges = async () => {
         try {
-            // Fetch active challenges (includes approved status automatically)
-            const activeResponse = await challengesApi.getAll('active');
-            let activeChallenges: Challenge[] = [];
-            
-            if (activeResponse.status === 'success') {
-                const data = activeResponse.data?.challenges || activeResponse.data || [];
-                activeChallenges = Array.isArray(data) ? data : [];
-                // Ensure we include challenges with 'approved' status as active
-                activeChallenges = activeChallenges.filter((ch: any) => 
-                    ch.status === 'active' || ch.status === 'approved'
-                );
+            setLoading(true);
+            setRefreshing(true);
+
+            if (!user) {
+                setChallenges([]);
+                setLoading(false);
+                setRefreshing(false);
+                return;
             }
 
-            // Also fetch pending challenges created by the current user
-            let myPendingChallenges: Challenge[] = [];
-            if (user) {
-                try {
-                    const myChallengesResponse = await challengesApi.getMyChallenges();
-                    if (myChallengesResponse.status === 'success') {
-                        const myData = myChallengesResponse.data?.challenges || myChallengesResponse.data || [];
-                        const allMyChallenges = Array.isArray(myData) ? myData : [];
-                        // Filter for pending challenges
-                        myPendingChallenges = allMyChallenges.filter((ch: any) => ch.status === 'pending');
-                    }
-                } catch (error) {
-                    console.error('Error fetching my challenges:', error);
+            let challengesToDisplay: Challenge[] = [];
+
+            if (activeTab === 'created') {
+                // Fetch NOT-JOINED challenges (user hasn't created or joined)
+                const allResponse = await challengesApi.getAll('active');
+                const createdResponse = await challengesApi.getMyChallenges();
+                const joinedResponse = await challengesApi.getJoinedChallenges();
+
+                let allChallenges: Challenge[] = [];
+                if (allResponse.status === 'success') {
+                    const data = allResponse.data?.challenges || allResponse.data || [];
+                    allChallenges = Array.isArray(data) ? data : [];
+                }
+
+                const createdIds = new Set<string>();
+                if (createdResponse.status === 'success') {
+                    const created = createdResponse.data?.challenges || [];
+                    Array.isArray(created) && created.forEach((ch: any) => createdIds.add(ch.id));
+                }
+
+                const joinedIds = new Set<string>();
+                if (joinedResponse.status === 'success') {
+                    const joined = joinedResponse.data || [];
+                    Array.isArray(joined) && joined.forEach((item: any) => {
+                        const ch = item.challenge || item;
+                        joinedIds.add(ch.id);
+                    });
+                }
+
+                // Filter: not created by user AND not joined by user
+                challengesToDisplay = allChallenges.filter((ch: any) => 
+                    !createdIds.has(ch.id) && !joinedIds.has(ch.id)
+                );
+            } else if (activeTab === 'joined') {
+                // Fetch user's joined challenges
+                const response = await challengesApi.getJoinedChallenges();
+                if (response.status === 'success') {
+                    const data = response.data || [];
+                    // Extract challenge from participations wrapper if needed
+                    challengesToDisplay = Array.isArray(data) 
+                        ? data.map((item: any) => item.challenge || item)
+                        : [];
+                }
+            } else if (activeTab === 'not-joined') {
+                // Fetch user's CREATED challenges
+                const response = await challengesApi.getMyChallenges();
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    challengesToDisplay = Array.isArray(data) ? data : [];
                 }
             }
 
-            // Combine active and pending challenges, removing duplicates
-            const allChallenges = [...activeChallenges, ...myPendingChallenges];
-            const uniqueChallenges = allChallenges.filter((challenge, index, self) =>
-                index === self.findIndex((c) => c.id === challenge.id)
-            );
-
             // Sort by creation date (newest first)
-            uniqueChallenges.sort((a, b) => {
+            challengesToDisplay.sort((a, b) => {
                 const dateA = new Date((a as any).createdAt || a.start_date).getTime();
                 const dateB = new Date((b as any).createdAt || b.start_date).getTime();
                 return dateB - dateA;
             });
 
-            setChallenges(uniqueChallenges);
+            setChallenges(challengesToDisplay);
 
             if (__DEV__) {
-                console.log('📋 [ChallengesList] Fetched challenges:', {
-                    active: activeChallenges.length,
-                    pending: myPendingChallenges.length,
-                    total: uniqueChallenges.length,
+                console.log('📋 [ChallengesList] Fetched challenges for tab:', {
+                    tab: activeTab,
+                    count: challengesToDisplay.length,
                 });
             }
         } catch (error) {
-            console.error('Error fetching challenges:', error);
+            console.error('[ChallengesList] Error fetching challenges:', error);
+            setChallenges([]);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -104,7 +132,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
 
     useEffect(() => {
         fetchChallenges();
-    }, [user, refreshTrigger]);
+    }, [activeTab, user, refreshTrigger]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -270,13 +298,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
         );
     };
 
-    if (loading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#60a5fa" />
-            </View>
-        );
-    }
+    const filteredChallenges = challenges;
 
     return (
         <View style={styles.container}>
@@ -291,7 +313,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
             </View>
 
             <FlatList
-                data={challenges}
+                data={filteredChallenges}
                 renderItem={renderChallengeItem}
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContent}
@@ -301,8 +323,16 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
                         <Feather name="award" size={48} color="#333" />
-                        <Text style={styles.emptyText}>No active challenges</Text>
-                        <Text style={styles.emptySubtext}>Create one to get started!</Text>
+                        <Text style={styles.emptyText}>
+                            {activeTab === 'created' ? 'No challenges created' : 
+                             activeTab === 'joined' ? 'No challenges joined' : 
+                             'No challenges available'}
+                        </Text>
+                        <Text style={styles.emptySubtext}>
+                            {activeTab === 'created' ? 'Create one to get started!' :
+                             activeTab === 'joined' ? 'Join a challenge to participate!' :
+                             'Check back later!'}
+                        </Text>
                     </View>
                 }
             />

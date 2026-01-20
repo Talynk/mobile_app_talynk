@@ -42,6 +42,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [formData, setFormData] = useState({
     phone1: '',
     phone2: '',
+    bio: '',
   });
   const [loading, setLoading] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       setFormData({
         phone1: user.phone1 || '',
         phone2: user.phone2 || '',
+        bio: user.bio || '',
       });
     }
   }, [user, isVisible]);
@@ -70,6 +72,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         updateData.phone2 = formData.phone2.trim();
       }
 
+      if (formData.bio.trim()) {
+        updateData.bio = formData.bio.trim();
+      }
+
       console.log('Sending profile update with data:', updateData);
 
       const response = await userApi.updateProfile(updateData, profileImage || undefined);
@@ -79,7 +85,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
         onProfileUpdated({
           ...user!,
           ...formData,
-          ...(response.data && { profile_picture: response.data.profile_picture }),
+          ...(response.data && {
+            profile_picture: (response.data as any).profile_picture,
+            bio: (response.data as any).bio ?? formData.bio,
+          }),
         });
         onClose();
       } else {
@@ -198,6 +207,19 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   keyboardType="phone-pad"
                 />
               </View>
+
+              {/* Bio */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Bio</Text>
+                <TextInput
+                  style={[styles.input, styles.bioInput]}
+                  value={formData.bio}
+                  onChangeText={(value) => setFormData(prev => ({ ...prev, bio: value }))}
+                  placeholder="Tell others a bit about yourself..."
+                  placeholderTextColor="#666"
+                  multiline
+                />
+              </View>
             </View>
           </ScrollView>
         </View>
@@ -301,15 +323,8 @@ const styles = StyleSheet.create({
     color: '#f3f4f6',
     fontSize: 16,
   },
-  textArea: {
-    backgroundColor: '#232326',
-    borderWidth: 1,
-    borderColor: '#27272a',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#f3f4f6',
-    fontSize: 16,
+  bioInput: {
     minHeight: 100,
+    textAlignVertical: 'top',
   },
 }); 

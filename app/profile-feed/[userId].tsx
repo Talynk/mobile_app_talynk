@@ -71,23 +71,10 @@ const formatNumber = (num: number): string => {
   return num.toString();
 };
 
-const timeAgo = (date: string): string => {
-  const now = new Date();
-  const postDate = new Date(date);
-  const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
-
-  if (diffInSeconds < 60) return `${diffInSeconds}s`;
-  const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60) return `${diffInMinutes}m`;
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24) return `${diffInHours}h`;
-  const diffInDays = Math.floor(diffInHours / 24);
-  if (diffInDays < 7) return `${diffInDays}d`;
-  return postDate.toLocaleDateString();
-};
 
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
+import { timeAgo } from '@/lib/utils/time-ago';
 
 const getMediaUrl = (post: Post): string | null => {
   return getPostMediaUrl(post);
@@ -193,8 +180,12 @@ const PostItem: React.FC<PostItemProps> = ({
       allKeys: Object.keys(item),
     });
   }
-  const isVideo = item.type === 'video' || !!item.video_url || 
-    (mediaUrl !== null && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+  const isVideo =
+    item.type === 'video' ||
+    (mediaUrl !== null &&
+      (mediaUrl.includes('.mp4') ||
+        mediaUrl.includes('.mov') ||
+        mediaUrl.includes('.webm')));
 
   useEffect(() => {
     if (!videoRef.current || useNativeControls || !isVideo) return;
@@ -517,6 +508,12 @@ const PostItem: React.FC<PostItemProps> = ({
                 text={item.caption || item.description || item.title || ''} 
                 maxLines={2} 
               />
+            )}
+            {/* Timestamp */}
+            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
+              <Text style={styles.timestamp}>
+                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
+              </Text>
             )}
           </View>
 
@@ -1213,6 +1210,14 @@ const styles = StyleSheet.create({
     color: '#aaa',
     fontSize: 14,
     marginTop: 4,
+  },
+  timestamp: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 11,
+    marginTop: 4,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   categoryBadge: {
     backgroundColor: 'rgba(96, 165, 250, 0.8)',

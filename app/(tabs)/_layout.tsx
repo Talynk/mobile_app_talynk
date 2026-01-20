@@ -64,6 +64,9 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
 
         // Other tabs
         const isNotificationsTab = idx === 3; // Notifications is at index 3
+        const icon = icons[idx];
+        
+        if (!icon) return null;
         
         return (
           <TouchableOpacity
@@ -72,7 +75,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
             activeOpacity={0.8}
             style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 50, position: 'relative' }}
           >
-            {React.cloneElement(icons[idx], { 
+            {React.cloneElement(icon, { 
               color: isFocused ? active : inactive,
               size: isFocused ? 28 : 24
             })}

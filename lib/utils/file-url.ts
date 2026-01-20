@@ -82,8 +82,15 @@ export function getPostMediaUrl(post: any): string | null {
     });
   }
 
-  // Check for fullUrl first (from API response), then video_url/image, then imageUrl
-  const url = post?.fullUrl || post?.video_url || post?.image || post?.imageUrl || '';
+  // Check for fullUrl first (from API response), then various video / image fields
+  const url =
+    post?.fullUrl ||
+    post?.video_url ||
+    post?.videoUrl ||
+    post?.image ||
+    post?.imageUrl ||
+    post?.mediaUrl ||
+    '';
   
   if (__DEV__) {
     console.log('🔗 [getPostMediaUrl] Found URL:', url);

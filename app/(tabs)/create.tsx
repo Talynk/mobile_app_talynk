@@ -32,10 +32,6 @@ import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import ViewShot from 'react-native-view-shot';
-import { WatermarkOverlay } from '@/lib/utils/watermark';
-import { captureRef } from 'react-native-view-shot';
-import watermarkLogo from '../../assets/images/watermark_logo.png';
 import Constants from 'expo-constants';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -79,6 +75,7 @@ export default function CreatePostScreen() {
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [editedVideoUri, setEditedVideoUri] = useState<string | null>(null);
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(null);
+  const [serverMediaUrl, setServerMediaUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errors, setErrors] = useState<{ [k: string]: string }>({});
@@ -93,12 +90,9 @@ export default function CreatePostScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [showPostActionModal, setShowPostActionModal] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const cameraViewShotRef = useRef<ViewShot>(null);
-  const watermarkViewRef = useRef<View>(null);
-  const imageCompositeRef = useRef<ViewShot>(null); // For compositing image + watermark
-  const [tempImageUri, setTempImageUri] = useState<string | null>(null); // Temporary image for compositing
   const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
@@ -137,16 +131,14 @@ export default function CreatePostScreen() {
 
 
   // --- CONFIGURE AUDIO MODE ---
-  // Initialize audio mode on component mount
   useEffect(() => {
     const configureAudio = async () => {
       try {
-        // Set initial audio mode for recording
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,                  // Required during recording
-          playsInSilentModeIOS: true,                // Play audio even in silent mode
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
           shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,         // Force speaker on Android
+          playThroughEarpieceAndroid: false,
         });
         console.log('Audio mode configured for recording');
       } catch (error) {
@@ -156,7 +148,6 @@ export default function CreatePostScreen() {
     configureAudio();
   }, []);
 
-  // Preferred category order
   const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
 
   // --- FETCH CATEGORIES ---
@@ -170,7 +161,6 @@ export default function CreatePostScreen() {
       if (res.status === 'success' && (res.data as any)?.categories) {
         const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
         const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
-        // Sort categories according to preferred order
         mains.sort((a, b) => {
           const indexA = CATEGORY_ORDER.indexOf(a.name);
           const indexB = CATEGORY_ORDER.indexOf(b.name);
@@ -201,7 +191,7 @@ export default function CreatePostScreen() {
     loadSubs();
   }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
-  // Fetch joined challenges when authenticated
+  // Fetch joined challenges
   useEffect(() => {
     const fetchJoinedChallenges = async () => {
       if (!isAuthenticated || authLoading) {
@@ -219,15 +209,11 @@ export default function CreatePostScreen() {
         });
         
         if (response.status === 'success' && response.data && Array.isArray(response.data)) {
-          // Extract challenge objects from the response
-          // Each item has a nested 'challenge' property according to the API docs
           const challenges = response.data
             .map((item: any) => {
-              // Handle the API response structure: item.challenge contains the challenge object
               if (item.challenge) {
                 return item.challenge;
               }
-              // Fallback: if challenge is already at root level
               return item;
             })
             .filter((challenge: any) => challenge && challenge.id && challenge.name);
@@ -235,7 +221,6 @@ export default function CreatePostScreen() {
           console.log('[Create] Extracted challenges:', challenges.length, challenges);
           setJoinedChallenges(challenges);
           
-          // Auto-select challenge if passed via params
           if (params.challengeId && challenges.some((c: any) => c.id === params.challengeId)) {
             setSelectedChallengeId(params.challengeId as string);
             console.log('[Create] Auto-selected challenge:', params.challengeId);
@@ -260,11 +245,22 @@ export default function CreatePostScreen() {
     fetchJoinedChallenges();
   }, [isAuthenticated, authLoading, params.challengeId]);
 
+  // --- Handle camera mode changes ---
+  useEffect(() => {
+    if (showCamera && cameraRef.current) {
+      console.log('[Camera] Mode changed to:', cameraMode);
+      setIsCameraReady(false); // Reset ready state when mode changes
+      const timeoutId = setTimeout(() => {
+        console.log('[Camera] Reconfigured for mode:', cameraMode);
+      }, 100);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [cameraMode, showCamera]);
+
   // --- CAMERA RECORDING ---
-  // Define handleRecordVideo with useCallback so it can be used in useEffect
   const handleRecordVideo = useCallback(async () => {
     try {
-      // Request camera permission
       if (!cameraPermission?.granted) {
         const cameraResult = await requestCameraPermission();
         if (!cameraResult.granted) {
@@ -273,8 +269,7 @@ export default function CreatePostScreen() {
         }
       }
 
-      // Request microphone permission for audio recording
-      if (!microphonePermission?.granted) {
+      if (cameraMode === 'video' && !microphonePermission?.granted) {
         const micResult = await requestMicrophonePermission();
         if (!micResult.granted) {
           Alert.alert('Permission Required', 'Microphone permission is required to record audio with your video.');
@@ -282,28 +277,27 @@ export default function CreatePostScreen() {
         }
       }
 
-      // CRITICAL: Set audio mode for recording before opening camera
-      // This ensures the audio session is ready when the camera opens
       try {
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,  // CRITICAL: Required for iOS audio recording
+          allowsRecordingIOS: cameraMode === 'video',
           playsInSilentModeIOS: true,
           shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,
         });
-        // Small delay to ensure audio mode is fully initialized
         await new Promise(resolve => setTimeout(resolve, 200));
       } catch (audioError) {
-        console.error('Error setting audio mode before camera:', audioError);
+        console.error('Error setting audio mode:', audioError);
       }
 
       setShowCamera(true);
       setRecordingDuration(0);
+      setCameraMode('video');
+      
     } catch (error: any) {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
     }
-  }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission]);
+  }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission, cameraMode]);
 
   // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
   useEffect(() => {
@@ -313,8 +307,6 @@ export default function CreatePostScreen() {
 
     setHasOpenedCameraOnMount(true);
 
-    // Small delay so the screen can finish rendering before opening the native camera.
-    // This makes auto-open more reliable on some devices / platforms.
     const timeoutId = setTimeout(() => {
       handleRecordVideo();
     }, 400);
@@ -325,9 +317,6 @@ export default function CreatePostScreen() {
   }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo]);
 
   // --- CATEGORY HELPERS ---
-  // All category data (main + sub) now comes directly from the backend response,
-  // so we never hardcode groups or subcategories. This keeps the UI in sync
-  // with whatever the backend currently holds.
   const getCategoriesForGroup = () => {
     if (!selectedGroup) return [];
     const parent = mainCategories.find(c => c.name === selectedGroup);
@@ -339,7 +328,6 @@ export default function CreatePostScreen() {
     const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
     if (foundSub) return foundSub.name;
 
-    // Fallback to loaded mainCategories (server-provided category structure)
     const foundFromLoaded = mainCategories
       .flatMap(c => c.children || [])
       .find(cat => String(cat.id) === selectedCategoryId);
@@ -352,46 +340,163 @@ export default function CreatePostScreen() {
     return selectedCategoryId || '';
   };
 
-  // Show loading screen while checking authentication
-  if (authLoading) {
-    return (
-      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={C.primary} />
-        <Text style={[{ fontSize: 16, marginTop: 12, fontWeight: '500' }, { color: C.text }]}>Loading...</Text>
-      </View>
-    );
-  }
+  // --- Helper function to process captured image ---
+  const processCapturedImage = async (imageUri: string) => {
+    try {
+      const verifiedInfo = await FileSystem.getInfoAsync(imageUri);
+      if (!verifiedInfo.exists) {
+        throw new Error('Image file not found after capture');
+      }
+      
+      let destPath = imageUri;
+      const timestamp = Date.now();
+      const fileName = `photo_${timestamp}.jpg`;
+      const cacheDir = FileSystem.cacheDirectory;
+      
+      try {
+        destPath = `${cacheDir}${fileName}`;
+        await FileSystem.copyAsync({
+          from: imageUri,
+          to: destPath,
+        });
+        
+        const copiedInfo = await FileSystem.getInfoAsync(destPath);
+        if (!copiedInfo.exists || ((copiedInfo as any).size < 1000)) {
+          console.warn('[Camera] Cache copy failed, using original URI');
+          destPath = imageUri;
+        }
+      } catch (copyError) {
+        console.warn('[Camera] Could not copy to cache:', copyError);
+        destPath = imageUri;
+      }
+      
+      console.log('[Camera] Image ready:', destPath);
+      
+      setRecordedVideoUri(null);
+      setEditedVideoUri(null);
+      setShowCamera(false);
+      setCapturedImageUri(destPath);
+      showToast('Image captured successfully!');
+      
+    } catch (processError: any) {
+      console.error('Image processing error:', processError);
+      Alert.alert('Processing Error', 'Failed to process captured image. Please try again.');
+    }
+  };
 
-  // Show login prompt if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <MaterialIcons name="lock" size={64} color={C.primary} />
-        <Text style={[{ fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 12, textAlign: 'center' }, { color: C.text }]}>Authentication Required</Text>
-        <Text style={[{ fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 32 }, { color: C.textSecondary }]}>
-          You need to be logged in to create posts and share your content with the community.
-        </Text>
-        <TouchableOpacity
-          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.primary }]}
-          onPress={() => router.push('/auth/login')}
-        >
-          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
-          onPress={() => router.replace('/')}
-        >
-          <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // --- IMAGE CAPTURE ---
+  const takePicture = async () => {
+    if (!cameraRef.current) {
+      console.error('[Camera] Camera ref is not available');
+      Alert.alert('Error', 'Camera is not ready. Please try again.');
+      return;
+    }
+
+    try {
+      // Verify camera is ready and mode is correct
+      if (!isCameraReady) {
+        console.warn('[Camera] Camera is still initializing, waiting...');
+        // Wait up to 2 seconds for camera to be ready
+        let waitCount = 0;
+        while (!isCameraReady && waitCount < 20) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          waitCount++;
+        }
+        if (!isCameraReady) {
+          console.error('[Camera] Camera failed to initialize');
+          Alert.alert('Error', 'Camera is not ready. Please try again.');
+          return;
+        }
+      }
+      
+      // Verify we're in picture mode before capturing
+      if (cameraMode !== 'picture') {
+        console.error('[Camera] Camera is not in picture mode:', cameraMode);
+        Alert.alert('Error', 'Camera must be in picture mode to take photos.');
+        return;
+      }
+      
+      console.log('[Camera] Taking picture with mode:', cameraMode, 'facing:', cameraFacing);
+      
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.9,
+        base64: false,
+        exif: true,
+        skipProcessing: false,
+        imageType: 'jpg',
+        scale: 1,
+        isImageMirror: cameraFacing === 'front',
+      });
+      
+      // Check if photo is null/undefined
+      if (!photo) {
+        console.error('[Camera] takePictureAsync returned null/undefined');
+        console.error('[Camera] Camera state:', {
+          hasRef: !!cameraRef.current,
+          mode: cameraMode,
+          ready: isCameraReady,
+          facing: cameraFacing
+        });
+        Alert.alert('Error', 'Failed to capture image. Camera returned no data. Please try again.');
+        return;
+      }
+      
+      console.log('[Camera] Photo captured successfully:', {
+        uri: photo.uri,
+        width: photo.width,
+        height: photo.height,
+        exif: photo.exif ? 'yes' : 'no'
+      });
+      
+      if (photo && photo.uri) {
+        const fileInfo = await FileSystem.getInfoAsync(photo.uri);
+        console.log('[Camera] Image file info:', {
+          exists: fileInfo.exists,
+          size: fileInfo.exists ? (fileInfo as any).size : 0,
+          uri: photo.uri
+        });
+        
+        if (!fileInfo.exists || ((fileInfo as any).size < 1000)) {
+          console.error('[Camera] Image file is too small or invalid:', (fileInfo as any).size);
+          
+          // Attempt fallback capture
+          try {
+            const fallbackPhoto = await cameraRef.current?.takePictureAsync({
+              quality: 0.8,
+              skipProcessing: true,
+            });
+            
+            if (fallbackPhoto?.uri) {
+              const fallbackInfo = await FileSystem.getInfoAsync(fallbackPhoto.uri);
+              if (fallbackInfo.exists && ((fallbackInfo as any).size > 1000)) {
+                console.log('[Camera] Fallback capture successful');
+                await processCapturedImage(fallbackPhoto.uri);
+                return;
+              }
+            }
+          } catch (fallbackError) {
+            console.error('[Camera] Fallback capture failed:', fallbackError);
+          }
+          
+          Alert.alert('Error', 'Failed to capture valid image. Please try again.');
+          return;
+        }
+        
+        await processCapturedImage(photo.uri);
+      } else {
+        Alert.alert('Error', 'No image data returned from camera.');
+      }
+    } catch (error: any) {
+      console.error('Image capture error:', error);
+      console.error('[Camera] Error stack:', error.stack);
+      Alert.alert('Capture Error', `Failed to take picture: ${error.message || 'Please try again'}`);
+    }
+  };
 
   const startRecording = async () => {
     if (!cameraRef.current) return;
 
     try {
-      // Double-check microphone permission before recording
       if (!microphonePermission?.granted) {
         const micResult = await requestMicrophonePermission();
         if (!micResult.granted) {
@@ -408,11 +513,9 @@ export default function CreatePostScreen() {
       setIsRecording(true);
       setRecordingDuration(0);
       
-      // Start duration timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
-          // Auto-stop at 2:30 (150 seconds)
           if (newDuration >= 150) {
             stopRecording();
             return 150;
@@ -421,21 +524,15 @@ export default function CreatePostScreen() {
         });
       }, 1000);
 
-      // CRITICAL: Set audio mode for recording BEFORE starting
-      // This must be done right before recording to ensure proper audio capture
-      // The order and timing here is critical for audio to work properly
       try {
-        // First, ensure we're in recording mode with optimal settings
-        // These settings help capture louder, clearer audio
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,  // CRITICAL: Required for iOS audio recording
+          allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
-          shouldDuckAndroid: false,  // Don't duck other audio on Android
-          playThroughEarpieceAndroid: false, // Use speaker, not earpiece
-          staysActiveInBackground: false, // Don't need background recording
+          shouldDuckAndroid: false,
+          playThroughEarpieceAndroid: false,
+          staysActiveInBackground: false,
         });
         
-        // Verify microphone permission is still granted
         if (!microphonePermission?.granted) {
           console.error('Microphone permission not granted before recording');
           Alert.alert('Error', 'Microphone permission is required for audio recording.');
@@ -443,9 +540,6 @@ export default function CreatePostScreen() {
           return;
         }
         
-        // Small delay to ensure audio session is fully initialized
-        // This is critical - without this delay, audio might not be captured properly
-        // Increased delay slightly to ensure audio session is ready
         await new Promise(resolve => setTimeout(resolve, 200));
         
         console.log('Audio mode set for recording, microphone permission verified');
@@ -456,36 +550,26 @@ export default function CreatePostScreen() {
         return;
       }
 
-      // Start recording (this is async and will resolve when stopRecording is called)
-      // Enhanced audio settings for better quality and volume
-      // CRITICAL: These settings aim to capture clear, loud audio like native camera apps
       const recordingOptions: any = {
-        maxDuration: 150, // 2:30 minutes in seconds
-        mute: false, // CRITICAL: Ensure audio is not muted - explicitly set to false
-        quality: 'high', // Use high quality recording
+        maxDuration: 150,
+        mute: false,
+        quality: 'high',
       };
       
-      // Platform-specific options with enhanced audio settings
       if (Platform.OS === 'ios') {
         recordingOptions.codec = 'h264';
         recordingOptions.extension = '.mov';
-        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // iOS audio settings optimized for clear, loud audio
-        recordingOptions.audioBitrate = 192000; // Increased from 128kbps for better quality
-        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
-        recordingOptions.audioChannels = 2; // Stereo audio
-        // Note: iOS handles noise suppression automatically, but higher bitrate helps
+        recordingOptions.videoBitrate = 5000000;
+        recordingOptions.audioBitrate = 192000;
+        recordingOptions.audioSampleRate = 48000;
+        recordingOptions.audioChannels = 2;
       } else {
-        // Android settings optimized for clear, loud audio
-        recordingOptions.maxFileSize = 100 * 1024 * 1024; // 100MB max for Android
+        recordingOptions.maxFileSize = 100 * 1024 * 1024;
         recordingOptions.extension = '.mp4';
-        recordingOptions.videoBitrate = 5000000; // 5 Mbps video
-        // Android audio settings - optimized for video recording (like native camera)
-        recordingOptions.audioBitrate = 256000; // Higher audio bitrate (256 kbps) for better quality
-        recordingOptions.audioSampleRate = 48000; // Higher sample rate (48kHz) for better quality
-        recordingOptions.audioChannels = 2; // Stereo audio (2 channels)
-        // Try to use video-optimized audio source if available
-        // Note: expo-camera may not expose audioSource directly, but higher bitrate helps
+        recordingOptions.videoBitrate = 5000000;
+        recordingOptions.audioBitrate = 256000;
+        recordingOptions.audioSampleRate = 48000;
+        recordingOptions.audioChannels = 2;
       }
       
       console.log('Starting recording with options:', recordingOptions);
@@ -494,7 +578,6 @@ export default function CreatePostScreen() {
       const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
       
       recordingPromise.then((video) => {
-        // This will be called when recording stops
         setIsRecording(false);
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
@@ -514,9 +597,8 @@ export default function CreatePostScreen() {
 
           setRecordedVideoUri(video.uri);
           setEditedVideoUri(null);
-          setCapturedImageUri(null); // Clear image when video is recorded
+          setCapturedImageUri(null);
           
-          // Generate thumbnail
           generateThumbnail(video.uri).then((thumb) => {
             setThumbnailUri(thumb);
           }).catch((thumbError) => {
@@ -525,7 +607,6 @@ export default function CreatePostScreen() {
           
           setShowCamera(false);
           setRecordingDuration(0);
-          // Don't show modal - buttons will be in the form
         } else {
           Alert.alert('Error', 'Failed to save video. Please try again.');
           setShowCamera(false);
@@ -538,7 +619,6 @@ export default function CreatePostScreen() {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
         }
-        // Don't show error if user cancelled
         if (error?.message && !error.message.includes('cancel')) {
           Alert.alert('Error', 'Failed to record video. Please try again.');
         }
@@ -565,7 +645,6 @@ export default function CreatePostScreen() {
       recordingTimerRef.current = null;
     }
 
-    // stopRecording() returns void, the video comes from the promise in startRecording
     cameraRef.current.stopRecording();
   };
 
@@ -582,249 +661,8 @@ export default function CreatePostScreen() {
     }
   };
 
-  // --- CREATE WATERMARK IMAGE (optional helper, currently unused for upload) ---
-  const createWatermarkImage = async (): Promise<string | null> => {
-    try {
-      if (!user?.id || !watermarkViewRef.current) {
-        console.warn('User ID or watermark view not available');
-        return null;
-      }
-
-      try {
-        // Give React a moment to ensure the hidden watermark view is fully rendered
-        await new Promise(resolve => setTimeout(resolve, 150));
-
-        const watermarkUri = await captureRef(watermarkViewRef, {
-          format: 'png',
-          quality: 1.0,
-        });
-        return watermarkUri;
-      } catch (error) {
-        console.error('Error capturing watermark view:', error);
-        return null;
-      }
-    } catch (error) {
-      console.error('Error creating watermark image:', error);
-      return null;
-    }
-  };
-
-  // --- NORMALIZE IMAGE TO 9:16 (1080x1920) ---
-  const normalizeImageAspect = async (imageUri: string): Promise<string> => {
-    try {
-      const info = await ImageManipulator.manipulateAsync(
-        imageUri,
-        [],
-        { compress: 1, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      const sourceWidth = info.width;
-      const sourceHeight = info.height;
-
-      if (!sourceWidth || !sourceHeight) {
-        return imageUri;
-      }
-
-      const targetWidth = 1080;
-      const targetHeight = 1920;
-      const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
-
-      const resizedWidth = Math.round(sourceWidth * scale);
-      const resizedHeight = Math.round(sourceHeight * scale);
-
-      const resized = await ImageManipulator.manipulateAsync(
-        imageUri,
-        [{ resize: { width: resizedWidth, height: resizedHeight } }],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      const cropOriginX = Math.max(0, Math.round((resizedWidth - targetWidth) / 2));
-      const cropOriginY = Math.max(0, Math.round((resizedHeight - targetHeight) / 2));
-
-      const cropped = await ImageManipulator.manipulateAsync(
-        resized.uri,
-        [{
-          crop: {
-            originX: cropOriginX,
-            originY: cropOriginY,
-            width: targetWidth,
-            height: targetHeight,
-          },
-        }],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-      );
-
-      return cropped.uri;
-    } catch (error) {
-      console.error('Error normalizing image aspect ratio:', error);
-      return imageUri;
-    }
-  };
-
-  // --- ADD WATERMARK TO IMAGE ---
-  // Uses view-shot to composite the watermark onto the image
-  // NO FALLBACKS - MUST WORK OR THROW ERROR
-  const addWatermarkToImage = async (imageUri: string): Promise<string> => {
-      if (!user?.id) {
-      throw new Error('[Watermark] User ID not available. Cannot add watermark to image.');
-    }
-
-    if (!imageUri) {
-      throw new Error('[Watermark] Image URI is required');
-      }
-
-      // Set the image URI temporarily so we can render it in the composite view
-      setTempImageUri(imageUri);
-      
-      // Wait a bit for the view to render
-    await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // Capture the composite view (image + watermark overlay)
-    if (!imageCompositeRef.current) {
-      setTempImageUri(null);
-      throw new Error('[Watermark] Image composite ref not available. Cannot add watermark.');
-    }
-
-    try {
-      // Use ViewShot's capture method directly
-      if (!imageCompositeRef.current || typeof imageCompositeRef.current.capture !== 'function') {
-        setTempImageUri(null);
-        throw new Error('[Watermark] ViewShot capture method not available');
-      }
-      
-      const watermarkedUri = await imageCompositeRef.current.capture();
-      setTempImageUri(null); // Clear temp image
-      
-      if (!watermarkedUri) {
-        throw new Error('[Watermark] Failed to capture watermarked image. ViewShot returned null.');
-      }
-
-      // Verify the output file exists
-      const outputInfo = await FileSystem.getInfoAsync(watermarkedUri);
-      if (!outputInfo.exists) {
-        throw new Error(`[Watermark] Watermarked image file not found: ${watermarkedUri}`);
-      }
-
-      console.log('[Watermark] ✅ Image watermarked successfully:', watermarkedUri);
-      return watermarkedUri;
-    } catch (error: any) {
-      setTempImageUri(null);
-      const errorMsg = `[Watermark] Failed to add watermark to image: ${error?.message || error}`;
-      console.error(errorMsg);
-      throw new Error(errorMsg);
-    }
-  };
-
-  // --- ADD WATERMARK TO VIDEO ---
-  const addWatermarkToVideo = async (videoUri: string): Promise<string> => {
-    try {
-      if (!user?.id) {
-        console.warn('User ID not available, skipping watermark');
-        return videoUri;
-      }
-
-      // Video watermarking requires FFmpeg or server-side processing
-      // For Expo Go, we can't easily watermark videos client-side
-      // The best approach is server-side processing after upload
-      // For now, return the original video
-      console.warn('Video watermarking requires server-side processing or native modules');
-      return videoUri;
-    } catch (error) {
-      console.error('Error adding watermark to video:', error);
-      return videoUri;
-    }
-  };
-
-  // --- IMAGE CAPTURE ---
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
-
-    try {
-      let imageUri: string | null = null;
-
-      // Use native camera capture
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.92,
-        base64: false,
-        skipProcessing: false,
-        exif: false,
-      });
-      
-      console.log('[Camera] Photo captured:', photo);
-      
-      if (photo && photo.uri) {
-        imageUri = photo.uri;
-        
-        // Verify the image file exists and has content
-        const fileInfo = await FileSystem.getInfoAsync(imageUri);
-        console.log('[Camera] Image file info:', fileInfo);
-        
-        if (!fileInfo.exists || (fileInfo.size && fileInfo.size < 1000)) {
-          console.error('[Camera] Invalid image file - size:', fileInfo.size);
-          Alert.alert('Error', 'Captured image appears to be invalid. Please try again.');
-          return;
-        }
-      }
-
-      if (imageUri) {
-        // First set the captured image immediately so user sees something
-        // This prevents the "black image" issue
-        setRecordedVideoUri(null);
-        setEditedVideoUri(null);
-        
-        // Close camera to show form
-        setShowCamera(false);
-        
-        // Process image in background - normalize and watermark
-        try {
-          // Normalize the image to 9:16 (1080x1920)
-          const normalizedUri = await normalizeImageAspect(imageUri);
-          console.log('[Camera] Normalized image URI:', normalizedUri);
-          
-          // Verify normalized image
-          const normalizedInfo = await FileSystem.getInfoAsync(normalizedUri);
-          if (!normalizedInfo.exists || (normalizedInfo.size && normalizedInfo.size < 1000)) {
-            console.warn('[Camera] Normalized image invalid, using original');
-            setCapturedImageUri(imageUri);
-            return;
-          }
-
-          // Try to add watermark, but don't fail if it doesn't work
-          try {
-            const watermarkedUri = await addWatermarkToImage(normalizedUri);
-            console.log('[Camera] Watermarked image URI:', watermarkedUri);
-            
-            // Verify watermarked image
-            const watermarkedInfo = await FileSystem.getInfoAsync(watermarkedUri);
-            if (watermarkedInfo.exists && watermarkedInfo.size && watermarkedInfo.size > 1000) {
-              setCapturedImageUri(watermarkedUri);
-            } else {
-              console.warn('[Camera] Watermarked image invalid, using normalized');
-              setCapturedImageUri(normalizedUri);
-            }
-          } catch (watermarkError: any) {
-            console.warn('[Camera] Watermarking failed, using normalized image:', watermarkError.message);
-            setCapturedImageUri(normalizedUri);
-            showToast('Image captured');
-          }
-        } catch (processError: any) {
-          console.error('[Camera] Image processing error:', processError);
-          // If all processing fails, use the original image
-          setCapturedImageUri(imageUri);
-          showToast('Image captured');
-        }
-      } else {
-        Alert.alert('Error', 'Failed to capture image. Please try again.');
-      }
-    } catch (error: any) {
-      console.error('Image capture error:', error);
-      Alert.alert('Error', `Failed to capture image: ${error.message || 'Unknown error'}. Please try again.`);
-    }
-  };
-
-  // --- VIDEO EDITING --- (Re-record instead of edit)
+  // --- VIDEO EDITING ---
   const handleEditVideo = async () => {
-    // For now, just re-record
     handleRecordVideo();
   };
 
@@ -908,7 +746,6 @@ export default function CreatePostScreen() {
       return;
     }
 
-    // Request notification permissions
     const hasPermission = await uploadNotificationService.requestPermissions();
     if (!hasPermission) {
       console.log('Notification permissions not granted');
@@ -918,7 +755,6 @@ export default function CreatePostScreen() {
     setUploadProgress(0);
     
     try {
-      // Backend requires category NAME in `post_category` (not just ID)
       const categoryName = getSelectedCategoryName();
       if (!categoryName || categoryName.trim() === '') {
         setUploading(false);
@@ -927,37 +763,11 @@ export default function CreatePostScreen() {
         return;
       }
 
-      // --- FRONTEND MEDIA PROCESSING ---
-      // We no longer process videos on-device with FFmpegKit because the native
-      // module is unstable in this setup. Instead:
-      // 1) For videos, we upload the raw recorded file.
-      // 2) For images, we still normalize + watermark on-device.
-
-      // Verify image is watermarked if it's an image
-      let finalImageUri = imageUri;
-      if (imageUri && !rawVideoUri) {
-        try {
-          finalImageUri = await addWatermarkToImage(imageUri);
-        } catch (watermarkError: any) {
-          setUploading(false);
-          setUploadProgress(0);
-          const errorMessage = watermarkError?.message || 'Failed to add watermark to image';
-          console.error('[Upload] Image watermarking error:', errorMessage);
-          Alert.alert(
-            'Image Watermarking Failed',
-            errorMessage,
-            [{ text: 'OK' }]
-          );
-          return;
-        }
-      }
-
-      const mediaUri = rawVideoUri || finalImageUri;
+      const mediaUri = imageUri || rawVideoUri;
       if (!mediaUri) {
         throw new Error('No media file to upload');
       }
 
-      // Get file info
       const fileInfo = await FileSystem.getInfoAsync(mediaUri);
       if (!fileInfo.exists) {
         throw new Error('Media file not found');
@@ -967,7 +777,6 @@ export default function CreatePostScreen() {
       const fileName = mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
       const fileType = isVideo ? 'video/mp4' : 'image/jpeg';
       
-      // Verify media file exists before uploading
       const mediaInfo = await FileSystem.getInfoAsync(mediaUri);
       if (!mediaInfo.exists) {
         throw new Error(`Media file not found at: ${mediaUri}`);
@@ -980,17 +789,24 @@ export default function CreatePostScreen() {
         fileType
       });
 
-      // If challenge is selected, use challenge-specific API endpoint
+      let fileData: any = {
+        uri: mediaUri,
+        name: fileName,
+        type: fileType,
+      };
+
+      // Note: For React Native, FormData.append(name, file) expects:
+      // - file as a Blob/File object with uri property (which RN handles)
+      // - OR a string/number
+      // We don't convert to base64 for FormData as it expects the native file object
+      // FormData will read the file from the URI automatically
+
       if (selectedChallengeId) {
         const formData = new FormData();
         formData.append('title', caption.trim().substring(0, 50) || 'My Post');
         formData.append('caption', caption);
         formData.append('post_category', categoryName);
-        formData.append('file', {
-          uri: mediaUri,
-          name: fileName,
-          type: fileType,
-        } as any);
+        formData.append('file', fileData as any);
         
         console.log('[Upload] Creating post in challenge:', {
           challengeId: selectedChallengeId,
@@ -1052,10 +868,42 @@ export default function CreatePostScreen() {
             console.log('[Upload] Challenge post response:', response);
             
             if (response.status === 'success') {
-              await uploadNotificationService.showUploadSuccess('Post created in challenge successfully!', fileName);
-              // Reset form
+              await uploadNotificationService.showUploadComplete(fileName);
+              
+              // Extract media URL from response for preview
+              // Backend returns: response.data.post.video_url
+              const postData = response.data?.post || response.data;
+              let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
+              
+              // CRITICAL FIX: For images, we need to ensure proper URL handling
+              // Verify the URL is complete and valid before setting
+              if (mediaUrl) {
+                // Add cache busting for fresh image loads
+                const cacheBustUrl = mediaUrl.includes('?') 
+                  ? `${mediaUrl}&t=${Date.now()}`
+                  : `${mediaUrl}?t=${Date.now()}`;
+                
+                console.log('[Upload] Challenge post - URL Details:', {
+                  originalUrl: mediaUrl,
+                  cacheBustUrl: cacheBustUrl,
+                  fileType: postData?.type || 'unknown',
+                  isImage: postData?.type === 'image'
+                });
+                
+                // Use original URL without cache bust to keep it clean
+                // But log both for debugging
+                setServerMediaUrl(mediaUrl);
+                console.log('[Upload] Challenge post - Setting server media URL:', mediaUrl);
+              } else {
+                console.warn('[Upload] Challenge post - No media URL found in response:', {
+                  responseData: response.data,
+                  postData: postData,
+                  allKeys: postData ? Object.keys(postData) : []
+                });
+              }
+              
               setRecordedVideoUri(null);
-              setCapturedImageUri(null);
+              // Keep capturedImageUri for preview display
               setEditedVideoUri(null);
               setThumbnailUri(null);
               setCaption('');
@@ -1063,8 +911,13 @@ export default function CreatePostScreen() {
               setSelectedCategoryId('');
               setSelectedChallengeId(null);
               setIsVideoPlaying(false);
-              // Navigate back or show success
-              router.back();
+              
+              // Delay navigation to show the server image
+              setTimeout(() => {
+                setServerMediaUrl(null);
+                setCapturedImageUri(null);
+                router.back();
+              }, 1500);
             } else {
               const errorMsg = response.message || 'Failed to create post in challenge';
               await uploadNotificationService.showUploadError(errorMsg, fileName);
@@ -1088,25 +941,18 @@ export default function CreatePostScreen() {
         return;
       }
       
-      // Regular post upload (no challenge)
       const formData = new FormData();
-      // Use first 50 chars of caption as title, or generate one
       const autoTitle = caption.trim().substring(0, 50) || 'My Post';
       formData.append('title', autoTitle);
-      // Only send caption, not both title and caption to avoid duplication
       formData.append('caption', caption);
       
       const categoryId = getSelectedCategoryId();
       
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
-      formData.append('status', status); // Add status (pending or draft)
+      formData.append('status', status);
       
-      formData.append('file', {
-        uri: mediaUri,
-        name: fileName,
-        type: fileType,
-      } as any);
+      formData.append('file', fileData as any);
       
       console.log('[Upload] FormData prepared:', {
         title: autoTitle,
@@ -1176,6 +1022,38 @@ export default function CreatePostScreen() {
             if (response.status === 'success') {
               await uploadNotificationService.showUploadComplete(fileName);
               
+              // Extract media URL from response for preview
+              // Backend returns: response.data.post.video_url
+              const postData = response.data?.post || response.data;
+              let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
+              
+              // CRITICAL FIX: For images, we need to ensure proper URL handling
+              // Verify the URL is complete and valid before setting
+              if (mediaUrl) {
+                // Add cache busting for fresh image loads
+                const cacheBustUrl = mediaUrl.includes('?') 
+                  ? `${mediaUrl}&t=${Date.now()}`
+                  : `${mediaUrl}?t=${Date.now()}`;
+                
+                console.log('[Upload] Regular post - URL Details:', {
+                  originalUrl: mediaUrl,
+                  cacheBustUrl: cacheBustUrl,
+                  fileType: postData?.type || 'unknown',
+                  isImage: postData?.type === 'image'
+                });
+                
+                // Use original URL without cache bust to keep it clean
+                // But log both for debugging
+                setServerMediaUrl(mediaUrl);
+                console.log('[Upload] Regular post - Setting server media URL:', mediaUrl);
+              } else {
+                console.warn('[Upload] Regular post - No media URL found in response:', {
+                  responseData: response.data,
+                  postData: postData,
+                  allKeys: postData ? Object.keys(postData) : []
+                });
+              }
+              
               const successMessage = status === 'draft' 
                 ? 'Draft saved successfully! You can publish it later from your profile.'
                 : 'Post published successfully! It is now live and visible to all users.';
@@ -1187,23 +1065,23 @@ export default function CreatePostScreen() {
                   { 
                     text: 'View Profile', 
                     onPress: () => {
+                      setServerMediaUrl(null);
+                      setCapturedImageUri(null);
                       router.replace('/(tabs)/profile');
                     }
                   }
                 ]
               );
               
-              // Reset form
               setCaption('');
               setSelectedGroup('');
               setSelectedCategoryId('');
               setRecordedVideoUri(null);
-              setCapturedImageUri(null);
+              // Keep capturedImageUri for preview display
               setEditedVideoUri(null);
               setThumbnailUri(null);
               setIsVideoPlaying(false);
             } else {
-              // Handle draft limit error
               if (response.message?.includes('Maximum draft limit reached') || response.message?.includes('draft limit')) {
                 Alert.alert(
                   'Draft Limit Reached',
@@ -1226,13 +1104,11 @@ export default function CreatePostScreen() {
             Alert.alert('Error', 'Failed to parse server response.');
           }
         } else {
-          // Try to parse server error for a real message (e.g. "Invalid category", "Maximum draft limit reached")
           let serverMessage = `Failed to create post. Server responded with status ${xhr.status}`;
           try {
             const parsed = JSON.parse(xhr.responseText);
             if (parsed?.message) serverMessage = parsed.message;
           } catch (_) {
-            // ignore JSON parse errors
           }
           await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, fileName);
           Alert.alert('Error', serverMessage);
@@ -1273,21 +1149,18 @@ export default function CreatePostScreen() {
   const currentVideoUri = editedVideoUri || recordedVideoUri;
   const currentMediaUri = currentVideoUri || capturedImageUri;
 
-  // Handle video playback
   const handlePlayPause = async () => {
     if (videoRef.current) {
       if (isVideoPlaying) {
         await videoRef.current.pauseAsync();
       } else {
-        // Force speaker for playback (allowsRecordingIOS: false switches to bottom speaker on iOS)
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,  // This switches iOS to bottom speaker
+          allowsRecordingIOS: false,
           playsInSilentModeIOS: true,
           shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false, // Force speaker on Android
+          playThroughEarpieceAndroid: false,
         });
         
-        // Ensure video is unmuted and at full volume before playing
         await videoRef.current.setIsMutedAsync(false);
         await videoRef.current.setVolumeAsync(1.0);
         await videoRef.current.playAsync();
@@ -1302,38 +1175,48 @@ export default function CreatePostScreen() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Show loading screen
+  if (authLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={C.primary} />
+        <Text style={[{ fontSize: 16, marginTop: 12, fontWeight: '500' }, { color: C.text }]}>Loading...</Text>
+      </View>
+    );
+  }
+
+  // Show login prompt
+  if (!isAuthenticated) {
+    return (
+      <View style={[styles.container, { backgroundColor: C.background, justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <MaterialIcons name="lock" size={64} color={C.primary} />
+        <Text style={[{ fontSize: 24, fontWeight: '700', marginTop: 20, marginBottom: 12, textAlign: 'center' }, { color: C.text }]}>Authentication Required</Text>
+        <Text style={[{ fontSize: 16, lineHeight: 24, textAlign: 'center', marginBottom: 32 }, { color: C.textSecondary }]}>
+          You need to be logged in to create posts and share your content with the community.
+        </Text>
+        <TouchableOpacity
+          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.primary }]}
+          onPress={() => router.push('/auth/login')}
+        >
+          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
+          onPress={() => router.replace('/')}
+        >
+          <Text style={[{ fontSize: 14, fontWeight: '500' }, { color: C.text }]}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
       
-      {/* Hidden watermark host for FFmpeg (logo + user id) */}
-      {user && user.id && (
-        <View style={styles.hiddenCompositeView} collapsable={false}>
-          <WatermarkOverlay appName="Talentix" userId={user.id} ref={watermarkViewRef} />
-        </View>
-      )}
-
-      {/* Hidden composite view for watermarking images */}
-      {tempImageUri && (
-        <View style={styles.hiddenCompositeView} collapsable={false}>
-          <ViewShot ref={imageCompositeRef} style={styles.compositeViewShot}>
-            <Image 
-              source={{ uri: tempImageUri || '' }} 
-              style={styles.compositeImage}
-              resizeMode="cover"
-            />
-            {user && user.id && (
-              <WatermarkOverlay appName="Talentix" userId={user.id} ref={watermarkViewRef} />
-            )}
-          </ViewShot>
-        </View>
-      )}
-
       {/* Camera Modal */}
       {showCamera && (
-        <ViewShot
-          ref={cameraViewShotRef}
-          options={{ format: 'jpg', quality: 0.9 }}
+        <View
           style={[styles.cameraContainer, { paddingTop: insets.top }]}
         >
           <CameraView
@@ -1341,125 +1224,119 @@ export default function CreatePostScreen() {
             style={styles.camera}
             facing={cameraFacing}
             mode={cameraMode}
+            autofocus="on"
+            zoom={0}
+            enableTorch={false}
+            flash={cameraMode === 'picture' ? 'on' : 'off'}
+            videoQuality="1080p"
+            onCameraReady={() => {
+              console.log('[Camera] Camera is ready');
+              setIsCameraReady(true);
+            }}
           />
-          {/* Overlay with absolute positioning */}
-            <View style={styles.cameraOverlay}>
-              {/* Watermark - Bottom Right */}
-              {user && user.id && (
-                <View style={styles.watermarkContainer}>
-                  <Image source={watermarkLogo} style={styles.watermarkLogo} resizeMode="contain" />
-                  <Text style={styles.watermarkUserId}>{user.id}</Text>
+          <View style={styles.cameraOverlay}>
+            <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
+              <TouchableOpacity
+                style={styles.cameraCancelButton}
+                onPress={cancelCamera}
+                accessibilityLabel="Cancel"
+                accessibilityRole="button"
+              >
+                <MaterialIcons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+              
+              {isRecording && (
+                <View style={styles.recordingIndicator}>
+                  <View style={styles.recordingDot} />
+                  <Text style={styles.recordingTimer}>
+                    {formatDuration(recordingDuration)}
+                  </Text>
                 </View>
               )}
 
-              {/* Top bar - only cancel and timer */}
-              <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
+              <View style={{ width: 36 }} />
+            </View>
+
+            <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
+              <View style={styles.cameraBottomControls}>
                 <TouchableOpacity
-                  style={styles.cameraCancelButton}
-                  onPress={cancelCamera}
-                  accessibilityLabel="Cancel"
+                  style={styles.cameraModeButton}
+                  onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
+                  disabled={isRecording}
+                  accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
                   accessibilityRole="button"
                 >
-                  <MaterialIcons name="close" size={24} color="#fff" />
+                  <MaterialIcons 
+                    name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
+                    size={28} 
+                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                  />
                 </TouchableOpacity>
-                
-                {isRecording && (
-                  <View style={styles.recordingIndicator}>
-                    <View style={styles.recordingDot} />
-                    <Text style={styles.recordingTimer}>
-                      {formatDuration(recordingDuration)}
-                    </Text>
-                  </View>
-                )}
 
-                <View style={{ width: 36 }} />
-              </View>
-
-              {/* Bottom controls - phone-like layout */}
-              <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
-                <View style={styles.cameraBottomControls}>
-                  {/* Left side - Mode toggle */}
+                {cameraMode === 'video' ? (
+                  !isRecording ? (
                     <TouchableOpacity
-                    style={styles.cameraModeButton}
-                    onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
-                    disabled={isRecording}
-                    accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons 
-                      name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
-                      size={28} 
-                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
-                    />
-                  </TouchableOpacity>
-
-                  {/* Center - Record/Stop/Capture Button */}
-                  {cameraMode === 'video' ? (
-                    !isRecording ? (
-                      <TouchableOpacity
-                        style={styles.recordButtonCompact}
+                      style={styles.recordButtonCompact}
                       onPress={startRecording}
-                        accessibilityLabel="Start recording"
-                        accessibilityRole="button"
-                    >
-                        <View style={styles.recordButtonInnerCompact} />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                        style={styles.stopButtonCompact}
-                      onPress={stopRecording}
-                        accessibilityLabel="Stop recording"
-                        accessibilityRole="button"
-                      >
-                        <View style={styles.stopButtonInnerCompact} />
-                      </TouchableOpacity>
-                    )
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.captureButtonCompact}
-                      onPress={takePicture}
-                      accessibilityLabel="Take picture"
+                      accessibilityLabel="Start recording"
                       accessibilityRole="button"
                     >
-                      <View style={styles.captureButtonInnerCompact} />
+                      <View style={styles.recordButtonInnerCompact} />
                     </TouchableOpacity>
-                  )}
-
-                  {/* Right side - Flip camera */}
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.stopButtonCompact}
+                      onPress={stopRecording}
+                      accessibilityLabel="Stop recording"
+                      accessibilityRole="button"
+                    >
+                      <View style={styles.stopButtonInnerCompact} />
+                    </TouchableOpacity>
+                  )
+                ) : (
                   <TouchableOpacity
-                    style={styles.cameraFlipButton}
-                    onPress={handleFlipCamera}
-                    disabled={isRecording}
-                    accessibilityLabel="Flip camera"
+                    style={styles.captureButtonCompact}
+                    onPress={takePicture}
+                    accessibilityLabel="Take picture"
                     accessibilityRole="button"
                   >
-                    <MaterialIcons 
-                      name="flip-camera-ios" 
-                      size={28} 
-                      color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
-                    />
+                    <View style={styles.captureButtonInnerCompact} />
                   </TouchableOpacity>
-                </View>
+                )}
+
+                <TouchableOpacity
+                  style={styles.cameraFlipButton}
+                  onPress={handleFlipCamera}
+                  disabled={isRecording}
+                  accessibilityLabel="Flip camera"
+                  accessibilityRole="button"
+                >
+                  <MaterialIcons 
+                    name="flip-camera-ios" 
+                    size={28} 
+                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                  />
+                </TouchableOpacity>
               </View>
             </View>
-        </ViewShot>
+          </View>
+        </View>
       )}
-
 
       {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS */}
       {!currentVideoUri && !capturedImageUri && (
         <View style={[styles.studioContainer, { paddingTop: insets.top + 16 }]}>
           <View style={styles.studioHeader}>
-            <Text style={[styles.studioTitle, { color: C.text }]}>Create Post Studio</Text>
+            <Text style={[styles.studioTitle, { color: C.text }]}>Studio</Text>
             <Text style={[styles.studioSubtitle, { color: C.textSecondary }]}>
-              We use an in-app camera studio. Record a video up to 2 min 30 sec. You&apos;ll add caption and categories after you confirm.
+              Record up to 2:30. Add details after recording.
             </Text>
           </View>
 
           <View style={styles.studioBody}>
             <MaterialIcons name="videocam" size={72} color={C.primary} />
             <Text style={[styles.studioHint, { color: C.textSecondary }]}>
-              The camera studio should open automatically. If it does not, tap the button below.
+              Camera opens automatically
             </Text>
 
             <TouchableOpacity
@@ -1477,14 +1354,14 @@ export default function CreatePostScreen() {
                 <>
                   <MaterialIcons name="videocam" size={24} color={C.buttonText} />
                   <Text style={[styles.recordButtonText, { color: C.buttonText }]}>
-                    Open Camera Studio
+                    Open Camera
                   </Text>
                 </>
               )}
             </TouchableOpacity>
 
             <Text style={[styles.studioWarning, { color: C.warning }]}>
-              Make sure your content is 100% authentic. No AI, deepfakes, or manipulated media.
+              Authentic content only
             </Text>
           </View>
         </View>
@@ -1494,16 +1371,17 @@ export default function CreatePostScreen() {
       {currentMediaUri && (
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 20 : 0}
         >
         <ScrollView
           style={[styles.scrollView, { backgroundColor: C.background }]}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
           showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Media Preview Section */}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          nestedScrollEnabled={true}
+        >
             <View style={[styles.videoPreviewSection, { paddingTop: insets.top + 8 }]}>
               <View style={styles.videoPreviewContainer}>
                 {currentVideoUri ? (
@@ -1515,8 +1393,8 @@ export default function CreatePostScreen() {
                       resizeMode={ResizeMode.COVER}
                       isLooping
                       shouldPlay={false}
-                      isMuted={false} // CRITICAL: Ensure video playback is not muted
-                      volume={1.0} // Full volume playback
+                      isMuted={false}
+                      volume={1.0}
                       onPlaybackStatusUpdate={(status) => {
                         if (status.isLoaded) {
                           setIsVideoPlaying(status.isPlaying);
@@ -1524,8 +1402,7 @@ export default function CreatePostScreen() {
                       }}
                     />
                     
-                    {/* Play/Pause Overlay */}
-            <TouchableOpacity
+                    <TouchableOpacity
                       style={styles.videoPlayOverlay}
                       onPress={handlePlayPause}
                       activeOpacity={0.8}
@@ -1535,19 +1412,56 @@ export default function CreatePostScreen() {
                       {!isVideoPlaying && (
                         <View style={styles.playButtonCircle}>
                           <MaterialIcons name="play-arrow" size={48} color="#fff" />
-              </View>
+                        </View>
                       )}
-            </TouchableOpacity>
+                    </TouchableOpacity>
                   </>
                 ) : (
-                  <Image
-                    source={{ uri: capturedImageUri || '' }}
-                    style={styles.videoPlayer}
-                    resizeMode="cover"
-                  />
+                  <View style={styles.imagePreviewContainer}>
+                    {serverMediaUrl && !capturedImageUri ? (
+                      <Image
+                        key={`server-image-${serverMediaUrl}`}
+                        source={{ uri: serverMediaUrl }}
+                        style={styles.videoPlayer}
+                        resizeMode="cover"
+                        progressiveRenderingEnabled={true}
+                        onError={(error) => {
+                          console.error('[ImagePreview] Server image failed to load:', {
+                            uri: serverMediaUrl,
+                            error: error,
+                            timestamp: new Date().toISOString()
+                          });
+                        }}
+                        onLoad={() => {
+                          console.log('[ImagePreview] Server image loaded successfully:', {
+                            uri: serverMediaUrl,
+                            timestamp: new Date().toISOString()
+                          });
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        key={`local-image-${capturedImageUri}`}
+                        source={{ uri: capturedImageUri || '' }}
+                        style={styles.videoPlayer}
+                        resizeMode="cover"
+                        onError={(error) => {
+                          console.error('[ImagePreview] Local image failed to load:', {
+                            uri: capturedImageUri,
+                            error: error
+                          });
+                        }}
+                        onLoad={() => {
+                          console.log('[ImagePreview] Local image loaded successfully:', capturedImageUri);
+                        }}
+                      />
+                    )}
+                    {serverMediaUrl && (
+                      <Text style={styles.uploadingIndicator}>✓ Uploaded</Text>
+                    )}
+                  </View>
                 )}
 
-                {/* Media Controls */}
                 <View style={styles.videoControlsBar}>
                   <TouchableOpacity
                     style={styles.videoControlButton}
@@ -1555,8 +1469,12 @@ export default function CreatePostScreen() {
                       if (currentVideoUri) {
                         handleRecordVideo();
                       } else {
-                        setShowCamera(true);
+                        setServerMediaUrl(null);
                         setCameraMode('picture');
+                        setShowCamera(true);
+                        setTimeout(() => {
+                          setCapturedImageUri(null);
+                        }, 100);
                       }
                     }}
                     disabled={uploading}
@@ -1567,35 +1485,33 @@ export default function CreatePostScreen() {
                     <Text style={styles.videoControlText}>{currentVideoUri ? "Re-record" : "Retake"}</Text>
                   </TouchableOpacity>
                   
-                    <TouchableOpacity
+                  <TouchableOpacity
                     style={[styles.videoControlButton, styles.discardButton]}
-                      onPress={() => {
-                        setRecordedVideoUri(null);
+                    onPress={() => {
+                      setServerMediaUrl(null);
+                      setRecordedVideoUri(null);
                       setCapturedImageUri(null);
-                        setEditedVideoUri(null);
-                        setThumbnailUri(null);
-                        setCaption('');
-                        setSelectedGroup('');
-                        setSelectedCategoryId('');
+                      setEditedVideoUri(null);
+                      setThumbnailUri(null);
+                      setCaption('');
+                      setSelectedGroup('');
+                      setSelectedCategoryId('');
                       setIsVideoPlaying(false);
-                      }}
+                    }}
                     disabled={uploading}
                     accessibilityLabel="Discard media"
                     accessibilityRole="button"
-                    >
+                  >
                     <MaterialIcons name="delete-outline" size={20} color="#ef4444" />
                     <Text style={[styles.videoControlText, { color: '#ef4444' }]}>Discard</Text>
-                    </TouchableOpacity>
-                  </View>
-                  </View>
+                  </TouchableOpacity>
+                </View>
+              </View>
               {errors.media && <Text style={[styles.errorText, { color: C.error, textAlign: 'center', marginTop: 8 }]}>{errors.media}</Text>}
             </View>
 
-
-            {/* Form Content */}
             <View style={styles.formContainer}>
-              {/* Caption Input */}
-            <View style={styles.inputGroup}>
+              <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
                   <Text style={[styles.label, { color: C.text }]}>Caption ✨</Text>
                   <Text style={[styles.labelHint, { color: C.textSecondary }]}>
@@ -1613,11 +1529,11 @@ export default function CreatePostScreen() {
                     style={[styles.captionInput, { color: C.inputText }]}
                     placeholder="Share your story... 🎬 What makes this special? Add #hashtags"
                     placeholderTextColor={C.placeholder}
-                value={caption}
-                onChangeText={setCaption}
-                multiline
+                    value={caption}
+                    onChangeText={setCaption}
+                    multiline
                     scrollEnabled
-                textAlignVertical="top"
+                    textAlignVertical="top"
                     autoCapitalize="sentences"
                     autoCorrect
                     returnKeyType="default"
@@ -1636,7 +1552,6 @@ export default function CreatePostScreen() {
               )}
             </View>
 
-              {/* Category Selection */}
             <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
                   <Text style={[styles.label, { color: C.text }]}>Category 🏷️</Text>
@@ -1649,7 +1564,6 @@ export default function CreatePostScreen() {
                   )}
                 </View>
                 
-                {/* Category Groups */}
                 <Text style={[styles.subLabel, { color: C.textSecondary }]}>Select a group</Text>
               <ScrollView
                 horizontal
@@ -1707,7 +1621,6 @@ export default function CreatePostScreen() {
                 <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
               )}
 
-                {/* Subcategories */}
             {selectedGroup && (
                   <View style={styles.subcategorySection}>
                     <Text style={[styles.subLabel, { color: C.textSecondary }]}>
@@ -1761,7 +1674,6 @@ export default function CreatePostScreen() {
               </View>
             )}
 
-            {/* Challenge Selection - Show after media is captured */}
             {(recordedVideoUri || capturedImageUri) && (
               <View style={styles.inputGroup}>
                 {loadingChallenges ? (
@@ -1844,7 +1756,6 @@ export default function CreatePostScreen() {
             )}
               </View>
 
-              {/* Content Warning */}
               <TouchableOpacity
                 style={[styles.warningBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}
                 onPress={() => setAccordionOpen(!accordionOpen)}
@@ -1872,7 +1783,6 @@ export default function CreatePostScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Upload Progress */}
               {uploading && (
                 <View style={[styles.uploadProgressCard, { backgroundColor: C.card, borderColor: C.primary }]}>
                   <View style={styles.uploadProgressHeader}>
@@ -1895,104 +1805,166 @@ export default function CreatePostScreen() {
               </View>
             )}
 
-              {/* Action Buttons - Horizontal */}
-              <View style={styles.quickActionButtonsContainer}>
-            <TouchableOpacity
-                  style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
-                  onPress={() => {
-                    // Show specific error messages for missing fields
-                    if (!caption.trim() && !selectedGroup) {
-                      showToast('Please add a caption and select a category');
-                    } else if (!caption.trim()) {
-                      showToast('Caption is required to publish');
-                    } else if (!selectedGroup) {
-                      showToast('Please select a category group');
-                    } else if (!selectedCategoryId) {
-                      showToast('Please select a specific category');
-                    } else {
-                      handleCreatePost('active');
-                    }
-                  }}
-                  disabled={uploading || !currentMediaUri}
-                  accessibilityLabel="Publish post"
-                  accessibilityRole="button"
-            >
-              {uploading ? (
-                    <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                      <MaterialIcons name="rocket-launch" size={20} color="#fff" />
-                      <Text style={styles.quickActionButtonText}>Publish</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              {selectedChallengeId ? (
+                <View style={styles.quickActionButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
+                    onPress={() => {
+                      if (!caption.trim() && !selectedGroup) {
+                        showToast('Please add a caption and select a category');
+                      } else if (!caption.trim()) {
+                        showToast('Caption is required');
+                      } else if (!selectedGroup) {
+                        showToast('Please select a category group');
+                      } else if (!selectedCategoryId) {
+                        showToast('Please select a specific category');
+                      } else {
+                        handleCreatePost('active');
+                      }
+                    }}
+                    disabled={uploading || !currentMediaUri}
+                    accessibilityLabel="Post to challenge"
+                    accessibilityRole="button"
+                  >
+                    {uploading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="emoji-events" size={20} color="#fff" />
+                        <Text style={styles.quickActionButtonText}>Post to Challenge</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
-                  onPress={async () => {
-                    // Show specific error messages for missing fields
-                    if (!caption.trim() && !selectedGroup) {
-                      showToast('Please add a caption and select a category');
-                    } else if (!caption.trim()) {
-                      showToast('Caption is required to save draft');
-                    } else if (!selectedGroup) {
-                      showToast('Please select a category group');
-                    } else if (!selectedCategoryId) {
-                      showToast('Please select a specific category');
-                    } else {
-                      await handleCreatePost('draft');
-                    }
-                  }}
-                  disabled={uploading || !currentMediaUri}
-                  accessibilityLabel="Save as draft"
-                  accessibilityRole="button"
-                >
-                  <MaterialIcons name="save" size={20} color="#fff" />
-                  <Text style={styles.quickActionButtonText}>Save Draft</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.quickActionButton, styles.quickDiscardButton]}
-                  onPress={() => {
-                    Alert.alert(
-                      'Discard Post?',
-                      'Are you sure you want to discard this post? This action cannot be undone.',
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Discard',
-                          style: 'destructive',
-                          onPress: () => {
-                            setRecordedVideoUri(null);
-                            setCapturedImageUri(null);
-                            setEditedVideoUri(null);
-                            setThumbnailUri(null);
-                            setCaption('');
-                            setSelectedGroup('');
-                            setSelectedCategoryId('');
-                            setIsVideoPlaying(false);
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.quickDiscardButton]}
+                    onPress={() => {
+                      Alert.alert(
+                        'Discard Post?',
+                        'Are you sure you want to discard this post? This action cannot be undone.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Discard',
+                            style: 'destructive',
+                            onPress: () => {
+                              setRecordedVideoUri(null);
+                              setCapturedImageUri(null);
+                              setEditedVideoUri(null);
+                              setThumbnailUri(null);
+                              setCaption('');
+                              setSelectedGroup('');
+                              setSelectedCategoryId('');
+                              setSelectedChallengeId(null);
+                              setIsVideoPlaying(false);
+                            }
                           }
-                        }
-                      ]
-                    );
-                  }}
-                  disabled={uploading}
-                  accessibilityLabel="Discard post"
-                  accessibilityRole="button"
-                >
-                  <MaterialIcons name="delete-outline" size={20} color="#fff" />
-                  <Text style={styles.quickActionButtonText}>Discard</Text>
-            </TouchableOpacity>
-              </View>
+                        ]
+                      );
+                    }}
+                    disabled={uploading}
+                    accessibilityLabel="Discard post"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons name="delete-outline" size={20} color="#fff" />
+                    <Text style={styles.quickActionButtonText}>Discard</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.quickActionButtonsContainer}>
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
+                    onPress={() => {
+                      if (!caption.trim() && !selectedGroup) {
+                        showToast('Please add a caption and select a category');
+                      } else if (!caption.trim()) {
+                        showToast('Caption is required to publish');
+                      } else if (!selectedGroup) {
+                        showToast('Please select a category group');
+                      } else if (!selectedCategoryId) {
+                        showToast('Please select a specific category');
+                      } else {
+                        handleCreatePost('active');
+                      }
+                    }}
+                    disabled={uploading || !currentMediaUri}
+                    accessibilityLabel="Publish post"
+                    accessibilityRole="button"
+                  >
+                    {uploading ? (
+                      <ActivityIndicator color="#fff" size="small" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="rocket-launch" size={20} color="#fff" />
+                        <Text style={styles.quickActionButtonText}>Publish</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
 
-              {/* Bottom spacing */}
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
+                    onPress={async () => {
+                      if (!caption.trim() && !selectedGroup) {
+                        showToast('Please add a caption and select a category');
+                      } else if (!caption.trim()) {
+                        showToast('Caption is required to save draft');
+                      } else if (!selectedGroup) {
+                        showToast('Please select a category group');
+                      } else if (!selectedCategoryId) {
+                        showToast('Please select a specific category');
+                      } else {
+                        await handleCreatePost('draft');
+                      }
+                    }}
+                    disabled={uploading || !currentMediaUri}
+                    accessibilityLabel="Save as draft"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons name="save" size={20} color="#fff" />
+                    <Text style={styles.quickActionButtonText}>Save Draft</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.quickActionButton, styles.quickDiscardButton]}
+                    onPress={() => {
+                      Alert.alert(
+                        'Discard Post?',
+                        'Are you sure you want to discard this post? This action cannot be undone.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Discard',
+                            style: 'destructive',
+                            onPress: () => {
+                              setRecordedVideoUri(null);
+                              setCapturedImageUri(null);
+                              setEditedVideoUri(null);
+                              setThumbnailUri(null);
+                              setCaption('');
+                              setSelectedGroup('');
+                              setSelectedCategoryId('');
+                              setIsVideoPlaying(false);
+                            }
+                          }
+                        ]
+                      );
+                    }}
+                    disabled={uploading}
+                    accessibilityLabel="Discard post"
+                    accessibilityRole="button"
+                  >
+                    <MaterialIcons name="delete-outline" size={20} color="#fff" />
+                    <Text style={styles.quickActionButtonText}>Discard</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               <View style={{ height: insets.bottom + 20 }} />
           </View>
         </ScrollView>
         </KeyboardAvoidingView>
       )}
 
-      {/* Toast Message */}
       {toastMessage && (
         <Animated.View
           style={[
@@ -2029,6 +2001,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
+    flexGrow: 1,
   },
   studioContainer: {
     flex: 1,
@@ -2301,18 +2274,18 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 1000,
-    backgroundColor: 'transparent', // Fix dark overlay
+    backgroundColor: 'transparent',
   },
   camera: {
     width: '100%',
     height: '100%',
-    backgroundColor: 'transparent', // Fix dark overlay
+    backgroundColor: 'transparent',
   },
   cameraOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'space-between',
     pointerEvents: 'box-none',
-    backgroundColor: 'transparent', // Ensure no dark background
+    backgroundColor: 'transparent',
   },
   cameraTopBar: {
     flexDirection: 'row',
@@ -2364,7 +2337,6 @@ const styles = StyleSheet.create({
   cameraControls: {
     alignItems: 'center',
   },
-  // Compact record button - phone-like
   recordButtonCompact: {
     width: 70,
     height: 70,
@@ -2395,7 +2367,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#fff',
   },
-  // Camera improvements
   cameraFlipButton: {
     width: 50,
     height: 50,
@@ -2412,7 +2383,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // Compact capture button for photos
   captureButtonCompact: {
     width: 70,
     height: 70,
@@ -2429,7 +2399,6 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     backgroundColor: '#fff',
   },
-  // Video Preview
   videoPreviewSection: {
     paddingHorizontal: 16,
     marginBottom: 16,
@@ -2443,6 +2412,22 @@ const styles = StyleSheet.create({
     width: '100%',
     height: SCREEN_WIDTH * 0.75,
     backgroundColor: 'transparent',
+  },
+  imagePreviewContainer: {
+    width: '100%',
+    height: SCREEN_WIDTH * 0.75,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  uploadingIndicator: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
   },
   videoPlayOverlay: {
     position: 'absolute',
@@ -2486,7 +2471,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  // Caption Input
   labelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2509,6 +2493,8 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     fontSize: 16,
     lineHeight: 24,
+    includeFontPadding: false,
+    textAlignVertical: 'top',
   },
   captionFooter: {
     paddingHorizontal: 16,
@@ -2518,7 +2504,6 @@ const styles = StyleSheet.create({
   charCount: {
     fontSize: 12,
   },
-  // Category Selection
   subLabel: {
     fontSize: 13,
     marginBottom: 10,
@@ -2580,7 +2565,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  // Warning Banner
   warningBanner: {
     borderRadius: 12,
     borderWidth: 1,
@@ -2602,7 +2586,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 10,
   },
-  // Upload Progress
   uploadProgressCard: {
     borderRadius: 16,
     borderWidth: 2,
@@ -2625,7 +2608,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
-  // Publish Button
   publishButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2642,7 +2624,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  // Post Action Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -2708,7 +2689,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  // Capture Button
   captureButtonLarge: {
     width: 80,
     height: 80,
@@ -2725,7 +2705,6 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     backgroundColor: '#fff',
   },
-  // Draft Save Button
   draftSaveButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2739,7 +2718,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  // Quick Action Buttons (Horizontal)
   quickActionButtonsContainer: {
     flexDirection: 'row',
     gap: 12,
@@ -2773,59 +2751,6 @@ const styles = StyleSheet.create({
   },
   quickActionButtonDisabled: {
     opacity: 0.5,
-  },
-  // Watermark
-  watermarkContainer: {
-    position: 'absolute',
-    // Match right‑middle positioning, slightly above center
-    top: '40%',
-    // Push very close to the right edge; a tiny bit may be off‑screen
-    right: -2,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  watermarkText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  watermarkUserId: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  watermarkLogo: {
-    width: 64,
-    height: 64,
-    marginBottom: 4,
-  },
-  hiddenCompositeView: {
-    position: 'absolute',
-    left: -9999,
-    top: -9999,
-    width: 1,
-    height: 1,
-    backgroundColor: 'transparent', // Fix dark overlay issue
-    opacity: 0,
-    overflow: 'hidden',
-  },
-  compositeViewShot: {
-    width: SCREEN_WIDTH,
-    height: (SCREEN_WIDTH * 16) / 9,
-    backgroundColor: 'transparent', // Ensure no dark background
-  },
-  compositeImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: 'transparent', // Ensure no dark background
   },
   toastContainer: {
     position: 'absolute',

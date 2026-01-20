@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,25 +25,63 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
 import { getPostMediaUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
+import { useVideoMute } from '@/lib/hooks/use-video-mute';
+
+const timeAgo = (dateString?: string | null) => {
+  if (!dateString) return '';
+  const now = new Date();
+  const postDate = new Date(dateString);
+  if (isNaN(postDate.getTime())) return '';
+
+  const diffInSeconds = Math.floor((now.getTime() - postDate.getTime()) / 1000);
+  if (diffInSeconds < 60) return `${diffInSeconds}s`;
+
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) return `${diffInMinutes}m`;
+
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours}h`;
+
+  const diffInDays = Math.floor(diffInHours / 24);
+  if (diffInDays < 7) return `${diffInDays}d`;
+
+  return postDate.toLocaleDateString();
+};
 
 export default function PostDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const { id, postData } = useLocalSearchParams();
   const { user } = useAuth();
   const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
-  const [post, setPost] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { isMuted, toggleMute } = useVideoMute();
+  const videoRef = useRef<Video>(null);
+  const insets = useSafeAreaInsets();
+  
+  // Try to parse postData if it was passed
+  let initialPost = null;
+  if (postData && typeof postData === 'string') {
+    try {
+      initialPost = JSON.parse(postData);
+    } catch (e) {
+      initialPost = null;
+    }
+  }
+  
+  const [post, setPost] = useState<any>(initialPost || null);
+  const [loading, setLoading] = useState(!initialPost);
   const [comments, setComments] = useState<any[]>([]);
   const [commentText, setCommentText] = useState('');
   const [commentLoading, setCommentLoading] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
-  const insets = useSafeAreaInsets();
 
   useEffect(() => {
-    fetchPost();
+    // Only fetch if we don't have initialPost
+    if (!initialPost) {
+      fetchPost();
+    }
     fetchComments();
-  }, [id]);
+  }, [id, initialPost]);
 
   const fetchPost = async () => {
     try {
@@ -215,9 +253,20 @@ export default function PostDetailScreen() {
   
   const mediaUrl = getMediaUrl();
   const hasValidMedia = mediaUrl && mediaUrl.trim() !== '';
-  const isVideo = !!(post.video_url || post.videoUrl);
+  const isVideo =
+    post.type === 'video' ||
+    (!!mediaUrl &&
+      (mediaUrl.toLowerCase().includes('.mp4') ||
+        mediaUrl.toLowerCase().includes('.mov') ||
+        mediaUrl.toLowerCase().includes('.webm')));
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
+
+  const handleVideoPress = () => {
+    if (isVideo) {
+      toggleMute();
+    }
+  };
   
   return (
     <KeyboardAvoidingView 
@@ -281,15 +330,32 @@ export default function PostDetailScreen() {
         {hasValidMedia ? (
           <View style={styles.mediaWrapper}>
             {isVideo ? (
-              <Video
-                source={{ uri: mediaUrl! }}
-                style={styles.media}
-                resizeMode={ResizeMode.CONTAIN}
-                useNativeControls
-                shouldPlay={false}
-                isLooping={false}
-                isMuted={false}
-              />
+              <TouchableOpacity
+                activeOpacity={0.95}
+                onPress={handleVideoPress}
+                style={styles.videoTouchable}
+              >
+                <Video
+                  ref={videoRef}
+                  source={{ uri: mediaUrl! }}
+                  style={styles.media}
+                  resizeMode={ResizeMode.CONTAIN}
+                  useNativeControls
+                  shouldPlay={false}
+                  isLooping={false}
+                  isMuted={isMuted}
+                  volume={isMuted ? 0 : 1}
+                />
+                
+                {/* Mute indicator - click to toggle */}
+                {isMuted && (
+                  <View style={styles.muteIndicatorContainer}>
+                    <View style={styles.muteIndicatorBadge}>
+                      <Feather name="volume-x" size={24} color="rgba(255,255,255,0.8)" />
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
             ) : (
               <Image 
                 source={{ uri: mediaUrl! }} 
@@ -357,14 +423,14 @@ export default function PostDetailScreen() {
           )}
           {(post.createdAt || post.uploadDate) && (
             <Text style={styles.postDate}>
-              {new Date(post.createdAt || post.uploadDate || '').toLocaleDateString()}
+              {timeAgo(post.createdAt || post.uploadDate)}
             </Text>
           )}
         </View>
 
         {/* Comments */}
         <View style={styles.commentsSection}>
-          <Text style={styles.commentsTitle}>Comments ({comments.length})</Text>
+          <Text style={styles.commentsTitle}>Comments</Text>
           
           {comments.length > 0 ? (
             comments.map((item, index) => (
@@ -568,9 +634,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#000',
   },
+  videoTouchable: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   media: {
     width: '100%',
     height: '100%',
+  },
+  muteIndicatorContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  muteIndicatorBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 40,
+    padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   noMediaContainer: {
     flex: 1,
@@ -589,16 +678,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: '#1a1a1a',
+    gap: 20,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 24,
+    justifyContent: 'center',
+    gap: 6,
   },
   actionText: {
     color: '#fff',
     fontSize: 14,
-    marginLeft: 6,
+    fontWeight: '500',
   },
   scrollContent: {
     flex: 1,

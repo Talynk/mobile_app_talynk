@@ -1,4 +1,5 @@
 import { apiClient } from './api-client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ApiResponse,
   Post,
@@ -462,8 +463,21 @@ export const postsApi = {
 
   getById: async (id: string): Promise<ApiResponse<Post>> => {
     try {
-      const response = await apiClient.get(`/api/posts/${id}`);
-      return response.data;
+      // Include user and full details in the response
+      const response = await apiClient.get(`/api/posts/${id}?include=user`);
+      const apiResponse = response.data;
+
+      // Backend returns: { status, data: { post: {...} } }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const post = (apiResponse.data as any).post || apiResponse.data;
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Post fetched successfully',
+          data: post as Post,
+        };
+      }
+
+      return apiResponse;
     } catch (error: any) {
       return {
         status: 'error',
@@ -953,6 +967,17 @@ export const notificationsApi = {
    */
   getAll: async (): Promise<ApiResponse<{ notifications: Notification[] }>> => {
     try {
+      // Check if user is authenticated before making the request
+      const token = await AsyncStorage.getItem('talynk_token');
+      if (!token) {
+        // Return empty notifications silently when not authenticated
+        return {
+          status: 'success',
+          message: 'No notifications available',
+          data: { notifications: [] },
+        };
+      }
+
       console.log('[Notifications API] 📥 GET /api/users/notifications');
       const response = await apiClient.get('/api/users/notifications');
       console.log('[Notifications API] ✅ Response received:', {
@@ -961,13 +986,17 @@ export const notificationsApi = {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[Notifications API] ❌ Error fetching notifications:', {
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-      });
+      // Only log errors if it's not a 401 (unauthorized) - that's expected when not logged in
+      if (error.response?.status !== 401) {
+        console.error('[Notifications API] ❌ Error fetching notifications:', {
+          status: error.response?.status,
+          message: error.response?.data?.message || error.message,
+        });
+      }
+      // Return empty notifications silently for 401 errors (not authenticated)
       return {
-        status: 'error',
-        message: error.response?.data?.message || 'Failed to fetch notifications',
+        status: 'success',
+        message: 'No notifications available',
         data: { notifications: [] },
       };
     }

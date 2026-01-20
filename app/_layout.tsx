@@ -3,10 +3,10 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useState } from 'react';
 import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
-import { LogBox, AppState, AppStateStatus } from 'react-native';
+import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated } from 'react-native';
 
 import { AuthProvider } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
@@ -15,6 +15,7 @@ import { store } from '@/lib/store';
 import { initializeStore } from '@/lib/store/initializeStore';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { imageCache } from '@/lib/utils/image-cache';
+import talynkLogo from '@/assets/images/mobile-app-logo.png';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -35,6 +36,8 @@ export default function RootLayout() {
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,
   });
+  const [showSplash, setShowSplash] = useState(true);
+  const spinAnim = new Animated.Value(0);
 
   // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
@@ -43,12 +46,41 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
-      SplashScreen.hideAsync();
+      // Start spin animation
+      Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        })
+      ).start();
+
+      // Hide splash after 2.5 seconds
+      setTimeout(() => {
+        setShowSplash(false);
+        SplashScreen.hideAsync();
+      }, 2500);
     }
   }, [loaded]);
 
-  if (!loaded) {
-    return null;
+  if (!loaded || showSplash) {
+    const spin = spinAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '360deg'],
+    });
+
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
+        <Image 
+          source={talynkLogo} 
+          style={{ width: 120, height: 120, marginBottom: 32 }}
+          resizeMode="contain"
+        />
+        <Animated.View style={{ transform: [{ rotate: spin }] }}>
+          <ActivityIndicator size={48} color="#60a5fa" />
+        </Animated.View>
+      </View>
+    );
   }
 
   return <RootLayoutNav />;
@@ -97,10 +129,6 @@ function RootLayoutNav() {
             <Stack 
               screenOptions={{ 
                 headerShown: false,
-                // Enable lazy loading for all screens
-                lazy: true,
-                // Freeze screens when not focused for memory optimization
-                freezeOnBlur: true,
                 // Animation optimization
                 animation: 'fade',
               }}
@@ -111,8 +139,6 @@ function RootLayoutNav() {
                 name="post/[id]" 
                 options={{ 
                   headerShown: false,
-                  // Don't detach this screen as it's commonly accessed
-                  detachPreviousScreen: false,
                 }} 
               />
               <Stack.Screen 
@@ -125,12 +151,8 @@ function RootLayoutNav() {
                 name="profile-feed/[userId]" 
                 options={{ 
                   headerShown: false,
-                  // Detach previous screen for memory when viewing feed
-                  detachPreviousScreen: true,
                 }} 
               />
-              <Stack.Screen name="followers/[id]" options={{ headerShown: false }} />
-              <Stack.Screen name="settings" options={{ headerShown: false }} />
               <Stack.Screen name="search" options={{ headerShown: false }} />
               <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
             </Stack>

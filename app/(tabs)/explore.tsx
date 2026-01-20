@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,54 +15,55 @@ import {
   Modal,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi, followsApi, categoriesApi, countriesApi, searchApi } from '@/lib/api';
+import { postsApi, userApi, followsApi, categoriesApi, searchApi } from '@/lib/api';
 import { Post, User, Country } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
-import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
-import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { getPostMediaUrl, getFileUrl } from '@/lib/utils/file-url';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { timeAgo } from '@/lib/utils/time-ago';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-const SEARCH_TABS = [
-  { key: 'top', label: 'Top' },
-  { key: 'people', label: 'People' },
-  { key: 'videos', label: 'Videos' },
+const CONFIGURED_COUNTRIES = [
+  { id: 140, name: 'Rwanda', code: 'RW', flag_emoji: '🇷🇼' },
+  { id: 2, name: 'Kenya', code: 'KE', flag_emoji: '🇰🇪' },
+  { id: 3, name: 'Uganda', code: 'UG', flag_emoji: '🇺🇬' },
+  { id: 4, name: 'Tanzania', code: 'TZ', flag_emoji: '🇹🇿' },
+  { id: 5, name: 'Nigeria', code: 'NG', flag_emoji: '🇳🇬' },
+  { id: 6, name: 'Ghana', code: 'GH', flag_emoji: '🇬🇭' },
+  { id: 7, name: 'South Africa', code: 'ZA', flag_emoji: '🇿🇦' },
+  { id: 8, name: 'United States', code: 'US', flag_emoji: '🇺🇸' },
+  { id: 9, name: 'United Kingdom', code: 'GB', flag_emoji: '🇬🇧' },
 ];
 
-// Preferred category order
-const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
-
 export default function ExploreScreen() {
+  const [activeTab, setActiveTab] = useState<'grid' | 'search'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [activeSearchTab, setActiveSearchTab] = useState('top');
 
+  // Grid state
+  const [gridPosts, setGridPosts] = useState<Post[]>([]);
+
+  // Filters
   const [categories, setCategories] = useState<any[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
-  const [selectedSubcategory, setSelectedSubcategory] = useState<string>('');
-  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | null>(null);
-  const [subcategories, setSubcategories] = useState<any[]>([]);
-
-  // Country filter
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [selectedCountry, setSelectedCountry] = useState<string>('All Countries');
+  // Hierarchical categories
+  const [selectedMainCategoryId, setSelectedMainCategoryId] = useState<number | null>(null);
+  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState<number | null>(null);
   const [selectedCountryId, setSelectedCountryId] = useState<number | null>(null);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
 
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [suggestions, setSuggestions] = useState<User[]>([]);
+  // Search results
+  const [searchUsers, setSearchUsers] = useState<User[]>([]);
+  const [searchPosts, setSearchPosts] = useState<Post[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [loadingPosts, setLoadingPosts] = useState(false);
 
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
@@ -70,75 +71,69 @@ export default function ExploreScreen() {
 
   useEffect(() => {
     loadInitialContent();
-    loadCountries();
   }, []);
 
-  // Load posts when filters change
+  // Load posts when filters change (only for grid, not feed)
   useEffect(() => {
-    if (!isSearching) {
-      loadFilteredPosts();
+    if (activeTab === 'grid') {
+      loadGridPosts();
     }
-  }, [selectedCategoryId, selectedSubcategoryId, selectedCountryId]);
+  }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, activeTab]);
 
   useEffect(() => {
     if (searchQuery.trim().length > 0) {
-      setIsSearching(true);
       performSearch();
     } else {
-      setIsSearching(false);
+      setSearchUsers([]);
+      setSearchPosts([]);
     }
-  }, [searchQuery, activeSearchTab]);
+  }, [searchQuery]);
 
-  // Update subcategories when category changes
-  useEffect(() => {
-    if (selectedCategory !== 'All') {
-      const category = categories.find(c => c.name === selectedCategory);
-      if (category?.children && category.children.length > 0) {
-        setSubcategories(category.children);
+  const applyClientFilters = (posts: Post[]) => {
+    let filtered = [...posts];
+
+    if (selectedCountryId) {
+      filtered = filtered.filter(
+        (p: any) => p.user?.country?.id === selectedCountryId
+      );
+    }
+
+    if (selectedSubCategoryId) {
+      filtered = filtered.filter(
+        (p: any) => p.category_id === selectedSubCategoryId || p.category?.id === selectedSubCategoryId
+      );
+    } else if (selectedMainCategoryId) {
+      const main = categories.find((c: any) => c.id === selectedMainCategoryId);
+      const childIds: number[] = (main?.children || []).map((ch: any) => ch.id);
+      if (childIds.length) {
+        filtered = filtered.filter((p: any) => childIds.includes(p.category_id || p.category?.id));
       } else {
-        setSubcategories([]);
+        // If no children exist, fall back to exact match
+        filtered = filtered.filter(
+          (p: any) => p.category_id === selectedMainCategoryId || p.category?.id === selectedMainCategoryId
+        );
       }
-    } else {
-      setSubcategories([]);
-      setSelectedSubcategory('');
-      setSelectedSubcategoryId(null);
     }
-  }, [selectedCategory, categories]);
 
-  const loadCountries = async () => {
-    try {
-      const res = await countriesApi.getAll();
-      if (res.status === 'success' && res.data?.countries) {
-        setCountries(res.data.countries);
-      }
-    } catch (error) {
-      console.error('Error loading countries:', error);
-    }
+    return filtered;
   };
 
   const loadInitialContent = async () => {
     setLoading(true);
     try {
-      const [categoriesRes, postsRes, suggestionsRes] = await Promise.all([
+      const [categoriesRes, postsRes] = await Promise.all([
         categoriesApi.getAll(),
-        postsApi.getAll(1, 30),
-        userApi.getSuggestions()
+        postsApi.getAll(1, 50),
       ]);
 
       if (categoriesRes.status === 'success') {
-        // Sort categories according to preferred order
-        const sortedCategories = sortCategories(categoriesRes.data.categories || []);
-        setCategories([{ name: 'All', id: null }, ...sortedCategories]);
+        setCategories(categoriesRes.data.categories || []);
       }
 
       if (postsRes.status === 'success') {
         const data = postsRes.data.posts || postsRes.data || [];
-        setPosts(Array.isArray(data) ? data : []);
-      }
-
-      if (suggestionsRes.status === 'success') {
-        const list = suggestionsRes.data?.suggestions || [];
-        setSuggestions(Array.isArray(list) ? list : []);
+        const postsList = Array.isArray(data) ? data : [];
+        setGridPosts(applyClientFilters(postsList));
       }
     } catch (error) {
       console.error('Error loading explore content:', error);
@@ -148,104 +143,50 @@ export default function ExploreScreen() {
     }
   };
 
-  // Sort categories according to preferred order
-  const sortCategories = (cats: any[]) => {
-    return cats.sort((a, b) => {
-      const indexA = CATEGORY_ORDER.indexOf(a.name);
-      const indexB = CATEGORY_ORDER.indexOf(b.name);
-      
-      // If both are in the preferred order, sort by that order
-      if (indexA !== -1 && indexB !== -1) {
-        return indexA - indexB;
-      }
-      // If only one is in the preferred order, it comes first
-      if (indexA !== -1) return -1;
-      if (indexB !== -1) return 1;
-      // Otherwise, sort alphabetically
-      return a.name.localeCompare(b.name);
-    });
-  };
-
-  const loadFilteredPosts = async () => {
-    setLoadingPosts(true);
+  const loadGridPosts = async () => {
     try {
-      // Build query params for filtering
-      let url = `/api/posts/all?page=1&limit=30`;
-      
-      // Use subcategory ID if selected, otherwise use main category ID
-      const categoryIdToUse = selectedSubcategoryId || selectedCategoryId;
-      if (categoryIdToUse) {
-        url += `&category_id=${categoryIdToUse}`;
+      let query = '';
+      // Backend filter is by category_id (subcategory id). Main categories won't match posts.
+      if (selectedSubCategoryId) {
+        query += `&category_id=${selectedSubCategoryId}`;
       }
-      
       if (selectedCountryId) {
-        url += `&country_id=${selectedCountryId}`;
+        // Backend currently ignores country_id in filters, so we will also filter client-side.
+        query += `&country_id=${selectedCountryId}`;
       }
 
-      const response = await postsApi.getAll(1, 30, categoryIdToUse ? `&category_id=${categoryIdToUse}` : '');
-      
+      const response = await postsApi.getAll(1, 50, query);
+
       if (response.status === 'success') {
         const data = response.data.posts || response.data || [];
-        setPosts(Array.isArray(data) ? data : []);
+        const list = Array.isArray(data) ? data : [];
+        setGridPosts(applyClientFilters(list));
       }
     } catch (error) {
-      console.error('Error loading filtered posts:', error);
-    } finally {
-      setLoadingPosts(false);
+      console.error('Error loading grid posts:', error);
     }
   };
 
   const performSearch = async () => {
-    setLoading(true);
     try {
-      const searchOptions: any = {
-        type: activeSearchTab === 'people' ? 'users' : activeSearchTab === 'videos' ? 'posts' : 'all',
+      const response = await searchApi.search(searchQuery, {
+        type: 'all',
         page: 1,
         limit: 20,
-      };
+      });
 
-      // Add filters
-      if (selectedCountryId) {
-        searchOptions.country_id = selectedCountryId;
-      }
-      if (selectedCategoryId) {
-        searchOptions.category_id = selectedCategoryId;
-      }
-
-      const res = await searchApi.search(searchQuery, searchOptions);
-      
-      if (res.status === 'success') {
-        if (activeSearchTab === 'people') {
-          setUsers(res.data.users || []);
-          setPosts([]);
-        } else if (activeSearchTab === 'videos') {
-          setPosts(res.data.posts || []);
-          setUsers([]);
-        } else {
-          // Top shows both
-          setUsers(res.data.users || []);
-          setPosts(res.data.posts || []);
-        }
-      } else {
-        setUsers([]);
-        setPosts([]);
+      if (response.status === 'success') {
+        setSearchUsers(response.data.users || []);
+        setSearchPosts(response.data.posts || []);
       }
     } catch (error) {
       console.error('Search error:', error);
-      setUsers([]);
-      setPosts([]);
-    } finally {
-      setLoading(false);
     }
   };
 
   const onRefresh = () => {
     setRefreshing(true);
-    if (isSearching) {
-      performSearch();
-    } else {
-      loadInitialContent();
-    }
+    loadInitialContent();
   };
 
   const handleFollow = async (userId: string) => {
@@ -262,181 +203,108 @@ export default function ExploreScreen() {
     }
   };
 
-  const handleCategorySelect = (cat: any) => {
-    setSelectedCategory(cat.name);
-    setSelectedCategoryId(cat.id || null);
-    setSelectedSubcategory('');
-    setSelectedSubcategoryId(null);
-  };
-
-  const handleSubcategorySelect = (subcat: any) => {
-    setSelectedSubcategory(subcat.name);
-    setSelectedSubcategoryId(subcat.id);
-  };
-
   const handleCountrySelect = (country: Country | null) => {
     if (country) {
-      setSelectedCountry(country.name);
       setSelectedCountryId(country.id);
     } else {
-      setSelectedCountry('All Countries');
       setSelectedCountryId(null);
     }
     setShowCountryPicker(false);
     setCountrySearchQuery('');
   };
 
-  const filteredCountries = countries.filter(c => 
+  const filteredCountries = CONFIGURED_COUNTRIES.filter(c =>
     c.name.toLowerCase().includes(countrySearchQuery.toLowerCase())
   );
 
-  const PostCard = ({ item }: { item: Post }) => {
-    const videoRef = useRef<Video>(null);
-    const [isActive, setIsActive] = useState(false);
-    const [showVideo, setShowVideo] = useState(false);
-    const [isLoaded, setIsLoaded] = useState(false);
-
+  // ============ GRID COMPONENTS ============
+  const GridPostCard = ({ item, index }: { item: Post; index: number }) => {
     const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
-    const isVideo = !!videoUrl;
-
-    // Get fallback image URL
-    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl(item.image || (item as any).thumbnail || '');
-
-    // Generate thumbnail for videos, use image directly for non-videos
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo ? videoUrl : null,
-      fallbackImageUrl || '',
-      1000 // Extract thumbnail at 1 second
-    );
-
-    // For videos: use generated thumbnail, fallback to provided image
-    // For images: use image directly
-    const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl)
-      : getPostMediaUrl(item) || '';
-
-    useEffect(() => {
-      if (isActive && isVideo && videoUrl) {
-        // Small delay before showing video to ensure smooth transition
-        const timer = setTimeout(() => {
-          setShowVideo(true);
-        }, 200);
-        return () => clearTimeout(timer);
-      } else {
-        setShowVideo(false);
-        setIsLoaded(false);
-        // Stop video when not active
-        if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => { });
-        }
-      }
-    }, [isActive, isVideo, videoUrl]);
-
-    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-      if (status.isLoaded) {
-        setIsLoaded(true);
-        // Loop the teaser after 3 seconds
-        if (status.positionMillis && status.positionMillis > 3000) {
-          videoRef.current?.setPositionAsync(0);
-        }
-      }
-    };
+    const thumbnailUrl = getPostMediaUrl(item) || '';
+    const mediaUrl = thumbnailUrl || videoUrl || '';
+    const isVideo =
+      item.type === 'video' ||
+      (mediaUrl !== null &&
+        (mediaUrl.includes('.mp4') ||
+          mediaUrl.includes('.mov') ||
+          mediaUrl.includes('.webm')));
 
     return (
       <TouchableOpacity
-        style={styles.postCard}
-        onPress={() => router.push({
-          pathname: '/post/[id]',
-          params: { id: item.id }
-        })}
-        onPressIn={() => setIsActive(true)}
-        onPressOut={() => setIsActive(false)}
-        activeOpacity={0.9}
+        style={styles.gridCard}
+        onPress={() =>
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: item.id, postData: JSON.stringify(item) },
+          })
+        }
       >
-        {/* Static thumbnail image - always visible in background */}
-        {staticThumbnailUrl ? (
+        {thumbnailUrl ? (
           <Image
-            source={{ uri: staticThumbnailUrl }}
-            style={styles.postMedia}
+            source={{ uri: thumbnailUrl }}
+            style={styles.gridMedia}
             resizeMode="cover"
           />
         ) : (
-          <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-            {isVideo && !staticThumbnailUrl ? (
-              <ActivityIndicator size="small" color="#60a5fa" />
-            ) : (
-              <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
-            )}
+          <View style={[styles.gridMedia, styles.gridNoMedia]}>
+            <MaterialIcons
+              name={isVideo ? 'video-library' : 'image'}
+              size={28}
+              color="#444"
+            />
           </View>
         )}
 
-        {/* Video teaser overlay - only when active */}
-        {showVideo && isVideo && videoUrl && isActive && (
-          <Video
-            ref={videoRef}
-            source={{ uri: videoUrl }}
-            style={[styles.postMedia, styles.teaserVideo]}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={isActive}
-            isLooping={false}
-            isMuted={true}
-            volume={0}
-            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          />
+        {isVideo && (
+          <View style={styles.gridPlayIcon}>
+            <Feather name="play" size={16} color="#fff" />
+          </View>
         )}
 
-        <View style={styles.postOverlay}>
-          <View style={styles.postStats}>
-            <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{item.likes || 0}</Text>
+        <View style={styles.gridOverlay}>
+          <View style={styles.gridStats}>
+            <Feather name="heart" size={12} color="#fff" />
+            <Text style={styles.gridStatText}>{item.likes || 0}</Text>
           </View>
-          {isVideo && (
-            <View style={styles.playIcon}>
-              {isActive && showVideo ? (
-                <View style={styles.playingDot} />
-              ) : (
-                <Feather name="play" size={16} color="#fff" />
+          {(item.createdAt || (item as any).uploadDate) && (
+            <Text style={styles.gridTime}>
+              {timeAgo(
+                (item as any).createdAt ||
+                  (item as any).uploadDate ||
+                  (item as any).created_at
               )}
-            </View>
+            </Text>
           )}
         </View>
       </TouchableOpacity>
     );
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
-    return <PostCard item={item} />;
-  };
-
-  const renderUser = ({ item }: { item: User }) => (
+  // ============ SEARCH COMPONENTS ============
+  const SearchUserRow = ({ item }: { item: User }) => (
     <TouchableOpacity
-      style={styles.userRow}
-      onPress={() => router.push({
-        pathname: '/user/[id]',
-        params: { id: item.id }
-      })}
+      style={styles.searchUserRow}
+      onPress={() => router.push({ pathname: '/user/[id]', params: { id: item.id } })}
     >
-      <Avatar
-        user={item}
-        size={50}
-        style={styles.userAvatar}
-      />
-      <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name || item.username}</Text>
-        <Text style={styles.userHandle}>@{item.username}</Text>
+      <Avatar user={item} size={50} style={styles.searchUserAvatar} />
+      <View style={styles.searchUserInfo}>
+        <Text style={styles.searchUserName}>{item.name || item.username}</Text>
+        <Text style={styles.searchUserHandle}>@{item.username}</Text>
       </View>
       {user && user.id !== item.id && (
         <TouchableOpacity
           style={[
-            styles.followButton,
-            followedUsers.has(item.id) && styles.followingButton
+            styles.searchFollowButton,
+            followedUsers.has(item.id) && styles.searchFollowingButton,
           ]}
           onPress={() => handleFollow(item.id)}
         >
-          <Text style={[
-            styles.followButtonText,
-            followedUsers.has(item.id) && styles.followingButtonText
-          ]}>
+          <Text
+            style={[
+              styles.searchFollowButtonText,
+              followedUsers.has(item.id) && styles.searchFollowingButtonText,
+            ]}
+          >
             {followedUsers.has(item.id) ? 'Following' : 'Follow'}
           </Text>
         </TouchableOpacity>
@@ -444,326 +312,289 @@ export default function ExploreScreen() {
     </TouchableOpacity>
   );
 
-  // Get active filter count for badge
-  const getActiveFilterCount = () => {
-    let count = 0;
-    if (selectedCategory !== 'All') count++;
-    if (selectedSubcategory) count++;
-    if (selectedCountryId) count++;
-    return count;
+  const SearchPostCard = ({ item, index }: { item: Post; index: number }) => {
+    const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
+    const thumbnailUrl = getPostMediaUrl(item) || '';
+    const mediaUrl = thumbnailUrl || videoUrl || '';
+    const isVideo =
+      item.type === 'video' ||
+      (mediaUrl !== null &&
+        (mediaUrl.includes('.mp4') ||
+          mediaUrl.includes('.mov') ||
+          mediaUrl.includes('.webm')));
+
+    return (
+      <TouchableOpacity
+        style={styles.gridCard}
+        onPress={() =>
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: item.id, postData: JSON.stringify(item) },
+          })
+        }
+      >
+        {thumbnailUrl ? (
+          <Image
+            source={{ uri: thumbnailUrl }}
+            style={styles.gridMedia}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[styles.gridMedia, styles.gridNoMedia]}>
+            <MaterialIcons name={isVideo ? 'video-library' : 'image'} size={28} color="#444" />
+          </View>
+        )}
+        {isVideo && (
+          <View style={styles.gridPlayIcon}>
+            <Feather name="play" size={16} color="#fff" />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#60a5fa" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.searchBar}>
-          <Feather name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search users, videos, trends..."
-            placeholderTextColor="#666"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            returnKeyType="search"
-            onSubmitEditing={() => {
-              setIsSearching(true);
-              performSearch();
-            }}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => {
-              setSearchQuery('');
-              setIsSearching(false);
-              Keyboard.dismiss();
-            }}>
-              <Feather name="x" size={18} color="#666" />
-            </TouchableOpacity>
-          )}
-        </View>
+        {activeTab === 'search' ? (
+          <View style={styles.searchBar}>
+            <Feather name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search users, videos..."
+              placeholderTextColor="#666"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+              onSubmitEditing={() => {
+                setActiveTab('search');
+                performSearch();
+              }}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                  Keyboard.dismiss();
+                }}
+              >
+                <Feather name="x" size={18} color="#666" />
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View style={{ height: 44 }} />
+        )}
       </View>
 
-      {isSearching && (
-        <View style={styles.tabsContainer}>
-          {SEARCH_TABS.map((tab) => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[styles.tab, activeSearchTab === tab.key && styles.tabActive]}
-              onPress={() => setActiveSearchTab(tab.key)}
-            >
-              <Text style={[styles.tabText, activeSearchTab === tab.key && styles.tabTextActive]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      {loading && !refreshing ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#60a5fa" />
-        </View>
-      ) : (
-        <ScrollView
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
-          }
+      {/* Tab buttons */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'grid' && styles.tabButtonActive]}
+          onPress={() => {
+            setActiveTab('grid');
+            setSearchQuery('');
+          }}
         >
-          {!isSearching && (
-            <>
-              {/* Filter Section Header */}
-              <View style={styles.filterHeader}>
-                <Text style={styles.filterTitle}>Explore Talents</Text>
-                {getActiveFilterCount() > 0 && (
-                  <TouchableOpacity 
-                    style={styles.clearFiltersButton}
-                    onPress={() => {
-                      setSelectedCategory('All');
-                      setSelectedCategoryId(null);
-                      setSelectedSubcategory('');
-                      setSelectedSubcategoryId(null);
-                      setSelectedCountry('All Countries');
-                      setSelectedCountryId(null);
-                    }}
-                  >
-                    <Text style={styles.clearFiltersText}>Clear filters ({getActiveFilterCount()})</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+          <Text style={[styles.tabText, activeTab === 'grid' && styles.tabTextActive]}>
+            Explore
+          </Text>
+        </TouchableOpacity>
 
-              {/* Country Filter */}
-              <TouchableOpacity 
-                style={styles.countrySelector}
-                onPress={() => setShowCountryPicker(true)}
+        <TouchableOpacity
+          style={[styles.tabButton, activeTab === 'search' && styles.tabButtonActive]}
+          onPress={() => setActiveTab('search')}
+        >
+          <Text style={[styles.tabText, activeTab === 'search' && styles.tabTextActive]}>
+            Search
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* GRID TAB - Explore with filters */}
+      {activeTab === 'grid' && (
+        <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          {/* Filters */}
+          <View style={styles.filterSection}>
+            {/* Country filter */}
+            <TouchableOpacity
+              style={styles.filterButton}
+              onPress={() => setShowCountryPicker(true)}
+            >
+              <MaterialIcons name="public" size={18} color="#60a5fa" />
+              <Text style={styles.filterButtonText}>
+                {CONFIGURED_COUNTRIES.find(c => c.id === selectedCountryId)?.name ||
+                  'All Countries'}
+              </Text>
+              <Feather name="chevron-down" size={16} color="#666" />
+            </TouchableOpacity>
+
+            {/* Main Category filter */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.categoryScroll}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.categoryPill,
+                  !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillActive,
+                ]}
+                onPress={() => {
+                  setSelectedMainCategoryId(null);
+                  setSelectedSubCategoryId(null);
+                }}
               >
-                <MaterialIcons name="public" size={20} color="#60a5fa" />
-                <Text style={styles.countrySelectorText}>{selectedCountry}</Text>
-                <Feather name="chevron-down" size={20} color="#666" />
+                <Text
+                  style={[
+                    styles.categoryPillText,
+                    !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillTextActive,
+                  ]}
+                >
+                  All
+                </Text>
               </TouchableOpacity>
+              {categories.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryPill,
+                    selectedMainCategoryId === cat.id && styles.categoryPillActive,
+                  ]}
+                  onPress={() => {
+                    setSelectedMainCategoryId(cat.id);
+                    setSelectedSubCategoryId(null);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      selectedMainCategoryId === cat.id && styles.categoryPillTextActive,
+                    ]}
+                  >
+                    {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
-              {/* Categories */}
+            {/* Subcategory filter (only when a main category is selected) */}
+            {!!selectedMainCategoryId && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
-                style={styles.categoriesContainer}
-                contentContainerStyle={styles.categoriesContent}
+                style={styles.categoryScroll}
               >
-                {categories.map((cat) => {
-                  const isSelected = selectedCategory === cat.name;
-                  return (
-                    <TouchableOpacity
-                      key={cat.id || cat.name}
-                      style={[styles.categoryPill, isSelected && styles.categoryPillActive]}
-                      onPress={() => handleCategorySelect(cat)}
-                    >
-                      <Text style={[styles.categoryPillText, isSelected && styles.categoryPillTextActive]}>
-                        {cat.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-
-              {/* Subcategories */}
-              {subcategories.length > 0 && (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.subcategoriesContainer}
-                  contentContainerStyle={styles.categoriesContent}
+                <TouchableOpacity
+                  style={[
+                    styles.categoryPill,
+                    !selectedSubCategoryId && styles.categoryPillActive,
+                  ]}
+                  onPress={() => setSelectedSubCategoryId(null)}
                 >
-                  <TouchableOpacity
-                    style={[styles.subcategoryPill, !selectedSubcategory && styles.subcategoryPillActive]}
-                    onPress={() => {
-                      setSelectedSubcategory('');
-                      setSelectedSubcategoryId(null);
-                    }}
+                  <Text
+                    style={[
+                      styles.categoryPillText,
+                      !selectedSubCategoryId && styles.categoryPillTextActive,
+                    ]}
                   >
-                    <Text style={[styles.subcategoryPillText, !selectedSubcategory && styles.subcategoryPillTextActive]}>
-                      All {selectedCategory}
+                    All in category
+                  </Text>
+                </TouchableOpacity>
+                {(categories.find((c: any) => c.id === selectedMainCategoryId)?.children || []).map((sub: any) => (
+                  <TouchableOpacity
+                    key={sub.id}
+                    style={[
+                      styles.categoryPill,
+                      selectedSubCategoryId === sub.id && styles.categoryPillActive,
+                    ]}
+                    onPress={() => setSelectedSubCategoryId(sub.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryPillText,
+                        selectedSubCategoryId === sub.id && styles.categoryPillTextActive,
+                      ]}
+                    >
+                      {sub.name}
                     </Text>
                   </TouchableOpacity>
-                  {subcategories.map((subcat) => {
-                    const isSelected = selectedSubcategory === subcat.name;
-                    return (
-                      <TouchableOpacity
-                        key={subcat.id}
-                        style={[styles.subcategoryPill, isSelected && styles.subcategoryPillActive]}
-                        onPress={() => handleSubcategorySelect(subcat)}
-                      >
-                        <Text style={[styles.subcategoryPillText, isSelected && styles.subcategoryPillTextActive]}>
-                          {subcat.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-
-              {/* Active Filters Display */}
-              {getActiveFilterCount() > 0 && (
-                <View style={styles.activeFiltersContainer}>
-                  <Text style={styles.activeFiltersLabel}>Showing:</Text>
-                  <View style={styles.activeFilterTags}>
-                    {selectedCategory !== 'All' && (
-                      <View style={styles.activeFilterTag}>
-                        <Text style={styles.activeFilterTagText}>{selectedCategory}</Text>
-                      </View>
-                    )}
-                    {selectedSubcategory && (
-                      <View style={styles.activeFilterTag}>
-                        <Text style={styles.activeFilterTagText}>{selectedSubcategory}</Text>
-                      </View>
-                    )}
-                    {selectedCountryId && (
-                      <View style={styles.activeFilterTag}>
-                        <MaterialIcons name="public" size={12} color="#60a5fa" />
-                        <Text style={styles.activeFilterTagText}>{selectedCountry}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              )}
-
-              {/* Suggestions */}
-              {suggestions.length > 0 && !selectedCategoryId && !selectedCountryId && (
-                <View style={styles.suggestionsSection}>
-                  <Text style={styles.sectionTitle}>Suggested for you</Text>
-                  <FlatList
-                    data={suggestions}
-                    renderItem={({ item }) => (
-                      <View style={styles.suggestionCard}>
-                        <TouchableOpacity onPress={() => router.push({ pathname: '/user/[id]', params: { id: item.id } })}>
-                          <Avatar user={item} size={80} style={styles.suggestionAvatar} />
-                          <Text style={styles.suggestionName} numberOfLines={1}>{item.username}</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[styles.suggestionFollowButton, followedUsers.has(item.id) && styles.suggestionFollowingButton]}
-                          onPress={() => handleFollow(item.id)}
-                        >
-                          <Text style={[styles.suggestionFollowText, followedUsers.has(item.id) && styles.suggestionFollowingText]}>
-                            {followedUsers.has(item.id) ? 'Following' : 'Follow'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                    keyExtractor={(item) => item.id}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.suggestionsList}
-                  />
-                </View>
-              )}
-            </>
-          )}
-
-          {/* Results Grid / List */}
-          <View style={styles.resultsContainer}>
-            {loadingPosts && (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator size="small" color="#60a5fa" />
-              </View>
+                ))}
+              </ScrollView>
             )}
-            {isSearching ? (
-              <>
-                {activeSearchTab === 'top' && (
-                  <>
-                    {users.length > 0 && (
-                      <View style={styles.searchSection}>
-                        <Text style={styles.sectionTitle}>People</Text>
-                        <FlatList
-                          data={users}
-                          renderItem={renderUser}
-                          keyExtractor={(item) => item.id}
-                          scrollEnabled={false}
-                        />
-                      </View>
-                    )}
-                    {posts.length > 0 && (
-                      <View style={styles.searchSection}>
-                        <Text style={styles.sectionTitle}>Videos</Text>
-                        <FlatList
-                          data={posts}
-                          renderItem={renderPost}
-                          keyExtractor={(item) => item.id}
-                          numColumns={3}
-                          scrollEnabled={false}
-                          contentContainerStyle={styles.postsGrid}
-                        />
-                      </View>
-                    )}
-                    {users.length === 0 && posts.length === 0 && searchQuery.length > 0 && (
-                      <View style={styles.emptyContainer}>
-                        <Feather name="search" size={48} color="#666" />
-                        <Text style={styles.emptyText}>No results found</Text>
-                        <Text style={styles.emptySubtext}>Try searching for something else</Text>
-                      </View>
-                    )}
-                  </>
-                )}
-                {activeSearchTab === 'people' && (
+          </View>
+
+          {/* Grid */}
+          <FlatList
+            data={gridPosts}
+            renderItem={({ item, index }) => (
+              <GridPostCard item={item} index={index} />
+            )}
+            keyExtractor={(item) => item.id}
+            numColumns={3}
+            scrollEnabled={false}
+            contentContainerStyle={styles.gridContent}
+          />
+        </ScrollView>
+      )}
+
+      {/* SEARCH TAB */}
+      {activeTab === 'search' && (
+        <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+          {searchQuery.length > 0 ? (
+            <>
+              {/* Users */}
+              {searchUsers.length > 0 && (
+                <View style={styles.searchSection}>
+                  <Text style={styles.searchSectionTitle}>Users</Text>
                   <FlatList
-                    data={users}
-                    renderItem={renderUser}
+                    data={searchUsers}
+                    renderItem={({ item }) => <SearchUserRow item={item} />}
                     keyExtractor={(item) => item.id}
                     scrollEnabled={false}
-                    ListEmptyComponent={
-                      <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>No users found</Text>
-                      </View>
-                    }
                   />
-                )}
-                {activeSearchTab === 'videos' && (
+                </View>
+              )}
+
+              {/* Posts */}
+              {searchPosts.length > 0 && (
+                <View style={styles.searchSection}>
+                  <Text style={styles.searchSectionTitle}>Posts</Text>
                   <FlatList
-                    data={posts}
-                    renderItem={renderPost}
+                    data={searchPosts}
+                    renderItem={({ item, index }) => (
+                      <SearchPostCard item={item} index={index} />
+                    )}
                     keyExtractor={(item) => item.id}
                     numColumns={3}
                     scrollEnabled={false}
-                    contentContainerStyle={styles.postsGrid}
-                    ListEmptyComponent={
-                      <View style={styles.emptyContainer}>
-                        <Feather name="video" size={48} color="#666" />
-                        <Text style={styles.emptyText}>No videos found</Text>
-                      </View>
-                    }
+                    contentContainerStyle={styles.gridContent}
                   />
-                )}
-              </>
-            ) : (
-              <FlatList
-                data={posts}
-                renderItem={renderPost}
-                keyExtractor={(item) => item.id}
-                numColumns={3}
-                scrollEnabled={false}
-                contentContainerStyle={styles.postsGrid}
-                ListEmptyComponent={
-                  <View style={styles.emptyContainer}>
-                    <Feather name="video" size={48} color="#666" />
-                    <Text style={styles.emptyText}>
-                      {getActiveFilterCount() > 0 ? 'No talents found with these filters' : 'No posts found'}
-                    </Text>
-                    {getActiveFilterCount() > 0 && (
-                      <TouchableOpacity 
-                        style={styles.clearFiltersButtonEmpty}
-                        onPress={() => {
-                          setSelectedCategory('All');
-                          setSelectedCategoryId(null);
-                          setSelectedSubcategory('');
-                          setSelectedSubcategoryId(null);
-                          setSelectedCountry('All Countries');
-                          setSelectedCountryId(null);
-                        }}
-                      >
-                        <Text style={styles.clearFiltersTextEmpty}>Clear all filters</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                }
-              />
-            )}
-          </View>
+                </View>
+              )}
+
+              {searchUsers.length === 0 && searchPosts.length === 0 && (
+                <View style={styles.emptyContainer}>
+                  <Feather name="search" size={48} color="#666" />
+                  <Text style={styles.emptyText}>No results found</Text>
+                </View>
+              )}
+            </>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Feather name="search" size={48} color="#666" />
+              <Text style={styles.emptyText}>Start searching</Text>
+            </View>
+          )}
         </ScrollView>
       )}
 
@@ -782,7 +613,7 @@ export default function ExploreScreen() {
                 <Feather name="x" size={24} color="#fff" />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalSearchBar}>
               <Feather name="search" size={18} color="#666" />
               <TextInput
@@ -796,27 +627,49 @@ export default function ExploreScreen() {
 
             <ScrollView style={styles.countryList}>
               <TouchableOpacity
-                style={[styles.countryItem, !selectedCountryId && styles.countryItemActive]}
+                style={[
+                  styles.countryItem,
+                  !selectedCountryId && styles.countryItemActive,
+                ]}
                 onPress={() => handleCountrySelect(null)}
               >
-                <MaterialIcons name="public" size={24} color={!selectedCountryId ? "#60a5fa" : "#666"} />
-                <Text style={[styles.countryItemText, !selectedCountryId && styles.countryItemTextActive]}>
+                <MaterialIcons
+                  name="public"
+                  size={24}
+                  color={!selectedCountryId ? '#60a5fa' : '#666'}
+                />
+                <Text
+                  style={[
+                    styles.countryItemText,
+                    !selectedCountryId && styles.countryItemTextActive,
+                  ]}
+                >
                   All Countries
                 </Text>
                 {!selectedCountryId && <Feather name="check" size={20} color="#60a5fa" />}
               </TouchableOpacity>
-              
+
               {filteredCountries.map((country) => (
                 <TouchableOpacity
                   key={country.id}
-                  style={[styles.countryItem, selectedCountryId === country.id && styles.countryItemActive]}
+                  style={[
+                    styles.countryItem,
+                    selectedCountryId === country.id && styles.countryItemActive,
+                  ]}
                   onPress={() => handleCountrySelect(country)}
                 >
                   <Text style={styles.countryFlag}>{country.flag_emoji || '🏳️'}</Text>
-                  <Text style={[styles.countryItemText, selectedCountryId === country.id && styles.countryItemTextActive]}>
+                  <Text
+                    style={[
+                      styles.countryItemText,
+                      selectedCountryId === country.id && styles.countryItemTextActive,
+                    ]}
+                  >
                     {country.name}
                   </Text>
-                  {selectedCountryId === country.id && <Feather name="check" size={20} color="#60a5fa" />}
+                  {selectedCountryId === country.id && (
+                    <Feather name="check" size={20} color="#60a5fa" />
+                  )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -830,12 +683,19 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#000',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   header: {
     paddingHorizontal: 16,
     paddingBottom: 12,
     backgroundColor: '#000',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
   },
   searchBar: {
     flexDirection: 'row',
@@ -854,327 +714,282 @@ const styles = StyleSheet.create({
     fontSize: 16,
     height: '100%',
   },
-  tabsContainer: {
+  tabContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    marginBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#1a1a1a',
+    backgroundColor: '#000',
   },
-  tab: {
+  tabButton: {
+    flex: 1,
     paddingVertical: 12,
-    marginRight: 24,
-  },
-  tabActive: {
+    alignItems: 'center',
     borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabButtonActive: {
     borderBottomColor: '#60a5fa',
   },
   tabText: {
     color: '#666',
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 14,
+    fontWeight: '600',
   },
   tabTextActive: {
     color: '#fff',
-    fontWeight: '600',
   },
-  filterHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+
+  // ============ FEED STYLES ============
+  feedPostContainer: {
+    width: screenWidth,
+    height: screenHeight - 200,
+    backgroundColor: '#000',
+  },
+  feedMediaWrapper: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    position: 'relative',
   },
-  filterTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
+  feedMedia: {
+    width: '100%',
+    height: '100%',
   },
-  clearFiltersButton: {
-    padding: 8,
-  },
-  clearFiltersText: {
-    color: '#60a5fa',
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  countrySelector: {
-    flexDirection: 'row',
+  feedNoMedia: {
+    justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1a1a1a',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 10,
   },
-  countrySelectorText: {
+  feedMuteOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    pointerEvents: 'none',
+  },
+  feedMuteBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 36,
+    padding: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  feedProgressBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  feedProgressFill: {
+    height: '100%',
+    backgroundColor: '#60a5fa',
+  },
+  feedOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 16,
+    paddingBottom: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  feedUserSection: {
+    marginBottom: 16,
+  },
+  feedUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  feedUserAvatar: {
+    marginRight: 12,
+  },
+  feedUserInfo: {
     flex: 1,
+  },
+  feedUsername: {
     color: '#fff',
     fontSize: 15,
+    fontWeight: '600',
+  },
+  feedDisplayName: {
+    color: '#999',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  feedActions: {
+    flexDirection: 'column',
+  },
+  feedCaption: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  feedStats: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: 20,
+  },
+  feedStatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  feedStatText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // ============ GRID STYLES ============
+  filterSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 8,
+  },
+  filterButtonText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '500',
   },
-  categoriesContainer: {
-    marginBottom: 8,
-  },
-  categoriesContent: {
-    paddingHorizontal: 16,
+  categoryScroll: {
+    marginBottom: 4,
   },
   categoryPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
     backgroundColor: '#1a1a1a',
     marginRight: 8,
+    marginLeft: 16,
   },
   categoryPillActive: {
     backgroundColor: '#60a5fa',
   },
   categoryPillText: {
-    color: '#999',
-    fontSize: 14,
+    color: '#666',
+    fontSize: 12,
     fontWeight: '500',
   },
   categoryPillTextActive: {
     color: '#fff',
-    fontWeight: '600',
   },
-  subcategoriesContainer: {
-    marginBottom: 12,
+  gridContent: {
+    padding: 1,
   },
-  subcategoryPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#252525',
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: '#333',
+  gridCard: {
+    width: (screenWidth - 5) / 3,
+    height: (screenWidth - 5) / 3 * 1.3,
+    margin: 1,
+    backgroundColor: '#1a1a1a',
+    position: 'relative',
   },
-  subcategoryPillActive: {
-    backgroundColor: 'rgba(96, 165, 250, 0.2)',
-    borderColor: '#60a5fa',
+  gridMedia: {
+    width: '100%',
+    height: '100%',
   },
-  subcategoryPillText: {
-    color: '#888',
-    fontSize: 13,
-    fontWeight: '500',
+  gridNoMedia: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
   },
-  subcategoryPillTextActive: {
-    color: '#60a5fa',
-    fontWeight: '600',
+  gridPlayIcon: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 4,
+    padding: 4,
   },
-  activeFiltersContainer: {
+  gridOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 4,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  gridStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    gap: 8,
-  },
-  activeFiltersLabel: {
-    color: '#666',
-    fontSize: 13,
-  },
-  activeFilterTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  activeFilterTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(96, 165, 250, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
     gap: 4,
   },
-  activeFilterTagText: {
-    color: '#60a5fa',
-    fontSize: 12,
-    fontWeight: '500',
+  gridStatText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
   },
-  suggestionsSection: {
-    marginBottom: 24,
+
+  // ============ SEARCH STYLES ============
+  searchSection: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
   },
-  sectionTitle: {
+  searchSectionTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     paddingHorizontal: 16,
     marginBottom: 12,
   },
-  searchSection: {
-    marginBottom: 24,
-  },
-  suggestionsList: {
-    paddingHorizontal: 16,
-  },
-  suggestionCard: {
+  searchUserRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  searchUserAvatar: {
     marginRight: 12,
-    width: 110,
   },
-  suggestionAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    marginBottom: 8,
+  searchUserInfo: {
+    flex: 1,
   },
-  suggestionName: {
+  searchUserName: {
     color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  searchUserHandle: {
+    color: '#666',
     fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-    textAlign: 'center',
+    marginTop: 2,
   },
-  suggestionFollowButton: {
+  searchFollowButton: {
     backgroundColor: '#60a5fa',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
-  },
-  suggestionFollowingButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#666',
-  },
-  suggestionFollowText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  suggestionFollowingText: {
-    color: '#666',
-  },
-  resultsContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  loadingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  postsGrid: {
-    padding: 1,
-  },
-  postCard: {
-    width: (screenWidth - 5) / 3,
-    height: (screenWidth - 5) / 3 * 1.5,
-    margin: 1,
-    backgroundColor: '#1a1a1a',
-  },
-  postMedia: {
-    width: '100%',
-    height: '100%',
-  },
-  noMediaPlaceholder: {
-    backgroundColor: '#1a1a1a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  teaserVideo: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  postOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 6,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  postStats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  postStatText: {
-    color: '#fff',
-    fontSize: 11,
-    marginLeft: 4,
-  },
-  playIcon: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 8,
-    padding: 2,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#fff',
-  },
-  userRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
-  },
-  userAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  userHandle: {
-    color: '#666',
-    fontSize: 13,
-  },
-  followButton: {
-    backgroundColor: '#60a5fa',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
   },
-  followingButton: {
+  searchFollowingButton: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: '#666',
   },
-  followButtonText: {
+  searchFollowButtonText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
   },
-  followingButtonText: {
+  searchFollowingButtonText: {
     color: '#666',
-  },
-  loadingContainer: {
-    flex: 1,
-    paddingVertical: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   emptyContainer: {
     paddingVertical: 60,
@@ -1186,19 +1001,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: 'center',
   },
-  clearFiltersButtonEmpty: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    backgroundColor: '#60a5fa',
-    borderRadius: 20,
-  },
-  clearFiltersTextEmpty: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  // Modal styles
+
+  // ============ MODAL STYLES ============
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',

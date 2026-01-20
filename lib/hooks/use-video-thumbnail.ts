@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 
 const THUMBNAIL_CACHE_KEY = '@video_thumbnails_cache';
 const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -48,6 +48,7 @@ loadCache();
 
 /**
  * Hook to generate and cache video thumbnails
+ * Uses expo-video-thumbnails (Expo-compatible)
  * 
  * @param videoUrl - The video URL (remote or local)
  * @param fallbackUrl - Fallback image URL if thumbnail generation fails
@@ -97,20 +98,20 @@ export const useVideoThumbnail = (
 
     const generateThumbnail = async () => {
       try {
-        const { uri } = await VideoThumbnails.getThumbnailAsync(videoUrl, {
+        const result = await VideoThumbnails.getThumbnailAsync(videoUrl, {
           time: timeStamp,
-          quality: 0.7, // Balance between quality and file size
+          quality: 0.7,
         });
 
-        if (mounted.current) {
+        if (mounted.current && result?.uri) {
           // Cache the result
           thumbnailCache[videoUrl] = {
-            uri,
+            uri: result.uri,
             timestamp: Date.now(),
           };
           await saveCache();
-          
-          setThumbnailUri(uri);
+
+          setThumbnailUri(result.uri);
         }
       } catch (error) {
         console.warn('[Thumbnail] Failed to generate thumbnail:', error);
@@ -179,21 +180,3 @@ export const clearThumbnailCache = async () => {
 };
 
 export default useVideoThumbnail;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
