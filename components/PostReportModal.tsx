@@ -11,6 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { reportsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,7 +51,20 @@ export const PostReportModal: React.FC<PostReportModalProps> = ({
     }
 
     if (!user) {
-      Alert.alert('Authentication Required', 'Please login to report posts.');
+      Alert.alert(
+        'Authentication Required',
+        'Please login or sign up to report posts.',
+        [
+          {
+            text: 'Sign Up',
+            onPress: () => router.push('/auth/register')
+          },
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/auth/login')
+          }
+        ]
+      );
       return;
     }
 

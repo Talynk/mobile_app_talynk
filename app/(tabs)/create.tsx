@@ -113,12 +113,16 @@ export default function CreatePostScreen() {
     if (!authLoading && !isAuthenticated) {
       Alert.alert(
         'Authentication Required',
-        'You need to be logged in to create posts. Would you like to sign in?',
+        'You need to be logged in to create posts. Would you like to sign in or sign up?',
         [
           {
             text: 'Cancel',
             style: 'cancel',
             onPress: () => router.replace('/')
+          },
+          {
+            text: 'Sign Up',
+            onPress: () => router.push('/auth/register')
           },
           {
             text: 'Sign In',
@@ -724,8 +728,12 @@ export default function CreatePostScreen() {
     if (!isAuthenticated || !user) {
       Alert.alert(
         'Authentication Required',
-        'You need to be logged in to create posts.',
+        'You need to be logged in to create posts. Would you like to sign in or sign up?',
         [
+          {
+            text: 'Sign Up',
+            onPress: () => router.push('/auth/register')
+          },
           {
             text: 'Sign In',
             onPress: () => router.push('/auth/login')
@@ -1199,6 +1207,12 @@ export default function CreatePostScreen() {
           onPress={() => router.push('/auth/login')}
         >
           <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.buttonText }]}>Sign In</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[{ paddingVertical: 16, paddingHorizontal: 32, borderRadius: 12, marginBottom: 12, minWidth: 200, alignItems: 'center' }, { backgroundColor: C.card, borderWidth: 1, borderColor: C.primary }]}
+          onPress={() => router.push('/auth/register')}
+        >
+          <Text style={[{ fontSize: 16, fontWeight: '600' }, { color: C.primary }]}>Sign Up</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, minWidth: 120, alignItems: 'center' }, { borderColor: C.border }]}
