@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Talentix",
-    "slug": "talentix-app",
+    "slug": "talentix",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/mobile-app-logo.png",
