@@ -558,7 +558,7 @@ export default function ProfileScreen() {
 
         // Update profile posts_count to only show published posts (exclude drafts)
         const publishedPostsCount = response.data.posts.filter((p: any) => p.status !== 'draft').length;
-        setProfile(prevProfile => ({
+        setProfile((prevProfile: any) => ({
           ...prevProfile,
           posts_count: publishedPostsCount,
         }));

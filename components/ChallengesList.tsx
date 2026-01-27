@@ -308,7 +308,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                     onPress={onCreateChallenge}
                 >
                     <Feather name="plus" size={20} color="#fff" />
-                    <Text style={styles.createButtonText}>Create Challenge</Text>
+                    <Text style={styles.createButtonText}>Create Competition</Text>
                 </TouchableOpacity>
             </View>
 

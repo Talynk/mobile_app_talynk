@@ -8,6 +8,7 @@ import {
   setPostLikeCount 
 } from '@/lib/store/slices/likesSlice';
 import { likesApi } from '@/lib/api';
+import { networkStatus } from '@/lib/network-status';
 
 /**
  * Efficient Like Manager Hook - TikTok-style batch checking
@@ -125,6 +126,7 @@ export const useLikesManager = () => {
         const isNetwork = isNetworkError(error);
         if (isNetwork) {
           console.warn('⚠️ Network error checking like status - will retry later');
+          networkStatus.reportOffline({ source: 'likes-batch-status', message: 'batch-status' });
           // Don't mark as checked for network errors - allow retry
           // Put posts back in queue for next attempt
           pendingPostIds.current.push(...batch);

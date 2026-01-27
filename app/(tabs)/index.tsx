@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
-  FlatList,
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
@@ -17,6 +16,7 @@ import {
   AppState,
   PanResponder,
 } from 'react-native';
+import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
 import { router, useFocusEffect } from 'expo-router';
@@ -38,6 +38,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { useNetworkStatus } from '@/lib/hooks/use-network-status';
+import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import ChallengesTabView from '@/components/ChallengesTabView';
@@ -60,7 +62,7 @@ const pauseAllVideosExcept = async (currentVideo: Video | null) => {
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
   { key: 'following', label: 'Following' },
-  { key: 'challenges', label: 'Challenges' },
+  { key: 'challenges', label: 'Competitions' },
 ];
 
 const formatNumber = (num: number): string => {
@@ -162,7 +164,7 @@ const PostItem: React.FC<PostItemProps> = ({
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [isMuted, setIsMuted] = useState(true); // Local mute state for this post
+  const [isMuted, setIsMuted] = useState(false); // Videos unmuted by default - user can mute if desired
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -448,7 +450,7 @@ const PostItem: React.FC<PostItemProps> = ({
               )}
               <Video
                 ref={videoRef}
-                source={{ 
+                source={{
                   uri: mediaUrl || '',
                   headers: {
                     'Cache-Control': 'public, max-age=31536000, immutable'
@@ -539,6 +541,17 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
+        {/* Mute/Unmute Indicator Overlay - Instagram-style center indicator */}
+        {isVideo && !useNativeControls && isActive && (
+          <View style={styles.muteIndicatorOverlay} pointerEvents="none">
+            {isMuted ? (
+              <View style={styles.muteIndicatorBadge}>
+                <Feather name="volume-x" size={32} color="rgba(255,255,255,0.9)" />
+              </View>
+            ) : null}
+          </View>
+        )}
+
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Avatar
@@ -610,9 +623,9 @@ const PostItem: React.FC<PostItemProps> = ({
 
             {/* Show caption/description only once - prefer caption, then description, then title */}
             {(item.caption || item.description || item.title) && (
-              <ExpandableCaption 
-                text={item.caption || item.description || item.title || ''} 
-                maxLines={2} 
+              <ExpandableCaption
+                text={item.caption || item.description || item.title || ''}
+                maxLines={2}
               />
             )}
             {/* Timestamp */}
@@ -706,7 +719,10 @@ export default function FeedScreen() {
   const [isMuted, setIsMuted] = useState(false);
   const [networkError, setNetworkError] = useState(false);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlashListRef<Post>>(null);
+  const scrollVelocityRef = useRef(0);
+  const lastScrollYRef = useRef(0);
+  const lastScrollTimeRef = useRef(Date.now());
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers, syncLikedPostsFromServer } = useCache();
   const dispatch = useAppDispatch();
@@ -716,6 +732,7 @@ export default function FeedScreen() {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
 
   const likesManager = useLikesManager();
+  const { isOffline } = useNetworkStatus();
 
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
@@ -725,6 +742,14 @@ export default function FeedScreen() {
 
   const INITIAL_LIMIT = 10;
   const LOAD_MORE_LIMIT = 10;
+
+  // Dynamic limit based on scroll velocity
+  const getDynamicLimit = useCallback(() => {
+    const velocity = Math.abs(scrollVelocityRef.current);
+    if (velocity > 500) return 10; // Fast scrolling → larger batches
+    if (velocity < 200) return 3;  // Slow scrolling → smaller batches
+    return 5; // Medium scrolling → default
+  }, []);
 
   const loadPosts = async (tab = 'featured', refresh = false, page = 1) => {
     if (tab === 'challenges') return; // Handled by ChallengesList
@@ -741,7 +766,9 @@ export default function FeedScreen() {
       }
 
       let response;
-      const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
+      // Use velocity-based limit for pagination (fast scroll = more items, slow = fewer)
+      const baseLimit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
+      const limit = page === 1 ? baseLimit : getDynamicLimit();
 
       const timestamp = refresh ? `&t=${Date.now()}` : '';
 
@@ -798,7 +825,7 @@ export default function FeedScreen() {
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
-          
+
           // Fetch actual follow status for all unique users in posts
           const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))] as string[];
           const followStatusPromises = uniqueUserIds.map(async (userId: string) => {
@@ -809,7 +836,7 @@ export default function FeedScreen() {
               return { userId, isFollowing: false };
             }
           });
-          
+
           const followStatuses = await Promise.all(followStatusPromises);
           const followStatusMap: Record<string, boolean> = {};
           followStatuses.forEach(({ userId, isFollowing }) => {
@@ -825,7 +852,7 @@ export default function FeedScreen() {
           const videoPosts = postsArray
             .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
             .slice(0, 3); // Prefetch first 3 videos
-          
+
           // Videos will be cached automatically when loaded by Expo AV
           // The cache headers in source will ensure proper caching
         }
@@ -844,10 +871,10 @@ export default function FeedScreen() {
       }
     } catch (error: any) {
       const { isNetworkError, getErrorMessage } = require('@/lib/utils/network-error-handler');
-      
+
       const isNetwork = isNetworkError(error);
       const errorMessage = getErrorMessage(error, 'Failed to load posts');
-      
+
       if (isNetwork) {
         console.warn('⚠️ Network error loading posts:', errorMessage);
         // For network errors, keep existing posts if available, just show warning
@@ -868,13 +895,31 @@ export default function FeedScreen() {
     }
   };
 
-  const loadMorePosts = () => {
+  // Velocity-based fetching: adjust batch size based on scroll speed
+  const getFetchLimit = useCallback((velocity: number): number => {
+    // Fast scrolling (>500 px/s) → larger batches (10 videos)
+    // Slow scrolling (<200 px/s) → smaller batches (3 videos)
+    // Medium scrolling → default (5 videos)
+    if (velocity > 500) return 10;
+    if (velocity < 200) return 3;
+    return 5;
+  }, []);
+
+  // Predictive preloading with velocity-based batch sizing (TikTok-style optimization)
+  const loadMorePosts = useCallback(() => {
     if (!loadingMore && hasMore && !loading && activeTab !== 'challenges') {
-      const nextPage = currentPage + 1;
-      setCurrentPage(nextPage);
-      loadPosts(activeTab, false, nextPage);
+      const remainingItems = posts.length - currentIndex;
+      // Start fetching when 3-5 items away from end (predictive preloading)
+      if (remainingItems <= 5 && remainingItems >= 3) {
+        const nextPage = currentPage + 1;
+        const velocity = Math.abs(scrollVelocityRef.current);
+        const fetchLimit = getFetchLimit(velocity);
+        setCurrentPage(nextPage);
+        // Note: loadPosts uses LOAD_MORE_LIMIT constant, but velocity-based logic is ready
+        loadPosts(activeTab, false, nextPage);
+      }
     }
-  };
+  }, [loadingMore, hasMore, loading, activeTab, posts.length, currentIndex, currentPage, getFetchLimit]);
 
   useEffect(() => {
     if (activeTab !== 'challenges') {
@@ -911,6 +956,14 @@ export default function FeedScreen() {
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
+
+  // Aggressive video preloading - downloads first 800KB of next 3 videos
+  const preloadStats = useVideoPreload(posts, currentIndex >= 0 ? currentIndex : -1, {
+    preloadCount: 3,
+    enabled: activeTab !== 'challenges' && isScreenFocused,
+    chunkSize: 800 * 1024, // 800KB chunks for instant playback
+    direction: 'forward', // Only preload ahead
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -1098,8 +1151,9 @@ export default function FeedScreen() {
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 100,
+    itemVisiblePercentThreshold: 80, // Higher threshold for full-screen pagination
+    minimumViewTime: 200,
+    waitForInteraction: false,
   }).current;
 
   return (
@@ -1130,8 +1184,8 @@ export default function FeedScreen() {
 
       {activeTab === 'challenges' ? (
         <>
-          <ChallengesTabView 
-            onCreateChallenge={() => setCreateChallengeVisible(true)} 
+          <ChallengesTabView
+            onCreateChallenge={() => setCreateChallengeVisible(true)}
             refreshTrigger={challengesRefreshTrigger}
           />
           <CreateChallengeModal
@@ -1147,12 +1201,38 @@ export default function FeedScreen() {
         <>
           {loading && posts.length === 0 ? (
             <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#60a5fa" />
+              {/* Skeleton loaders - TikTok-style placeholders */}
+              {[1, 2, 3].map((i) => (
+                <View key={i} style={[styles.skeletonItem, { height: availableHeight }]}>
+                  <View style={styles.skeletonMedia} />
+                  <View style={styles.skeletonActions}>
+                    <View style={styles.skeletonAvatar} />
+                    <View style={styles.skeletonActionButton} />
+                    <View style={styles.skeletonActionButton} />
+                    <View style={styles.skeletonActionButton} />
+                  </View>
+                  <View style={styles.skeletonBottomInfo}>
+                    <View style={styles.skeletonUsername} />
+                    <View style={styles.skeletonCaption} />
+                  </View>
+                </View>
+              ))}
             </View>
           ) : (
-            <FlatList
+            <FlashList
               ref={flatListRef}
               data={posts}
+              ListHeaderComponent={
+                (networkError || isOffline) ? (
+                  <View style={styles.offlineBanner}>
+                    <Feather name="wifi-off" size={16} color="#fff" />
+                    <Text style={styles.offlineBannerText}>
+                      No or low internet connection. Some features may not load.
+                    </Text>
+                  </View>
+                ) : null
+              }
+              stickyHeaderIndices={(networkError || isOffline) ? [0] : undefined}
               renderItem={({ item, index }) => (
                 <PostItem
                   item={item}
@@ -1170,27 +1250,19 @@ export default function FeedScreen() {
                 />
               )}
               keyExtractor={(item) => item.id}
-              pagingEnabled
-              showsVerticalScrollIndicator={false}
               snapToInterval={availableHeight}
               snapToAlignment="start"
               decelerationRate="fast"
-              contentContainerStyle={{ paddingBottom: 0 }}
-              scrollEventThrottle={16}
               disableIntervalMomentum={true}
+              showsVerticalScrollIndicator={false}
+              pagingEnabled={false}
+              contentContainerStyle={{ paddingBottom: 0 }}
+              getItemType={() => 'post'}
+              drawDistance={availableHeight * 2}
+              scrollEventThrottle={16}
               nestedScrollEnabled={false}
               scrollEnabled={true}
               bounces={false}
-              windowSize={3}
-              initialNumToRender={2}
-              maxToRenderPerBatch={2}
-              updateCellsBatchingPeriod={50}
-              removeClippedSubviews={false}
-              getItemLayout={(data, index) => ({
-                length: availableHeight,
-                offset: availableHeight * index,
-                index,
-              })}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -1198,6 +1270,17 @@ export default function FeedScreen() {
                   tintColor="#60a5fa"
                 />
               }
+              onScroll={(event) => {
+                const currentY = event.nativeEvent.contentOffset.y;
+                const currentTime = Date.now();
+                const timeDelta = currentTime - lastScrollTimeRef.current;
+                if (timeDelta > 0) {
+                  const distance = Math.abs(currentY - lastScrollYRef.current);
+                  scrollVelocityRef.current = (distance / timeDelta) * 1000; // px per second
+                  lastScrollYRef.current = currentY;
+                  lastScrollTimeRef.current = currentTime;
+                }
+              }}
               onEndReached={loadMorePosts}
               onEndReachedThreshold={0.5}
               ListFooterComponent={
@@ -1212,19 +1295,19 @@ export default function FeedScreen() {
               viewabilityConfig={viewabilityConfig}
               ListEmptyComponent={
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
-                  <Feather name={networkError ? "wifi-off" : "video"} size={64} color="#666" />
+                  <Feather name={(networkError || isOffline) ? "wifi-off" : "video"} size={64} color="#666" />
                   <Text style={styles.emptyText}>
-                    {networkError ? 'No Internet Connection' : 'No posts available'}
+                    {(networkError || isOffline) ? 'No or Low Internet Connection' : 'No posts available'}
                   </Text>
                   <Text style={styles.emptySubtext}>
-                    {networkError
-                      ? 'Please check your internet connection and try again'
+                    {(networkError || isOffline)
+                      ? 'Please check your connection and try again.'
                       : activeTab === 'following' && !user
                         ? 'Sign in to see posts from people you follow'
                         : 'Pull down to refresh or check back later'
                     }
                   </Text>
-                  {networkError && (
+                  {(networkError || isOffline) && (
                     <TouchableOpacity
                       style={styles.retryButton}
                       onPress={onRefresh}
@@ -1275,8 +1358,6 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: '#000000',
   },
   header: {
@@ -1288,6 +1369,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.95)',
     zIndex: 100,
     height: 56,
+  },
+  offlineBanner: {
+    backgroundColor: 'rgba(239, 68, 68, 0.92)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  offlineBannerText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -1340,6 +1435,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 8,
     zIndex: 20,
+  },
+  muteIndicatorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 15,
+    pointerEvents: 'none',
+  },
+  muteIndicatorBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 40,
+    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   rightActions: {
     position: 'absolute',
@@ -1563,5 +1676,56 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
     backgroundColor: 'black',
+  },
+  skeletonItem: {
+    width: '100%',
+    backgroundColor: '#000',
+    position: 'relative',
+  },
+  skeletonMedia: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#1a1a1a',
+  },
+  skeletonActions: {
+    position: 'absolute',
+    right: 12,
+    bottom: 100,
+    alignItems: 'center',
+    gap: 20,
+  },
+  skeletonAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#2a2a2a',
+    marginBottom: 8,
+  },
+  skeletonActionButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#2a2a2a',
+    marginBottom: 4,
+  },
+  skeletonBottomInfo: {
+    position: 'absolute',
+    left: 12,
+    bottom: 60,
+    right: 80,
+  },
+  skeletonUsername: {
+    width: 100,
+    height: 16,
+    borderRadius: 4,
+    backgroundColor: '#2a2a2a',
+    marginBottom: 8,
+  },
+  skeletonCaption: {
+    width: '80%',
+    height: 12,
+    borderRadius: 4,
+    backgroundColor: '#2a2a2a',
+    marginBottom: 4,
   },
 });

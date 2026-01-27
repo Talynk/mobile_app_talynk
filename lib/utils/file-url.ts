@@ -14,51 +14,29 @@ import { API_BASE_URL } from '@/lib/config';
  * // Returns: "https://example.com/file.jpg" (already full URL)
  */
 export function getFileUrl(relativePath: string | null | undefined): string | null {
-  if (__DEV__) {
-    console.log('🔍 [getFileUrl] Input:', relativePath, 'Type:', typeof relativePath);
-  }
-
-  if (!relativePath || typeof relativePath !== 'string') {
-    if (__DEV__) {
-      console.warn('⚠️ [getFileUrl] Invalid path:', relativePath);
-    }
+  if (!relativePath || typeof relativePath !== 'string' || relativePath.trim() === '') {
     return null;
   }
 
   // If already a full URL (starts with http), return as-is
   if (relativePath.startsWith('http://') || relativePath.startsWith('https://')) {
-    if (__DEV__) {
-      console.log('✅ [getFileUrl] Already full URL:', relativePath);
-    }
     return relativePath;
   }
 
   // If it's a relative path starting with /uploads/, prepend API base URL
   if (relativePath.startsWith('/uploads/')) {
-    const fullUrl = `${API_BASE_URL}${relativePath}`;
-    if (__DEV__) {
-      console.log('✅ [getFileUrl] Converted /uploads/ path:', fullUrl);
-    }
-    return fullUrl;
+    return `${API_BASE_URL}${relativePath}`;
   }
 
   // If it doesn't start with /uploads/ but is a relative path, add /uploads/ prefix
   // This handles cases where the path might be just "filename.mp4"
   if (relativePath.startsWith('/')) {
     // Already starts with /, just prepend API base URL
-    const fullUrl = `${API_BASE_URL}${relativePath}`;
-    if (__DEV__) {
-      console.log('✅ [getFileUrl] Converted / path:', fullUrl);
-    }
-    return fullUrl;
+    return `${API_BASE_URL}${relativePath}`;
   }
 
   // If it's a filename without path, assume it's in /uploads/
-  const fullUrl = `${API_BASE_URL}/uploads/${relativePath.replace(/^uploads\//, '')}`;
-  if (__DEV__) {
-    console.log('✅ [getFileUrl] Converted filename:', fullUrl);
-  }
-  return fullUrl;
+  return `${API_BASE_URL}/uploads/${relativePath.replace(/^uploads\//, '')}`;
 }
 
 /**
@@ -69,19 +47,6 @@ export function getFileUrl(relativePath: string | null | undefined): string | nu
  * @returns Full media URL or null
  */
 export function getPostMediaUrl(post: any): string | null {
-  // Log post structure for debugging
-  if (__DEV__) {
-    console.log('📦 [getPostMediaUrl] Post structure:', {
-      id: post?.id,
-      type: post?.type,
-      fullUrl: post?.fullUrl,
-      video_url: post?.video_url,
-      image: post?.image,
-      imageUrl: post?.imageUrl,
-      allKeys: post ? Object.keys(post) : [],
-    });
-  }
-
   // Check for fullUrl first (from API response), then various video / image fields
   const url =
     post?.fullUrl ||
@@ -92,23 +57,11 @@ export function getPostMediaUrl(post: any): string | null {
     post?.mediaUrl ||
     '';
   
-  if (__DEV__) {
-    console.log('🔗 [getPostMediaUrl] Found URL:', url);
-  }
-  
   if (!url || url.trim() === '') {
-    if (__DEV__) {
-      console.warn('⚠️ [getPostMediaUrl] No URL found for post:', post?.id);
-    }
     return null;
   }
 
-  const fullUrl = getFileUrl(url);
-  if (__DEV__) {
-    console.log('✅ [getPostMediaUrl] Converted to:', fullUrl);
-  }
-  
-  return fullUrl;
+  return getFileUrl(url);
 }
 
 /**

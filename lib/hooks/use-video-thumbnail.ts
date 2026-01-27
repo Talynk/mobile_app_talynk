@@ -30,7 +30,7 @@ const loadCache = async () => {
       }
     }
   } catch (error) {
-    console.warn('[Thumbnail] Failed to load cache:', error);
+    // Silently handle cache load errors
   }
 };
 
@@ -39,7 +39,7 @@ const saveCache = async () => {
   try {
     await AsyncStorage.setItem(THUMBNAIL_CACHE_KEY, JSON.stringify(thumbnailCache));
   } catch (error) {
-    console.warn('[Thumbnail] Failed to save cache:', error);
+    // Silently handle cache save errors
   }
 };
 
@@ -112,12 +112,15 @@ export const useVideoThumbnail = (
           await saveCache();
 
           setThumbnailUri(result.uri);
+        } else if (mounted.current) {
+          // If no result, use fallback
+          setThumbnailUri(fallbackUrl || videoUrl || null);
         }
       } catch (error) {
-        console.warn('[Thumbnail] Failed to generate thumbnail:', error);
-        // Use fallback if generation fails
+        // Silently fail and use fallback (handles Android MediaMetadataRetriever error)
+        // On Android, if thumbnail generation fails, use fallback or video URL
         if (mounted.current) {
-          setThumbnailUri(fallbackUrl || null);
+          setThumbnailUri(fallbackUrl || videoUrl || null);
         }
       } finally {
         isGenerating.current = false;
@@ -149,16 +152,18 @@ export const pregenerateThumbnails = async (
     await Promise.allSettled(
       batch.map(async (url) => {
         try {
-          const { uri } = await VideoThumbnails.getThumbnailAsync(url, {
+          const result = await VideoThumbnails.getThumbnailAsync(url, {
             time: timeStamp,
             quality: 0.7,
           });
-          thumbnailCache[url] = {
-            uri,
-            timestamp: Date.now(),
-          };
+          if (result?.uri) {
+            thumbnailCache[url] = {
+              uri: result.uri,
+              timestamp: Date.now(),
+            };
+          }
         } catch (error) {
-          // Silently fail for prefetch
+          // Silently fail for prefetch (handles Android errors)
         }
       })
     );
@@ -175,7 +180,7 @@ export const clearThumbnailCache = async () => {
   try {
     await AsyncStorage.removeItem(THUMBNAIL_CACHE_KEY);
   } catch (error) {
-    console.warn('[Thumbnail] Failed to clear cache:', error);
+    // Silently handle cache clear errors
   }
 };
 

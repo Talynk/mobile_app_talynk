@@ -934,7 +934,7 @@ export default function CreatePostScreen() {
           } catch (parseError) {
             console.error('[Upload] Error parsing response:', parseError);
             await uploadNotificationService.showUploadError('Failed to create post in challenge', fileName);
-            Alert.alert('Upload Error', 'Failed to create post in challenge. Please try again.');
+            Alert.alert('Upload Error', 'Failed to create post in competition. Please try again.');
           }
         };
         
@@ -1700,7 +1700,7 @@ export default function CreatePostScreen() {
                 ) : joinedChallenges.length > 0 ? (
                   <>
                     <View style={styles.labelRow}>
-                      <Text style={[styles.label, { color: C.text }]}>Post to Challenge 🏆</Text>
+                      <Text style={[styles.label, { color: C.text }]}>Post to Competition 🏆</Text>
                       <Text style={[styles.labelHint, { color: C.textSecondary }]}>
                         Optional
                       </Text>
@@ -1837,7 +1837,7 @@ export default function CreatePostScreen() {
                       }
                     }}
                     disabled={uploading || !currentMediaUri}
-                    accessibilityLabel="Post to challenge"
+                    accessibilityLabel="Post to competition"
                     accessibilityRole="button"
                   >
                     {uploading ? (
@@ -1845,7 +1845,7 @@ export default function CreatePostScreen() {
                     ) : (
                       <>
                         <MaterialIcons name="emoji-events" size={20} color="#fff" />
-                        <Text style={styles.quickActionButtonText}>Post to Challenge</Text>
+                        <Text style={styles.quickActionButtonText}>Post to Competition</Text>
                       </>
                     )}
                   </TouchableOpacity>

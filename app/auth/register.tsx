@@ -71,6 +71,7 @@ export default function RegisterScreen() {
   const [success, setSuccess] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { loading, error, clearError } = useAuth();
   const C = THEME;
   const insets = useSafeAreaInsets();
@@ -95,6 +96,11 @@ export default function RegisterScreen() {
   const [registerLoading, setRegisterLoading] = useState(false);
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpInputRefs = useRef<any[]>([]);
+
+  // Clear any persisted auth errors when component mounts (fixes "Invalid credentials" showing before user submits)
+  useEffect(() => {
+    clearError();
+  }, []);
 
   // Fetch countries from backend on mount (with fallback to static list)
   useEffect(() => {
@@ -365,57 +371,47 @@ export default function RegisterScreen() {
     clearError();
     setSuccess(null);
     setWarning(null);
+    setFieldErrors({});
 
     const trimmedName = name.trim();
     const trimmedUsername = username.trim();
-
-    if (!isValidEmail(email)) {
-      setWarning('Please enter a valid email address');
-      return;
-    }
-
-    if (!otpVerified || !verificationToken) {
-      setWarning('Please verify your email with the code we sent before signing up.');
-      return;
-    }
-
-    if (!password) {
-      setWarning('Please enter a password');
-      return;
-    }
-
-    if (!confirmPassword) {
-      setWarning('Please confirm your password');
-      return;
-    }
-
-    if (password.length < 8) {
-      setWarning('Password must be at least 8 characters long');
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setWarning('Passwords do not match');
-      return;
-    }
-
-    if (!agreed) {
-      setWarning('You must agree to the Terms and Conditions');
-      return;
-    }
+    const errors: Record<string, string> = {};
 
     if (!trimmedName) {
-      setWarning('Please enter your full name');
-      return;
+      errors.name = 'Please enter your full name';
     }
 
     if (!trimmedUsername) {
-      setWarning('Please enter a username');
-      return;
+      errors.username = 'Please enter a username';
+    } else if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
+      errors.username = 'Username can only contain letters, numbers, and underscores';
     }
 
-    if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
-      setWarning('Username can only contain letters, numbers, and underscores');
+    if (!otpVerified || !verificationToken) {
+      errors.email = 'Please verify your email with the code we sent';
+    }
+
+    if (!password) {
+      errors.password = 'Please enter a password';
+    } else if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters long';
+    }
+
+    if (!confirmPassword) {
+      errors.confirmPassword = 'Please confirm your password';
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = 'Passwords do not match';
+    }
+
+    if (!agreed) {
+      errors.agreed = 'You must agree to the Terms and Conditions';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      // Also show first error as warning at top
+      const firstError = Object.values(errors)[0];
+      setWarning(firstError);
       return;
     }
 
@@ -710,12 +706,27 @@ export default function RegisterScreen() {
           {step === 3 && (
             <View>
               <Text style={[styles.label, { color: C.text }]}>Password</Text>
-              <View style={[styles.passwordInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}> 
+              <View style={[
+                styles.passwordInputContainer,
+                {
+                  backgroundColor: C.input,
+                  borderColor: fieldErrors.password ? C.errorBorder : C.inputBorder
+                }
+              ]}> 
                 <TextInput
                   style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: 'transparent', borderColor: 'transparent', color: C.text }]}
                   placeholder="••••••••"
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(text) => {
+                    setPassword(text);
+                    if (fieldErrors.password) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.password;
+                        return next;
+                      });
+                    }
+                  }}
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -734,17 +745,36 @@ export default function RegisterScreen() {
                   />
                 </Pressable>
               </View>
-              <Text style={[styles.helperText, { color: C.textSecondary }]}> 
-                Password must be at least 8 characters long
-              </Text>
+              {fieldErrors.password ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.password}</Text>
+              ) : (
+                <Text style={[styles.helperText, { color: C.textSecondary }]}> 
+                  Password must be at least 8 characters long
+                </Text>
+              )}
 
               <Text style={[styles.label, { color: C.text }]}>Confirm Password</Text>
-              <View style={[styles.passwordInputContainer, { backgroundColor: C.input, borderColor: C.inputBorder }]}> 
+              <View style={[
+                styles.passwordInputContainer,
+                {
+                  backgroundColor: C.input,
+                  borderColor: fieldErrors.confirmPassword ? C.errorBorder : C.inputBorder
+                }
+              ]}> 
                 <TextInput
                   style={[styles.input, { flex: 1, marginBottom: 0, backgroundColor: 'transparent', borderColor: 'transparent', color: C.text }]}
                   placeholder="••••••••"
                   value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  onChangeText={(text) => {
+                    setConfirmPassword(text);
+                    if (fieldErrors.confirmPassword) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.confirmPassword;
+                        return next;
+                      });
+                    }
+                  }}
                   secureTextEntry={!showConfirmPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -763,14 +793,26 @@ export default function RegisterScreen() {
                   />
                 </Pressable>
               </View>
+              {fieldErrors.confirmPassword && (
+                <Text style={[styles.fieldError, { color: '#fecaca', marginTop: 4 }]}>{fieldErrors.confirmPassword}</Text>
+              )}
 
               <View style={styles.termsContainer}>
                 <Pressable
-                  onPress={() => setAgreed((v) => !v)}
+                  onPress={() => {
+                    setAgreed((v) => !v);
+                    if (fieldErrors.agreed) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.agreed;
+                        return next;
+                      });
+                    }
+                  }}
                   style={[
                     styles.checkbox,
                     {
-                      borderColor: agreed ? '#ffffff' : '#ffffff',
+                      borderColor: fieldErrors.agreed ? C.errorBorder : (agreed ? '#ffffff' : '#ffffff'),
                       backgroundColor: agreed ? '#ffffff' : 'transparent',
                     }
                   ]}
@@ -785,6 +827,9 @@ export default function RegisterScreen() {
                   </Text>
                 </Text>
               </View>
+              {fieldErrors.agreed && (
+                <Text style={[styles.fieldError, { color: '#fecaca', marginTop: 4 }]}>{fieldErrors.agreed}</Text>
+              )}
             </View>
           )}
 
@@ -793,31 +838,70 @@ export default function RegisterScreen() {
             <View>
               <Text style={[styles.label, { color: C.text }]}>Display name</Text>
               <TextInput
-                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: C.input,
+                    borderColor: fieldErrors.name ? C.errorBorder : C.inputBorder,
+                    color: C.text
+                  }
+                ]}
                 placeholder="John Doe"
                 value={name}
-                onChangeText={setName}
+                onChangeText={(text) => {
+                  setName(text);
+                  if (fieldErrors.name) {
+                    setFieldErrors(prev => {
+                      const next = { ...prev };
+                      delete next.name;
+                      return next;
+                    });
+                  }
+                }}
                 autoCapitalize="words"
                 autoCorrect={false}
                 placeholderTextColor={C.placeholder}
                 editable={!isFormBusy}
               />
+              {fieldErrors.name && (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.name}</Text>
+              )}
 
               <Text style={[styles.label, { color: C.text }]}>Username</Text>
               <TextInput
-                style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: C.input,
+                    borderColor: fieldErrors.username ? C.errorBorder : C.inputBorder,
+                    color: C.text
+                  }
+                ]}
                 placeholder="johndoe"
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(text) => {
+                  setUsername(text);
+                  if (fieldErrors.username) {
+                    setFieldErrors(prev => {
+                      const next = { ...prev };
+                      delete next.username;
+                      return next;
+                    });
+                  }
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="default"
                 placeholderTextColor={C.placeholder}
                 editable={!isFormBusy}
               />
-              <Text style={[styles.helperText, { color: C.textSecondary }]}>
-                Username can only contain letters, numbers, and underscores
-              </Text>
+              {fieldErrors.username ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.username}</Text>
+              ) : (
+                <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                  Username can only contain letters, numbers, and underscores
+                </Text>
+              )}
 
               <Text style={[styles.label, { color: C.text }]}>Country</Text>
               <TouchableOpacity
@@ -872,6 +956,14 @@ export default function RegisterScreen() {
                 Your country code is pre-selected. Enter numbers without leading zero.
               </Text>
 
+              {Object.keys(fieldErrors).length > 0 && (
+                <View style={[styles.validationSummary, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}>
+                  <Ionicons name="alert-circle" size={16} color="#fecaca" style={{ marginRight: 8 }} />
+                  <Text style={[styles.validationSummaryText, { color: '#fecaca' }]}>
+                    Please fix the errors above to continue
+                  </Text>
+                </View>
+              )}
               <TouchableOpacity
                 style={[styles.button, { backgroundColor: isFormBusy ? C.buttonDisabled : C.primary }]}
                 onPress={handleRegister}
@@ -1308,6 +1400,23 @@ const styles = StyleSheet.create({
     color: '#22c55e',
     marginBottom: 12,
     textAlign: 'center',
+  },
+  fieldError: {
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  validationSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  validationSummaryText: {
+    flex: 1,
+    fontSize: 13,
   },
   successMessage: {
     fontSize: 16,

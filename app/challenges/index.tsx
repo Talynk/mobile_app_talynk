@@ -366,7 +366,7 @@ export default function ChallengesScreen() {
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <MaterialIcons name="arrow-back" size={24} color={C.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: C.text }]}>Challenges</Text>
+        <Text style={[styles.headerTitle, { color: C.text }]}>Competitions</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -378,7 +378,7 @@ export default function ChallengesScreen() {
           activeOpacity={0.85}
         >
           <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
-          <Text style={styles.createButtonText}>Create Challenge</Text>
+          <Text style={styles.createButtonText}>Create Competition</Text>
         </TouchableOpacity>
       </View>
       <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
@@ -405,7 +405,7 @@ export default function ChallengesScreen() {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={C.primary} />
-          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading challenges...</Text>
+          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading competitions...</Text>
         </View>
       ) : error ? (
         <View style={styles.errorContainer}>
@@ -437,10 +437,10 @@ export default function ChallengesScreen() {
               <MaterialIcons name="emoji-events" size={64} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
                 {activeTab === 'joined' 
-                  ? "You haven't joined any challenges yet"
+                  ? "You haven't joined any competitions yet"
                   : activeTab === 'my'
-                    ? "You haven't created any challenges"
-                    : "No challenges available to join"}
+                    ? "You haven't created any competitions"
+                    : "No competitions available to join"}
               </Text>
             </View>
           }

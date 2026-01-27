@@ -23,9 +23,10 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
-import { getPostMediaUrl, getFileUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -48,6 +49,7 @@ export default function ExploreScreen() {
 
   // Grid state
   const [gridPosts, setGridPosts] = useState<Post[]>([]);
+  const [gridLoading, setGridLoading] = useState(false);
 
   // Filters
   const [categories, setCategories] = useState<any[]>([]);
@@ -68,15 +70,37 @@ export default function ExploreScreen() {
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
   const insets = useSafeAreaInsets();
+  const gridScrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadInitialContent();
   }, []);
 
+  // Category display name mapping for frontend
+  const getCategoryDisplayName = (name: string): string => {
+    const displayMap: { [key: string]: string } = {
+      'Women Beauty': 'Ladies Beauty',
+      'Men': 'Gentlemen Beauty',
+    };
+    return displayMap[name] || name;
+  };
+
   // Load posts when filters change (only for grid, not feed)
   useEffect(() => {
     if (activeTab === 'grid') {
-      loadGridPosts();
+      // Immediately clear posts and show loading
+      setGridPosts([]);
+      setGridLoading(true);
+
+      // Load posts with current filters immediately
+      loadGridPosts().then(() => {
+        // Scroll to top after loading
+        setTimeout(() => {
+          gridScrollViewRef.current?.scrollTo({ y: 0, animated: false });
+        }, 50);
+      }).catch(() => {
+        setGridLoading(false);
+      });
     }
   }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, activeTab]);
 
@@ -136,7 +160,7 @@ export default function ExploreScreen() {
         setGridPosts(applyClientFilters(postsList));
       }
     } catch (error) {
-      console.error('Error loading explore content:', error);
+      // Silently handle errors
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -145,25 +169,28 @@ export default function ExploreScreen() {
 
   const loadGridPosts = async () => {
     try {
-      let query = '';
-      // Backend filter is by category_id (subcategory id). Main categories won't match posts.
-      if (selectedSubCategoryId) {
-        query += `&category_id=${selectedSubCategoryId}`;
-      }
-      if (selectedCountryId) {
-        // Backend currently ignores country_id in filters, so we will also filter client-side.
-        query += `&country_id=${selectedCountryId}`;
-      }
+      let posts: Post[] = [];
 
-      const response = await postsApi.getAll(1, 50, query);
+      // Fetch all posts using the posts API (not search API)
+      // The posts API is designed to return all active posts
+      const response = await postsApi.getAll(1, 100);
 
-      if (response.status === 'success') {
+      if (response.status === 'success' && response.data) {
         const data = response.data.posts || response.data || [];
-        const list = Array.isArray(data) ? data : [];
-        setGridPosts(applyClientFilters(list));
+        const allPosts = Array.isArray(data) ? data : [];
+
+        // Apply client-side filters using the existing applyClientFilters function
+        // This handles category (main/sub) and country filtering
+        posts = applyClientFilters(allPosts);
       }
+
+      // Update state immediately with filtered posts
+      setGridPosts(posts);
     } catch (error) {
-      console.error('Error loading grid posts:', error);
+      // Silently handle errors
+      setGridPosts([]);
+    } finally {
+      setGridLoading(false);
     }
   };
 
@@ -180,7 +207,9 @@ export default function ExploreScreen() {
         setSearchPosts(response.data.posts || []);
       }
     } catch (error) {
-      console.error('Search error:', error);
+      // Silently handle search errors
+      setSearchUsers([]);
+      setSearchPosts([]);
     }
   };
 
@@ -220,14 +249,30 @@ export default function ExploreScreen() {
   // ============ GRID COMPONENTS ============
   const GridPostCard = ({ item, index }: { item: Post; index: number }) => {
     const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
-    const thumbnailUrl = getPostMediaUrl(item) || '';
-    const mediaUrl = thumbnailUrl || videoUrl || '';
+    const mediaUrl = getPostMediaUrl(item) || '';
+    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
     const isVideo =
       item.type === 'video' ||
       (mediaUrl !== null &&
-        (mediaUrl.includes('.mp4') ||
-          mediaUrl.includes('.mov') ||
-          mediaUrl.includes('.webm')));
+        mediaUrl !== '' &&
+        (mediaUrl.toLowerCase().includes('.mp4') ||
+          mediaUrl.toLowerCase().includes('.mov') ||
+          mediaUrl.toLowerCase().includes('.webm')));
+
+    // Use video thumbnail hook for videos
+    const generatedThumbnail = useVideoThumbnail(
+      isVideo && videoUrl ? videoUrl : null,
+      fallbackImageUrl || '',
+      1000
+    );
+
+    // Determine the final thumbnail URL to display
+    const staticThumbnailUrl = isVideo
+      ? (generatedThumbnail || fallbackImageUrl)
+      : (mediaUrl || fallbackImageUrl);
+
+    // Check if we're still loading the thumbnail
+    const isLoadingThumbnail = isVideo && !staticThumbnailUrl && videoUrl;
 
     return (
       <TouchableOpacity
@@ -239,13 +284,26 @@ export default function ExploreScreen() {
           })
         }
       >
-        {thumbnailUrl ? (
+        {isLoadingThumbnail ? (
+          // Show loading state while thumbnail is being generated
+          <View style={[styles.gridMedia, styles.gridNoMedia]}>
+            <ActivityIndicator size="small" color="#60a5fa" />
+            <MaterialIcons
+              name="video-library"
+              size={28}
+              color="#444"
+              style={{ marginTop: 8 }}
+            />
+          </View>
+        ) : staticThumbnailUrl ? (
+          // Show the thumbnail image
           <Image
-            source={{ uri: thumbnailUrl }}
+            source={{ uri: staticThumbnailUrl }}
             style={styles.gridMedia}
             resizeMode="cover"
           />
         ) : (
+          // Fallback placeholder
           <View style={[styles.gridMedia, styles.gridNoMedia]}>
             <MaterialIcons
               name={isVideo ? 'video-library' : 'image'}
@@ -270,8 +328,8 @@ export default function ExploreScreen() {
             <Text style={styles.gridTime}>
               {timeAgo(
                 (item as any).createdAt ||
-                  (item as any).uploadDate ||
-                  (item as any).created_at
+                (item as any).uploadDate ||
+                (item as any).created_at
               )}
             </Text>
           )}
@@ -314,14 +372,30 @@ export default function ExploreScreen() {
 
   const SearchPostCard = ({ item, index }: { item: Post; index: number }) => {
     const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
-    const thumbnailUrl = getPostMediaUrl(item) || '';
-    const mediaUrl = thumbnailUrl || videoUrl || '';
+    const mediaUrl = getPostMediaUrl(item) || '';
+    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
     const isVideo =
       item.type === 'video' ||
       (mediaUrl !== null &&
-        (mediaUrl.includes('.mp4') ||
-          mediaUrl.includes('.mov') ||
-          mediaUrl.includes('.webm')));
+        mediaUrl !== '' &&
+        (mediaUrl.toLowerCase().includes('.mp4') ||
+          mediaUrl.toLowerCase().includes('.mov') ||
+          mediaUrl.toLowerCase().includes('.webm')));
+
+    // Use video thumbnail hook for videos
+    const generatedThumbnail = useVideoThumbnail(
+      isVideo && videoUrl ? videoUrl : null,
+      fallbackImageUrl || '',
+      1000
+    );
+
+    // Determine the final thumbnail URL to display
+    const staticThumbnailUrl = isVideo
+      ? (generatedThumbnail || fallbackImageUrl)
+      : (mediaUrl || fallbackImageUrl);
+
+    // Check if we're still loading the thumbnail
+    const isLoadingThumbnail = isVideo && !staticThumbnailUrl && videoUrl;
 
     return (
       <TouchableOpacity
@@ -333,9 +407,19 @@ export default function ExploreScreen() {
           })
         }
       >
-        {thumbnailUrl ? (
+        {isLoadingThumbnail ? (
+          <View style={[styles.gridMedia, styles.gridNoMedia]}>
+            <ActivityIndicator size="small" color="#60a5fa" />
+            <MaterialIcons
+              name="video-library"
+              size={28}
+              color="#444"
+              style={{ marginTop: 8 }}
+            />
+          </View>
+        ) : staticThumbnailUrl ? (
           <Image
-            source={{ uri: thumbnailUrl }}
+            source={{ uri: staticThumbnailUrl }}
             style={styles.gridMedia}
             resizeMode="cover"
           />
@@ -422,7 +506,10 @@ export default function ExploreScreen() {
 
       {/* GRID TAB - Explore with filters */}
       {activeTab === 'grid' && (
-        <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        <ScrollView
+          ref={gridScrollViewRef}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
           {/* Filters */}
           <View style={styles.filterSection}>
             {/* Country filter */}
@@ -525,7 +612,7 @@ export default function ExploreScreen() {
                         selectedSubCategoryId === sub.id && styles.categoryPillTextActive,
                       ]}
                     >
-                      {sub.name}
+                      {getCategoryDisplayName(sub.name)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -534,16 +621,22 @@ export default function ExploreScreen() {
           </View>
 
           {/* Grid */}
-          <FlatList
-            data={gridPosts}
-            renderItem={({ item, index }) => (
-              <GridPostCard item={item} index={index} />
-            )}
-            keyExtractor={(item) => item.id}
-            numColumns={3}
-            scrollEnabled={false}
-            contentContainerStyle={styles.gridContent}
-          />
+          {gridLoading ? (
+            <View style={styles.gridLoadingContainer}>
+              <ActivityIndicator size="large" color="#60a5fa" />
+            </View>
+          ) : (
+            <FlatList
+              data={gridPosts}
+              renderItem={({ item, index }) => (
+                <GridPostCard item={item} index={index} />
+              )}
+              keyExtractor={(item) => item.id}
+              numColumns={3}
+              scrollEnabled={false}
+              contentContainerStyle={styles.gridContent}
+            />
+          )}
         </ScrollView>
       )}
 
@@ -894,6 +987,11 @@ const styles = StyleSheet.create({
   gridContent: {
     padding: 1,
   },
+  gridLoadingContainer: {
+    height: 300,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   gridCard: {
     width: (screenWidth - 5) / 3,
     height: (screenWidth - 5) / 3 * 1.3,
@@ -932,6 +1030,11 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   gridStatText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  gridTime: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',

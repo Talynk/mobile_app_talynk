@@ -62,7 +62,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
             const response = await challengesApi.create(payload);
 
             if (response.status === 'success') {
-                Alert.alert('Success', 'Challenge created successfully!');
+                Alert.alert('Success', 'Competition created successfully!');
                 onCreated();
                 onClose();
             } else {
@@ -85,7 +85,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
         >
             <View style={[styles.container, { paddingTop: Platform.OS === 'android' ? insets.top : 0 }]}>
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>Create Challenge</Text>
+                    <Text style={styles.headerTitle}>Create Competition</Text>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                         <Feather name="x" size={24} color="#fff" />
                     </TouchableOpacity>

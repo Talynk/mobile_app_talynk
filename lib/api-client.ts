@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from './config';
 import { authEventEmitter } from './auth-event-emitter';
 import { isNetworkError } from './utils/network-error-handler';
+import { networkStatus } from './network-status';
 
 // Create axios instance
 export const apiClient = axios.create({
@@ -22,7 +23,7 @@ apiClient.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (error) {
-      console.error('Error getting token from storage:', error);
+      // Silently handle token retrieval errors
     }
     return config;
   },
@@ -34,29 +35,29 @@ apiClient.interceptors.request.use(
 // Response interceptor to handle errors
 apiClient.interceptors.response.use(
   (response) => {
+    // Any successful response implies we have connectivity
+    networkStatus.reportOnline({ source: 'api-client' });
     return response;
   },
   async (error: AxiosError) => {
     // Handle 401 Unauthorized
     if (error.response?.status === 401) {
       // Token expired, clear storage and notify auth context
-      console.warn('[API] 401 Unauthorized - clearing auth state');
       try {
         await AsyncStorage.removeItem('talynk_token');
         await AsyncStorage.removeItem('talynk_user');
         // Emit event so auth context can update state
         authEventEmitter.emitUnauthorized();
       } catch (storageError) {
-        console.error('[API] Error clearing storage:', storageError);
+        // Silently handle storage errors
       }
     }
     
-    // Handle network errors - log but don't show alert here (let UI handle it)
+    // Handle network errors - silently handle, no console logs
     if (isNetworkError(error)) {
-      console.warn('[API] Network error:', {
-        url: error.config?.url,
-        method: error.config?.method,
-        message: error.message,
+      networkStatus.reportOffline({
+        source: 'api-client',
+        message: `${error.config?.method || 'request'} ${error.config?.url || ''}`.trim(),
       });
     }
     

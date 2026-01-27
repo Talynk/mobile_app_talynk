@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/mobile-app-logo.png",
+    "iconBackgroundColor": "#000000",
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,7 +21,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mobile-app-logo.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#000000"
       },
       "package": "com.ihirwe.talentix",
       "permissions": [

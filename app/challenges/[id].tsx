@@ -168,7 +168,7 @@ export default function ChallengeDetailScreen() {
 
   const handleJoinChallenge = async () => {
     if (!isAuthenticated) {
-      Alert.alert('Login Required', 'Please login to join challenges', [
+      Alert.alert('Login Required', 'Please login to join competitions', [
         { text: 'Cancel' },
         { text: 'Login', onPress: () => router.push('/auth/login') }
       ]);
@@ -176,7 +176,7 @@ export default function ChallengeDetailScreen() {
     }
     
     if (!id) {
-      Alert.alert('Error', 'Challenge ID is missing');
+      Alert.alert('Error', 'Competition ID is missing');
       return;
     }
     
@@ -186,29 +186,29 @@ export default function ChallengeDetailScreen() {
       const response = await challengesApi.join(id as string);
       
       if (response?.status === 'success') {
-        Alert.alert('Success', response.message || 'You have joined the challenge!', [
+        Alert.alert('Success', response.message || 'You have joined the competition!', [
           { text: 'OK', onPress: () => fetchChallenge() }
         ]);
       } else {
         const errorMessage = response?.message || 'Failed to join challenge';
-        let alertTitle = 'Cannot Join Challenge';
+        let alertTitle = 'Cannot Join Competition';
         let alertMessage = errorMessage;
         
         if (errorMessage.toLowerCase().includes('not started')) {
-          alertTitle = 'Challenge Not Started';
-          alertMessage = 'This challenge has not started yet. Please wait until the start date to join.';
+          alertTitle = 'Competition Not Started';
+          alertMessage = 'This competition has not started yet. Please wait until the start date to join.';
         } else if (errorMessage.toLowerCase().includes('already ended') || errorMessage.toLowerCase().includes('has ended')) {
-          alertTitle = 'Challenge Ended';
-          alertMessage = 'This challenge has already ended. You cannot join it anymore.';
+          alertTitle = 'Competition Ended';
+          alertMessage = 'This competition has already ended. You cannot join it anymore.';
         } else if (errorMessage.toLowerCase().includes('already a participant') || errorMessage.toLowerCase().includes('already joined')) {
           alertTitle = 'Already Joined';
-          alertMessage = 'You have already joined this challenge.';
+          alertMessage = 'You have already joined this competition.';
         } else if (errorMessage.toLowerCase().includes('cannot join own challenge') || errorMessage.toLowerCase().includes('organizer')) {
           alertTitle = 'Cannot Join';
-          alertMessage = 'You cannot join a challenge that you organized.';
+          alertMessage = 'You cannot join a competition that you organized.';
         } else if (errorMessage.toLowerCase().includes('not available')) {
-          alertTitle = 'Challenge Not Available';
-          alertMessage = 'This challenge is not available for joining at this time.';
+          alertTitle = 'Competition Not Available';
+          alertMessage = 'This competition is not available for joining at this time.';
         }
         
         Alert.alert(alertTitle, alertMessage);
@@ -219,11 +219,11 @@ export default function ChallengeDetailScreen() {
       let alertText = errorMessage;
       
       if (errorMessage.toLowerCase().includes('not started')) {
-        alertTitle = 'Challenge Not Started';
-        alertText = 'This challenge has not started yet. Please wait until the start date to join.';
+        alertTitle = 'Competition Not Started';
+        alertText = 'This competition has not started yet. Please wait until the start date to join.';
       } else if (errorMessage.toLowerCase().includes('already ended')) {
-        alertTitle = 'Challenge Ended';
-        alertText = 'This challenge has already ended. You cannot join it anymore.';
+        alertTitle = 'Competition Ended';
+        alertText = 'This competition has already ended. You cannot join it anymore.';
       }
       
       Alert.alert(alertTitle, alertText);
@@ -234,7 +234,7 @@ export default function ChallengeDetailScreen() {
 
   const handleCreatePost = () => {
     if (!challenge?.is_participant) {
-      Alert.alert('Join Required', 'You must join the challenge before posting');
+      Alert.alert('Join Required', 'You must join the competition before posting');
       return;
     }
     
@@ -730,7 +730,7 @@ export default function ChallengeDetailScreen() {
               <TouchableOpacity
                 style={[styles.organizerActionButton, { backgroundColor: C.success }]}
                 onPress={() => {
-                  Alert.alert('Challenge Posts', `There are ${posts.length} posts in this challenge`, [
+                  Alert.alert('Competition Posts', `There are ${posts.length} posts in this competition`, [
                     { text: 'OK' }
                   ]);
                 }}
@@ -901,7 +901,7 @@ export default function ChallengeDetailScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={C.primary} />
-          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading challenge...</Text>
+          <Text style={[styles.loadingText, { color: C.textSecondary }]}>Loading competition...</Text>
         </View>
       </SafeAreaView>
     );
@@ -915,12 +915,12 @@ export default function ChallengeDetailScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <MaterialIcons name="arrow-back" size={24} color={C.text} />
           </TouchableOpacity>
-          <Text style={[styles.headerTitle, { color: C.text }]}>Challenge</Text>
+          <Text style={[styles.headerTitle, { color: C.text }]}>Competition</Text>
           <View style={styles.headerSpacer} />
         </View>
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
-          <Text style={[styles.errorText, { color: C.textSecondary }]}>{error || 'Challenge not found'}</Text>
+          <Text style={[styles.errorText, { color: C.textSecondary }]}>{error || 'Competition not found'}</Text>
           <TouchableOpacity
             style={[styles.retryButton, { backgroundColor: C.primary }]}
             onPress={fetchChallenge}

@@ -35,6 +35,7 @@ import { useRealtime } from '@/lib/realtime-context';
 import RealtimeProvider from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 
@@ -436,10 +437,14 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Mute indicator */}
+        {/* Mute/Unmute Indicator Overlay - Instagram-style center indicator */}
         {isVideo && !useNativeControls && isActive && (
-          <View style={styles.muteIndicator}>
-            <Feather name={isMuted ? 'volume-x' : 'volume-2'} size={20} color="#fff" />
+          <View style={styles.muteIndicatorOverlay} pointerEvents="none">
+            {isMuted ? (
+              <View style={styles.muteIndicatorBadge}>
+                <Feather name="volume-x" size={32} color="rgba(255,255,255,0.9)" />
+              </View>
+            ) : null}
           </View>
         )}
 
@@ -525,6 +530,18 @@ const PostItem: React.FC<PostItemProps> = ({
               </Text>
             </TouchableOpacity>
           )}
+
+          {/* Publish button for draft posts - accessible from playback screen */}
+          {(item.status === 'draft' || item.status === 'Draft') && user && user.id === userId && (
+            <TouchableOpacity
+              style={styles.publishDraftButton}
+              onPress={() => handlePublishDraft(item.id)}
+              activeOpacity={0.8}
+            >
+              <Feather name="send" size={16} color="#fff" />
+              <Text style={styles.publishDraftButtonText}>Publish</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Video progress bar - at the very bottom edge */}
@@ -575,7 +592,7 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [commentsPostTitle, setCommentsPostTitle] = useState<string>('');
   const [commentsPostAuthor, setCommentsPostAuthor] = useState<string>('');
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); // Videos unmuted by default
   const [username, setUsername] = useState<string>('');
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
@@ -787,6 +804,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
+  // Preload next 3 videos when a video becomes active
+  useVideoPreload(posts, currentIndex >= 0 ? currentIndex : -1, {
+    preloadCount: 3,
+    enabled: isScreenFocused,
+  });
+
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
@@ -869,6 +892,41 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
     setReportModalVisible(true);
   };
 
+  const handlePublishDraft = async (postId: string) => {
+    const draftPost = posts.find(p => p.id === postId);
+    if (!draftPost) return;
+
+    Alert.alert(
+      'Publish Post',
+      'Are you sure you want to publish this draft? It will be submitted for review.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Publish',
+          style: 'default',
+          onPress: async () => {
+            try {
+              const { postsApi } = await import('@/lib/api');
+              const response = await postsApi.publishDraft(postId);
+
+              if (response.status === 'success') {
+                // Remove from drafts list
+                setPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+                Alert.alert('Success', 'Your post has been published and is pending review.', [{ text: 'OK' }]);
+                // Refresh posts
+                await loadPosts(1, true);
+              } else {
+                Alert.alert('Error', response.message || 'Failed to publish post. Please try again.');
+              }
+            } catch (error: any) {
+              Alert.alert('Error', error?.message || 'Failed to publish post. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
       const visibleItem = viewableItems[0];
@@ -891,8 +949,9 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 100,
+    itemVisiblePercentThreshold: 80, // Higher threshold for full-screen pagination
+    minimumViewTime: 200,
+    waitForInteraction: false,
   }).current;
 
   if (loading && posts.length === 0) {
@@ -946,11 +1005,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
           }}
-          pagingEnabled
+          pagingEnabled={false}
           showsVerticalScrollIndicator={false}
           snapToInterval={availableHeight}
           snapToAlignment="start"
           decelerationRate="fast"
+          disableIntervalMomentum={true}
           contentContainerStyle={{ paddingBottom: 0 }}
           windowSize={2}
           initialNumToRender={1}
@@ -1125,6 +1185,24 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 8,
   },
+  muteIndicatorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 15,
+    pointerEvents: 'none',
+  },
+  muteIndicatorBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 40,
+    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   progressBarContainer: {
     position: 'absolute',
     left: 0,
@@ -1247,6 +1325,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginTop: 16,
     textAlign: 'center',
+  },
+  publishDraftButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  publishDraftButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

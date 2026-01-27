@@ -22,6 +22,7 @@ import { Avatar } from '@/components/Avatar';
 import { Post } from '@/types';
 import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { timeAgo } from '@/lib/utils/time-ago';
 
@@ -128,6 +129,12 @@ export default function ChallengePostsScreen() {
       fullscreenListRef.current?.scrollToIndex({ index: safeIdx, animated: false });
     }, 50);
   }, [open, openIndex, posts.length]);
+
+  // Preload next 3 videos when viewing in fullscreen
+  useVideoPreload(posts, showFullscreen && fullscreenIndex >= 0 ? fullscreenIndex : -1, {
+    preloadCount: 3,
+    enabled: showFullscreen,
+  });
 
   const loadMorePosts = () => {
     if (!loadingMore && hasMore && !loading) {

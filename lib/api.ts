@@ -346,7 +346,7 @@ export const postsApi = {
       
       // Handle network errors gracefully - return empty result instead of error
       if (isNetwork) {
-        console.warn('⚠️ Network error fetching following posts:', errorMessage);
+        // Silently handle network errors
         // Return empty result for network errors so UI doesn't break
         return {
           status: 'success',
@@ -986,13 +986,7 @@ export const notificationsApi = {
       });
       return response.data;
     } catch (error: any) {
-      // Only log errors if it's not a 401 (unauthorized) - that's expected when not logged in
-      if (error.response?.status !== 401) {
-        console.error('[Notifications API] ❌ Error fetching notifications:', {
-          status: error.response?.status,
-          message: error.response?.data?.message || error.message,
-        });
-      }
+      // Silently handle errors - no console logs
       // Return empty notifications silently for 401 errors (not authenticated)
       return {
         status: 'success',
@@ -1546,7 +1540,7 @@ export const likesApi = {
 
       // Handle network errors gracefully
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
-        console.warn('Network error during like toggle:', postId);
+        // Silently handle network errors
         return {
           status: 'error',
           message: 'Network error. Please check your connection.',
@@ -1598,7 +1592,7 @@ export const likesApi = {
 
       // Handle network errors gracefully
       if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network')) {
-        console.warn('Network error during like status check:', postId);
+        // Silently handle network errors
         return {
           status: 'error',
           message: 'Network error. Please check your connection.',
@@ -1644,7 +1638,7 @@ export const likesApi = {
       const errorMessage = getErrorMessage(error, 'Failed to check like statuses');
       
       if (isNetwork) {
-        console.warn('⚠️ Network error checking like status:', errorMessage);
+        // Silently handle network errors
         // Return empty data for network errors - UI will work with cached/default values
         return {
           status: 'error',
