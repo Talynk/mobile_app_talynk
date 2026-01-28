@@ -8,6 +8,7 @@ import {
     ActivityIndicator,
     RefreshControl,
     Image,
+    Alert,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { challengesApi } from '@/lib/api';
@@ -66,25 +67,53 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                 setJoinedIds(userJoinedIds);
             }
 
-            // For unauthenticated users: fetch ALL active challenges (public API)
+            // For unauthenticated users: fetch ALL challenges (active, upcoming, ended)
             if (!user) {
+                // getAll('active') returns 'active' + 'approved' statuses
+                // Since ended challenges are still 'approved', this returns EVERYTHING (Active, Upcoming, Ended)
                 const response = await challengesApi.getAll('active');
                 if (response.status === 'success') {
                     const data = response.data?.challenges || response.data || [];
                     const all = Array.isArray(data) ? data : [];
-                    // Strict filter: must be active
-                    challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) >= now);
+                    // Show ALL challenges for unauthenticated users (no date filter)
+                    challengesToDisplay = all;
                 }
             } else if (internalTab === 'active') {
-                // Fetch 'active' from API but strictly filter client-side
-                const response = await challengesApi.getAll('active');
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
-                    const all = Array.isArray(data) ? data : [];
+                // Fetch 'active' from API AND 'my-challenges'
+                // We merge them to ensure:
+                // 1. Public active/upcoming challenges are shown
+                // 2. My own upcoming/pending challenges are shown (even if not in public list yet)
+                const [publicRes, myRes] = await Promise.all([
+                    challengesApi.getAll('active'),
+                    challengesApi.getMyChallenges()
+                ]);
 
-                    // Strict filter: End date must be in future
-                    challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) >= now);
+                let activeChallenges: Challenge[] = [];
+
+                // Process public challenges
+                if (publicRes.status === 'success') {
+                    const data = publicRes.data?.challenges || publicRes.data || [];
+                    const all = Array.isArray(data) ? data : [];
+                    activeChallenges = all;
                 }
+
+                // Merge my challenges if they fit the criteria
+                if (myRes.status === 'success') {
+                    const data = myRes.data?.challenges || myRes.data || [];
+                    const myAll = Array.isArray(data) ? data : [];
+
+                    myAll.forEach((ch: any) => {
+                        if (!activeChallenges.some(a => a.id === ch.id)) {
+                            activeChallenges.push(ch);
+                        }
+                    });
+                }
+
+                // Filter: End date must be in future (covers Ongoing and Upcoming)
+                // OR status is pending (so user can see their newly created competitions)
+                challengesToDisplay = activeChallenges.filter((ch: any) =>
+                    new Date(ch.end_date) >= now || ch.status === 'pending'
+                );
 
             } else if (internalTab === 'ended') {
                 // Fetch 'active' (which returns active + approved) because ended challenges still have 'approved' status
@@ -272,6 +301,13 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
             <TouchableOpacity
                 style={styles.card}
                 onPress={() => {
+                    if (item.status === 'pending') {
+                        Alert.alert(
+                            'Pending Approval',
+                            'This competition hasn\'t been approved yet. Please wait for administrators to approve it.'
+                        );
+                        return;
+                    }
                     router.push({
                         pathname: '/challenges/[id]',
                         params: { id: item.id }

@@ -308,7 +308,7 @@ export default function ChallengeDetailScreen() {
     // Cannot join if ended
     if (now > endDate) return false;
 
-    return (status === 'approved' || status === 'active') && hasStarted() && !challenge.is_participant;
+    return (status === 'approved' || status === 'active') && !challenge.is_participant;
   };
 
   const getDateInfo = () => {
@@ -767,9 +767,7 @@ export default function ChallengeDetailScreen() {
                       <>
                         <MaterialIcons name="person-add" size={20} color="#fff" />
                         <Text style={styles.joinButtonText}>
-                          {!hasStarted()
-                            ? 'Challenge Not Started'
-                            : 'Join Challenge'}
+                          Join Challenge
                         </Text>
                       </>
                     )}

@@ -10,6 +10,7 @@ import {
   Image,
   useColorScheme,
   Modal,
+  Alert,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { challengesApi } from '@/lib/api';
@@ -538,6 +539,11 @@ export default function ChallengesScreen() {
         onCreated={() => {
           setCreateModalVisible(false);
           fetchChallenges();
+          Alert.alert(
+            'Competition Created Successfully! 🎉',
+            'You have successfully created a competition. Your created challenge will appear in the active tab after it has been approved by the system administrators as soon as possible. Thank you for waiting.',
+            [{ text: 'OK' }]
+          );
         }}
       />
     </SafeAreaView>
