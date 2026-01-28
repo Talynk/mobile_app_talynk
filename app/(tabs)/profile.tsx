@@ -149,7 +149,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           <Feather name="heart" size={12} color="#fff" />
           <Text style={styles.postStatText}>{formatNumber(post.likes || 0)}</Text>
         </View>
-        
+
         {/* Views count button - COMMENTED OUT - Will implement later */}
         {/* {onViewsPress && (
           <TouchableOpacity
@@ -409,10 +409,10 @@ export default function ProfileScreen() {
 
       if (profileResponse.status === 'success' && profileResponse.data) {
         const userData = (profileResponse.data as any).user || profileResponse.data;
-        
+
         // Get following count from profile - backend returns followingCount directly
         let followingCount = userData.followingCount || 0;
-        
+
         // If still 0, try statistics endpoint
         if (followingCount === 0 && statsResponse.status === 'success' && statsResponse.data) {
           const stats = (statsResponse.data as any).statistics || statsResponse.data;

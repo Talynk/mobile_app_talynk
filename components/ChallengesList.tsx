@@ -57,6 +57,23 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
             let challengesToDisplay: Challenge[] = [];
 
             if (activeTab === 'created') {
+                // Fetch user's CREATED challenges
+                const response = await challengesApi.getMyChallenges();
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    challengesToDisplay = Array.isArray(data) ? data : [];
+                }
+            } else if (activeTab === 'joined') {
+                // Fetch user's joined challenges
+                const response = await challengesApi.getJoinedChallenges();
+                if (response.status === 'success') {
+                    const data = response.data || [];
+                    // Extract challenge from participations wrapper if needed
+                    challengesToDisplay = Array.isArray(data)
+                        ? data.map((item: any) => item.challenge || item)
+                        : [];
+                }
+            } else if (activeTab === 'not-joined') {
                 // Fetch NOT-JOINED challenges (user hasn't created or joined)
                 const allResponse = await challengesApi.getAll('active');
                 const createdResponse = await challengesApi.getMyChallenges();
@@ -84,26 +101,9 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                 }
 
                 // Filter: not created by user AND not joined by user
-                challengesToDisplay = allChallenges.filter((ch: any) => 
+                challengesToDisplay = allChallenges.filter((ch: any) =>
                     !createdIds.has(ch.id) && !joinedIds.has(ch.id)
                 );
-            } else if (activeTab === 'joined') {
-                // Fetch user's joined challenges
-                const response = await challengesApi.getJoinedChallenges();
-                if (response.status === 'success') {
-                    const data = response.data || [];
-                    // Extract challenge from participations wrapper if needed
-                    challengesToDisplay = Array.isArray(data) 
-                        ? data.map((item: any) => item.challenge || item)
-                        : [];
-                }
-            } else if (activeTab === 'not-joined') {
-                // Fetch user's CREATED challenges
-                const response = await challengesApi.getMyChallenges();
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
-                    challengesToDisplay = Array.isArray(data) ? data : [];
-                }
             }
 
             // Sort by creation date (newest first)
@@ -148,18 +148,18 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                 const now = new Date();
                 const startDate = new Date(challenge.start_date);
                 const endDate = new Date(challenge.end_date);
-                
+
                 if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
                 if (now > endDate) return { label: 'Ended', color: '#666' };
                 return { label: 'Inactive', color: '#666' };
             }
         }
-        
+
         // Fallback to date-based logic
         const now = new Date();
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
-        
+
         if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
         if (now > endDate) return { label: 'Ended', color: '#666' };
         return { label: 'Active', color: '#10b981' };
@@ -169,7 +169,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
         const now = new Date();
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
-        
+
         if (now >= startDate && now <= endDate) {
             return {
                 label: 'Started on',
@@ -196,8 +196,8 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
 
     const formatDate = (dateString: string) => {
         const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', { 
-            month: 'short', 
+        return date.toLocaleDateString('en-US', {
+            month: 'short',
             day: 'numeric',
             year: 'numeric'
         });
@@ -211,7 +211,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
         const organizerUsername = organizer.username || '';
         const participantCount = (item as any)._count?.participants || item.participants_count || 0;
         const postCount = (item as any)._count?.posts || item.posts_count || 0;
-        
+
         return (
             <TouchableOpacity
                 style={styles.card}
@@ -282,7 +282,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                         <Text style={styles.statText}>{postCount} {postCount === 1 ? 'post' : 'posts'}</Text>
                     </View>
                 </View>
-                
+
                 <View style={styles.dateContainer}>
                     <Feather name="calendar" size={14} color="#666" />
                     <Text style={styles.dateText}>
@@ -324,14 +324,14 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                     <View style={styles.emptyContainer}>
                         <Feather name="award" size={48} color="#333" />
                         <Text style={styles.emptyText}>
-                            {activeTab === 'created' ? 'No challenges created' : 
-                             activeTab === 'joined' ? 'No challenges joined' : 
-                             'No challenges available'}
+                            {activeTab === 'created' ? 'No challenges created' :
+                                activeTab === 'joined' ? 'No challenges joined' :
+                                    'No challenges available'}
                         </Text>
                         <Text style={styles.emptySubtext}>
                             {activeTab === 'created' ? 'Create one to get started!' :
-                             activeTab === 'joined' ? 'Join a challenge to participate!' :
-                             'Check back later!'}
+                                activeTab === 'joined' ? 'Join a challenge to participate!' :
+                                    'Check back later!'}
                         </Text>
                     </View>
                 }

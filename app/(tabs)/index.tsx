@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { router, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi, followsApi } from '@/lib/api';
 import { Post } from '@/types';
@@ -39,25 +39,12 @@ import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
-import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import ChallengesTabView from '@/components/ChallengesTabView';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 
-const activeVideoRef = { current: null as Video | null };
-const pauseAllVideosExcept = async (currentVideo: Video | null) => {
-  if (activeVideoRef.current && activeVideoRef.current !== currentVideo) {
-    try {
-      const status = await activeVideoRef.current.getStatusAsync();
-      if (status?.isLoaded && status.isPlaying) {
-        await activeVideoRef.current.pauseAsync();
-      }
-    } catch (error) {
-    }
-  }
-  activeVideoRef.current = currentVideo;
-};
+// expo-video handles video playback - no need for manual video ref management
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -80,6 +67,7 @@ import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/ut
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 
+
 const getMediaUrl = (post: Post): string | null => {
   return getPostMediaUrl(post);
 };
@@ -96,6 +84,7 @@ interface PostItemProps {
   isLiked: boolean;
   isFollowing: boolean;
   isActive: boolean;
+  shouldPreload: boolean;
   availableHeight: number;
 }
 
@@ -138,6 +127,7 @@ const PostItem: React.FC<PostItemProps> = ({
   isLiked,
   isFollowing,
   isActive,
+  shouldPreload,
   availableHeight
 }) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
@@ -161,10 +151,10 @@ const PostItem: React.FC<PostItemProps> = ({
     initialIsLiked: isPostLiked || isLiked,
   });
 
-  const videoRef = useRef<Video>(null);
+  const wasActiveRef = useRef(isActive);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [isMuted, setIsMuted] = useState(false); // Videos unmuted by default - user can mute if desired
+  const [isMuted, setIsMuted] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -177,6 +167,52 @@ const PostItem: React.FC<PostItemProps> = ({
   const [isSeeking, setIsSeeking] = useState(false);
   const progressBarRef = useRef<View>(null);
 
+  const mediaUrl = getMediaUrl(item);
+  const isVideo =
+    item.type === 'video' ||
+    (mediaUrl !== null &&
+      (mediaUrl.includes('.mp4') ||
+        mediaUrl.includes('.mov') ||
+        mediaUrl.includes('.webm')));
+
+  // expo-video: useVideoPlayer with conditional source for preloading
+  // When shouldPreload || isActive: video starts buffering
+  // When neither: null source frees memory
+  const shouldLoadVideo = isVideo && (shouldPreload || isActive);
+  const videoPlayer = useVideoPlayer(
+    shouldLoadVideo && mediaUrl ? mediaUrl : null,
+    (player) => {
+      player.loop = true;
+      player.muted = isMuted;
+    }
+  );
+
+  // Manage playback based on active state
+  useEffect(() => {
+    if (!videoPlayer) return;
+
+    if (isActive && !decoderErrorDetected) {
+      // Active: unmute and play
+      videoPlayer.muted = isMuted;
+      videoPlayer.play();
+    } else if (shouldPreload) {
+      // Preloading: keep paused, video is buffering
+      videoPlayer.muted = true;
+      videoPlayer.pause();
+    } else {
+      // Not active, not preloading: fully stop
+      videoPlayer.muted = true;
+      videoPlayer.pause();
+    }
+
+    // Reset to start when becoming active
+    if (isActive && !wasActiveRef.current) {
+      videoPlayer.currentTime = 0;
+    }
+
+    wasActiveRef.current = isActive;
+  }, [isActive, isMuted, shouldPreload, videoPlayer, decoderErrorDetected]);
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -185,26 +221,26 @@ const PostItem: React.FC<PostItemProps> = ({
         setIsSeeking(true);
       },
       onPanResponderMove: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoRef.current) return;
+        if (videoDuration === 0 || !videoPlayer) return;
 
         const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
-        const newPosition = progressFraction * videoDuration;
+        const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
 
         setVideoProgress(progressFraction);
 
         try {
-          await videoRef.current.setPositionAsync(newPosition);
+          videoPlayer.currentTime = newPosition;
         } catch (error) {
         }
       },
       onPanResponderRelease: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoRef.current) return;
+        if (videoDuration === 0 || !videoPlayer) return;
 
         const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
-        const newPosition = progressFraction * videoDuration;
+        const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
 
         try {
-          await videoRef.current.setPositionAsync(newPosition);
+          videoPlayer.currentTime = newPosition;
         } catch (error) {
         }
 
@@ -216,8 +252,6 @@ const PostItem: React.FC<PostItemProps> = ({
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
-  const mediaUrl = getMediaUrl(item);
-
   if (__DEV__ && index < 3) {
     console.log(`📄 [PostItem ${index}] Post data:`, {
       id: item.id,
@@ -227,17 +261,13 @@ const PostItem: React.FC<PostItemProps> = ({
       imageUrl: item.imageUrl,
       fullUrl: (item as any).fullUrl,
       mediaUrl: mediaUrl,
+      shouldPreload,
+      isActive,
       allKeys: Object.keys(item),
     });
   }
 
-  const isVideo =
-    item.type === 'video' ||
-    (mediaUrl !== null &&
-      (mediaUrl.includes('.mp4') ||
-        mediaUrl.includes('.mov') ||
-        mediaUrl.includes('.webm')));
-
+  // Update loading state based on active status
   useEffect(() => {
     if (isActive && isVideo) {
       setVideoLoading(true);
@@ -247,47 +277,6 @@ const PostItem: React.FC<PostItemProps> = ({
     }
   }, [isActive, isVideo]);
 
-  useEffect(() => {
-    if (!videoRef.current || useNativeControls || !isVideo) return;
-
-    const managePlayback = async () => {
-      try {
-        const currentVideo = videoRef.current;
-        if (!currentVideo) return;
-
-        const status = await currentVideo.getStatusAsync();
-        if (!status?.isLoaded) return;
-
-        if (isActive) {
-          await pauseAllVideosExcept(currentVideo);
-          if (!status.isPlaying) {
-            await currentVideo.playAsync();
-          }
-        } else {
-          if (status.isPlaying) {
-            await currentVideo.pauseAsync();
-          }
-          if (activeVideoRef.current === currentVideo) {
-            activeVideoRef.current = null;
-          }
-        }
-      } catch (error) {
-      }
-    };
-
-    managePlayback();
-  }, [isActive, useNativeControls, isVideo]);
-
-  useEffect(() => {
-    return () => {
-      if (videoRef.current) {
-        if (activeVideoRef.current === videoRef.current) {
-          activeVideoRef.current = null;
-        }
-        videoRef.current.unloadAsync().catch(() => { });
-      }
-    };
-  }, []);
 
   const handleVideoTap = () => {
     setIsMuted(!isMuted);
@@ -404,24 +393,11 @@ const PostItem: React.FC<PostItemProps> = ({
               activeOpacity={1}
               onPress={() => setIsMuted(!isMuted)}
             >
-              {imageLoading && !imageError && mediaUrl && (
-                <View style={styles.loadingOverlay}>
-                  <ActivityIndicator size="large" color="#60a5fa" />
-                </View>
-              )}
               {mediaUrl ? (
                 <Image
                   source={{ uri: getThumbnailUrl(item) || mediaUrl }}
                   style={styles.media}
                   resizeMode="contain"
-                  onLoadStart={() => setImageLoading(true)}
-                  onLoad={() => {
-                    setImageLoading(false);
-                  }}
-                  onError={() => {
-                    setImageError(true);
-                    setImageLoading(false);
-                  }}
                 />
               ) : (
                 <View style={[styles.media, styles.placeholderContainer]}>
@@ -443,94 +419,23 @@ const PostItem: React.FC<PostItemProps> = ({
               activeOpacity={1}
               onPress={() => setIsMuted(!isMuted)}
             >
-              {videoLoading && !videoLoaded && (
-                <View style={styles.loadingOverlay}>
-                  <ActivityIndicator size="large" color="#60a5fa" />
-                </View>
+              {videoPlayer && (
+                <VideoView
+                  player={videoPlayer}
+                  style={styles.media}
+                  contentFit="contain"
+                  nativeControls={useNativeControls}
+                />
               )}
-              <Video
-                ref={videoRef}
-                source={{
-                  uri: mediaUrl || '',
-                  headers: {
-                    'Cache-Control': 'public, max-age=31536000, immutable'
-                  }
-                }}
-                style={styles.media}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={useNativeControls ? false : !decoderErrorDetected && isActive}
-                isLooping={!useNativeControls}
-                isMuted={useNativeControls ? false : isMuted}
-                usePoster={false}
-                shouldCorrectPitch={true}
-                volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
-                useNativeControls={useNativeControls}
-                progressUpdateIntervalMillis={100}
-                onLoadStart={() => {
-                  setVideoLoading(true);
-                }}
-                onLoad={() => {
-                  setVideoLoaded(true);
-                  setVideoLoading(false);
-                  if (!useNativeControls && videoRef.current && isActive) {
-                    pauseAllVideosExcept(videoRef.current).then(() => {
-                      videoRef.current?.playAsync().catch(() => { });
-                    });
-                  }
-                }}
-                onError={(error: any) => {
-                  if (!decoderErrorDetected) {
-                    const errorMessage = error?.message || error?.toString() || '';
-                    if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
-                      setDecoderErrorDetected(true);
-                      setUseNativeControls(true);
-                      setVideoError(false);
-                      setVideoLoaded(true);
-                    } else {
-                      setVideoError(true);
-                      setVideoLoading(false);
-                    }
-                  }
-                }}
-                onPlaybackStatusUpdate={(status: any) => {
-                  if (status.isLoaded) {
-                    if (!useNativeControls) {
-                      if (status.isPlaying !== isPlaying) {
-                        setIsPlaying(status.isPlaying);
-                      }
-                      if (status.durationMillis && status.positionMillis !== undefined) {
-                        const progress = status.durationMillis > 0
-                          ? status.positionMillis / status.durationMillis
-                          : 0;
-                        setVideoProgress(progress);
-                        setVideoDuration(status.durationMillis);
-                      }
-                    }
-                  }
-                }}
-              />
             </TouchableOpacity>
           )
         ) : (
           <View style={styles.mediaWrapper}>
-            {imageLoading && !imageError && (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator size="large" color="#60a5fa" />
-              </View>
-            )}
             {mediaUrl && !imageError ? (
               <Image
                 source={{ uri: mediaUrl }}
                 style={styles.media}
                 resizeMode="contain"
-                onLoadStart={() => setImageLoading(true)}
-                onLoad={() => {
-                  setImageLoading(false);
-                }}
-                onError={() => {
-                  setImageError(true);
-                  setImageLoading(false);
-                }}
               />
             ) : (
               <View style={[styles.media, styles.placeholderContainer]}>
@@ -957,13 +862,8 @@ export default function FeedScreen() {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  // Aggressive video preloading - downloads first 800KB of next 3 videos
-  const preloadStats = useVideoPreload(posts, currentIndex >= 0 ? currentIndex : -1, {
-    preloadCount: 3,
-    enabled: activeTab !== 'challenges' && isScreenFocused,
-    chunkSize: 800 * 1024, // 800KB chunks for instant playback
-    direction: 'forward', // Only preload ahead
-  });
+  // expo-video handles preloading via useVideoPlayer with conditional source
+  // Videos in preload window get URL, others get null for memory management
 
   useFocusEffect(
     useCallback(() => {
@@ -975,7 +875,7 @@ export default function FeedScreen() {
         const savedIndex = currentIndexRef.current;
         setIsScreenFocused(false);
         lastActiveIndexRef.current = savedIndex;
-        pauseAllVideosExcept(null);
+        // No cleanup needed - expo-video handles it
       };
     }, [])
   );
@@ -1139,13 +1039,10 @@ export default function FeedScreen() {
         likesManager.onPostVisible(postId);
       }
 
-      if (activeVideoRef.current) {
-        pauseAllVideosExcept(null);
-      }
+      // expo-video handles pause/play automatically via isActive prop
       setCurrentIndex(newIndex);
       lastActiveIndexRef.current = newIndex;
     } else {
-      pauseAllVideosExcept(null);
       setCurrentIndex(-1);
     }
   }).current;
@@ -1233,22 +1130,30 @@ export default function FeedScreen() {
                 ) : null
               }
               stickyHeaderIndices={(networkError || isOffline) ? [0] : undefined}
-              renderItem={({ item, index }) => (
-                <PostItem
-                  item={item}
-                  index={index}
-                  onLike={handleLike}
-                  onComment={handleComment}
-                  onShare={handleShare}
-                  onReport={handleReport}
-                  onFollow={handleFollow}
-                  onUnfollow={handleUnfollow}
-                  isLiked={likedPosts.includes(item.id)}
-                  isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
-                  isActive={isScreenFocused && currentIndex === index}
-                  availableHeight={availableHeight}
-                />
-              )}
+              renderItem={({ item, index }) => {
+                const isActive = isScreenFocused && currentIndex === index;
+                // Calculate shouldPreload: preload next 5 videos for super fast instant playback
+                const distance = index - currentIndex;
+                const shouldPreload = !isActive && distance > 0 && distance <= 5;
+
+                return (
+                  <PostItem
+                    item={item}
+                    index={index}
+                    onLike={handleLike}
+                    onComment={handleComment}
+                    onShare={handleShare}
+                    onReport={handleReport}
+                    onFollow={handleFollow}
+                    onUnfollow={handleUnfollow}
+                    isLiked={likedPosts.includes(item.id)}
+                    isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                    isActive={isActive}
+                    shouldPreload={shouldPreload}
+                    availableHeight={availableHeight}
+                  />
+                );
+              }}
               keyExtractor={(item) => item.id}
               snapToInterval={availableHeight}
               snapToAlignment="start"
@@ -1258,7 +1163,7 @@ export default function FeedScreen() {
               pagingEnabled={false}
               contentContainerStyle={{ paddingBottom: 0 }}
               getItemType={() => 'post'}
-              drawDistance={availableHeight * 2}
+              drawDistance={availableHeight * 5}
               scrollEventThrottle={16}
               nestedScrollEnabled={false}
               scrollEnabled={true}
