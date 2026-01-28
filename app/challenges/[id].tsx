@@ -51,7 +51,7 @@ export default function ChallengeDetailScreen() {
   const { id } = useLocalSearchParams();
   const { user, isAuthenticated } = useAuth();
   const C = COLORS.dark;
-  
+
   const [challenge, setChallenge] = useState<any>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,13 +72,13 @@ export default function ChallengeDetailScreen() {
 
   const fetchChallenge = async () => {
     if (!id) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
       const response = await challengesApi.getById(id as string);
-      
+
       if (response?.status === 'success' && response.data) {
         setChallenge(response.data);
       } else {
@@ -93,12 +93,12 @@ export default function ChallengeDetailScreen() {
 
   const fetchPosts = async () => {
     if (!id) return;
-    
+
     setPostsLoading(true);
-    
+
     try {
       const response = await challengesApi.getPosts(id as string, 1, 20);
-      
+
       if (response?.status === 'success') {
         const postsList = response.data?.posts || [];
         const normalizedPosts = postsList.map((item: any) => item.post || item);
@@ -113,16 +113,16 @@ export default function ChallengeDetailScreen() {
 
   const fetchParticipants = async () => {
     if (!id) return;
-    
+
     setLoadingAllParticipants(true);
-    
+
     try {
       const response = await challengesApi.getParticipants(id as string);
-      
+
       if (response?.status === 'success') {
         const participantsList = response.data || [];
-        const normalizedParticipants = Array.isArray(participantsList) 
-          ? participantsList 
+        const normalizedParticipants = Array.isArray(participantsList)
+          ? participantsList
           : (participantsList.participants || []);
         setAllParticipants(normalizedParticipants);
       } else {
@@ -174,17 +174,17 @@ export default function ChallengeDetailScreen() {
       ]);
       return;
     }
-    
+
     if (!id) {
       Alert.alert('Error', 'Competition ID is missing');
       return;
     }
-    
+
     setJoining(true);
-    
+
     try {
       const response = await challengesApi.join(id as string);
-      
+
       if (response?.status === 'success') {
         Alert.alert('Success', response.message || 'You have joined the competition!', [
           { text: 'OK', onPress: () => fetchChallenge() }
@@ -193,7 +193,7 @@ export default function ChallengeDetailScreen() {
         const errorMessage = response?.message || 'Failed to join challenge';
         let alertTitle = 'Cannot Join Competition';
         let alertMessage = errorMessage;
-        
+
         if (errorMessage.toLowerCase().includes('not started')) {
           alertTitle = 'Competition Not Started';
           alertMessage = 'This competition has not started yet. Please wait until the start date to join.';
@@ -210,14 +210,14 @@ export default function ChallengeDetailScreen() {
           alertTitle = 'Competition Not Available';
           alertMessage = 'This competition is not available for joining at this time.';
         }
-        
+
         Alert.alert(alertTitle, alertMessage);
       }
     } catch (err: any) {
       const errorMessage = err.response?.data?.message || err.message || 'Failed to join challenge';
       let alertTitle = 'Error';
       let alertText = errorMessage;
-      
+
       if (errorMessage.toLowerCase().includes('not started')) {
         alertTitle = 'Competition Not Started';
         alertText = 'This competition has not started yet. Please wait until the start date to join.';
@@ -225,7 +225,7 @@ export default function ChallengeDetailScreen() {
         alertTitle = 'Competition Ended';
         alertText = 'This competition has already ended. You cannot join it anymore.';
       }
-      
+
       Alert.alert(alertTitle, alertText);
     } finally {
       setJoining(false);
@@ -237,7 +237,7 @@ export default function ChallengeDetailScreen() {
       Alert.alert('Join Required', 'You must join the competition before posting');
       return;
     }
-    
+
     router.push({
       pathname: '/(tabs)/create',
       params: { challengeId: id as string, challengeName: challenge.name }
@@ -246,8 +246,8 @@ export default function ChallengeDetailScreen() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'long', 
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
       day: 'numeric',
       year: 'numeric'
     });
@@ -255,7 +255,7 @@ export default function ChallengeDetailScreen() {
 
   const getChallengeStatus = () => {
     if (!challenge) return { label: 'Unknown', color: C.textSecondary };
-    
+
     if (challenge.is_currently_active !== undefined) {
       if (challenge.is_currently_active) {
         return { label: 'Active', color: C.success };
@@ -263,17 +263,17 @@ export default function ChallengeDetailScreen() {
         const now = new Date();
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
-        
+
         if (now < startDate) return { label: 'Upcoming', color: C.warning };
         if (now > endDate) return { label: 'Ended', color: C.textSecondary };
         return { label: 'Inactive', color: C.textSecondary };
       }
     }
-    
+
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
-    
+
     if (now < startDate) return { label: 'Upcoming', color: C.warning };
     if (now > endDate) return { label: 'Ended', color: C.textSecondary };
     return { label: 'Active', color: C.success };
@@ -281,11 +281,11 @@ export default function ChallengeDetailScreen() {
 
   const isActive = () => {
     if (!challenge) return false;
-    
+
     if (challenge.is_currently_active !== undefined) {
       return challenge.is_currently_active;
     }
-    
+
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
@@ -302,16 +302,22 @@ export default function ChallengeDetailScreen() {
   const canJoin = () => {
     if (!challenge) return false;
     const status = challenge.status;
+    const now = new Date();
+    const endDate = new Date(challenge.end_date);
+
+    // Cannot join if ended
+    if (now > endDate) return false;
+
     return (status === 'approved' || status === 'active') && hasStarted() && !challenge.is_participant;
   };
 
   const getDateInfo = () => {
     if (!challenge) return null;
-    
+
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
-    
+
     if (now >= startDate && now <= endDate) {
       return {
         label: 'Started on',
@@ -345,8 +351,8 @@ export default function ChallengeDetailScreen() {
       (mediaUrl !== null &&
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
-         mediaUrl.toLowerCase().includes('.mov') ||
-         mediaUrl.toLowerCase().includes('.webm')));
+          mediaUrl.toLowerCase().includes('.mov') ||
+          mediaUrl.toLowerCase().includes('.webm')));
 
     const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
     const videoUrl = isVideo && mediaUrl ? (mediaUrl.startsWith('http') ? mediaUrl : getFileUrl(mediaUrl)) : null;
@@ -399,7 +405,7 @@ export default function ChallengeDetailScreen() {
   const FullscreenPostViewer = ({ item, index, insets, C }: { item: any; index: number; insets: any; C: any }) => {
     const videoRef = useRef<Video>(null);
     const [isLoaded, setIsLoaded] = useState(false);
-    const [isMuted, setIsMuted] = useState(true);
+    const [isMuted, setIsMuted] = useState(false); // Default: sound ON
     const [videoProgress, setVideoProgress] = useState(0);
     const [videoDuration, setVideoDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -429,11 +435,11 @@ export default function ChallengeDetailScreen() {
 
     useEffect(() => {
       if (isVideo && videoUrl && videoRef.current) {
-        videoRef.current.playAsync().catch(() => {});
+        videoRef.current.playAsync().catch(() => { });
       }
       return () => {
         if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => {});
+          videoRef.current.pauseAsync().catch(() => { });
         }
       };
     }, [isVideo, videoUrl]);
@@ -489,7 +495,7 @@ export default function ChallengeDetailScreen() {
             >
               <Video
                 ref={videoRef}
-                source={{ 
+                source={{
                   uri: videoUrl,
                   headers: {
                     'Cache-Control': 'public, max-age=31536000, immutable'
@@ -510,14 +516,14 @@ export default function ChallengeDetailScreen() {
                 }}
                 onLoad={() => {
                   setIsLoaded(true);
-                  videoRef.current?.playAsync().catch(() => {});
+                  videoRef.current?.playAsync().catch(() => { });
                 }}
                 onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
                 onError={(error) => {
                   console.error('❌ [Video] Playback error:', error);
                 }}
               />
-              
+
               {isMuted && (
                 <View style={styles.muteIndicatorOverlay}>
                   <View style={styles.muteIndicatorBadge}>
@@ -616,7 +622,7 @@ export default function ChallengeDetailScreen() {
               </View>
             </View>
           </View>
-          
+
           <View style={[styles.statsRow, { marginTop: 20 }]}>
             <View style={styles.statItem}>
               <Text style={styles.statValue}>{participantCount}</Text>
@@ -637,7 +643,7 @@ export default function ChallengeDetailScreen() {
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.description}</Text>
             </View>
           )}
-          
+
           <View style={styles.detailBlock}>
             <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Duration</Text>
             <Text style={[styles.detailText, { color: C.text }]}>
@@ -655,25 +661,25 @@ export default function ChallengeDetailScreen() {
               })()}
             </Text>
           </View>
-          
+
           {challenge.has_rewards && challenge.rewards && (
             <View style={styles.detailBlock}>
               <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Rewards</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.rewards}</Text>
             </View>
           )}
-          
+
           {challenge.scoring_criteria && (
             <View style={styles.detailBlock}>
               <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Scoring Criteria</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.scoring_criteria}</Text>
             </View>
           )}
-          
+
           {challenge.organizer && (
             <View style={styles.organizerSection}>
               <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Organizer</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.organizerInfo}
                 onPress={() => router.push({
                   pathname: '/user/[id]',
@@ -744,29 +750,39 @@ export default function ChallengeDetailScreen() {
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
               <>
-                <TouchableOpacity
-                  style={[
-                    styles.joinButton, 
-                    { backgroundColor: C.primary },
-                    (!canJoin() || joining) && { opacity: 0.5 }
-                  ]}
-                  onPress={handleJoinChallenge}
-                  disabled={!canJoin() || joining}
-                >
-                  {joining ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="person-add" size={20} color="#fff" />
-                      <Text style={styles.joinButtonText}>
-                        {!hasStarted() 
-                          ? 'Challenge Not Started' 
-                          : 'Join Challenge'}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-                {!hasStarted() && (
+                {/* Only show Join button if not ended */}
+                {new Date() <= new Date(challenge.end_date) ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.joinButton,
+                      { backgroundColor: C.primary },
+                      (!canJoin() || joining) && { opacity: 0.5 }
+                    ]}
+                    onPress={handleJoinChallenge}
+                    disabled={!canJoin() || joining}
+                  >
+                    {joining ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="person-add" size={20} color="#fff" />
+                        <Text style={styles.joinButtonText}>
+                          {!hasStarted()
+                            ? 'Challenge Not Started'
+                            : 'Join Challenge'}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <View style={[styles.joinButton, { backgroundColor: C.card, borderColor: C.border, borderWidth: 1 }]}>
+                    <Text style={[styles.joinButtonText, { color: C.textSecondary }]}>
+                      Competition Ended
+                    </Text>
+                  </View>
+                )}
+
+                {!hasStarted() && new Date() <= new Date(challenge.end_date) && (
                   <View style={styles.infoMessage}>
                     <MaterialIcons name="info-outline" size={16} color={C.textSecondary} />
                     <Text style={[styles.infoText, { color: C.textSecondary }]}>
@@ -803,10 +819,10 @@ export default function ChallengeDetailScreen() {
               ]}
               onPress={() => setActiveTab('posts')}
             >
-              <MaterialIcons 
-                name="video-library" 
-                size={18} 
-                color={activeTab === 'posts' ? C.primary : C.textSecondary} 
+              <MaterialIcons
+                name="video-library"
+                size={18}
+                color={activeTab === 'posts' ? C.primary : C.textSecondary}
               />
               <Text style={[
                 styles.tabText,
@@ -815,26 +831,29 @@ export default function ChallengeDetailScreen() {
                 Posts ({postCount})
               </Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[
-                styles.tab,
-                activeTab === 'participants' && styles.tabActive
-              ]}
-              onPress={() => setActiveTab('participants')}
-            >
-              <MaterialIcons 
-                name="people" 
-                size={18} 
-                color={activeTab === 'participants' ? C.primary : C.textSecondary} 
-              />
-              <Text style={[
-                styles.tabText,
-                { color: activeTab === 'participants' ? C.primary : C.textSecondary }
-              ]}>
-                Participants ({participantCount})
-              </Text>
-            </TouchableOpacity>
+
+            {/* Only show Participants tab for authenticated users */}
+            {isAuthenticated && (
+              <TouchableOpacity
+                style={[
+                  styles.tab,
+                  activeTab === 'participants' && styles.tabActive
+                ]}
+                onPress={() => setActiveTab('participants')}
+              >
+                <MaterialIcons
+                  name="people"
+                  size={18}
+                  color={activeTab === 'participants' ? C.primary : C.textSecondary}
+                />
+                <Text style={[
+                  styles.tabText,
+                  { color: activeTab === 'participants' ? C.primary : C.textSecondary }
+                ]}>
+                  Participants ({participantCount})
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </>
@@ -851,7 +870,7 @@ export default function ChallengeDetailScreen() {
       const participantUser = item.user || item;
       const postCount = item.post_count || 0;
       const joinedAt = item.joined_at || item.createdAt;
-      
+
       return (
         <TouchableOpacity
           style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
@@ -970,10 +989,10 @@ export default function ChallengeDetailScreen() {
             </View>
           ) : (
             <View style={activeTab === 'posts' ? styles.emptyPosts : styles.emptyParticipants}>
-              <MaterialIcons 
-                name={activeTab === 'posts' ? "video-library" : "people-outline"} 
-                size={48} 
-                color={C.textSecondary} 
+              <MaterialIcons
+                name={activeTab === 'posts' ? "video-library" : "people-outline"}
+                size={48}
+                color={C.textSecondary}
               />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
                 {activeTab === 'posts' ? 'No posts yet' : 'No participants yet'}
@@ -987,10 +1006,10 @@ export default function ChallengeDetailScreen() {
           )
         }
         contentContainerStyle={
-          data.length === 0 
-            ? { flex: 1 } 
-            : activeTab === 'posts' 
-              ? styles.postsGrid 
+          data.length === 0
+            ? { flex: 1 }
+            : activeTab === 'posts'
+              ? styles.postsGrid
               : styles.participantsList
         }
         refreshControl={
@@ -1038,7 +1057,7 @@ export default function ChallengeDetailScreen() {
             onMomentumScrollEnd={(event) => {
               const index = Math.round(
                 event.nativeEvent.contentOffset.y /
-                  event.nativeEvent.layoutMeasurement.height
+                event.nativeEvent.layoutMeasurement.height
               );
               setFullscreenIndex(index);
             }}

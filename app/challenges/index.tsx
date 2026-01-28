@@ -53,7 +53,7 @@ export default function ChallengesScreen() {
   const { user, isAuthenticated } = useAuth();
   const colorScheme = useColorScheme() || 'dark';
   const C = COLORS[colorScheme];
-  
+
   const [activeTab, setActiveTab] = useState<'my' | 'joined' | 'not_joined'>('not_joined');
   const [allChallenges, setAllChallenges] = useState<any[]>([]);
   const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
@@ -80,7 +80,7 @@ export default function ChallengesScreen() {
   const fetchChallenges = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const [allRes, joinedRes, myRes] = await Promise.all([
         challengesApi.getAll('active'),
@@ -137,10 +137,13 @@ export default function ChallengesScreen() {
   );
 
   const visibleChallenges = useMemo(() => {
+    // For unauthenticated users: show ALL challenges
+    if (!isAuthenticated) return allChallenges;
+    // For authenticated: show based on active tab
     if (activeTab === 'joined') return joinedChallenges;
     if (activeTab === 'my') return myChallenges;
     return notJoinedChallenges;
-  }, [activeTab, joinedChallenges, myChallenges, notJoinedChallenges]);
+  }, [isAuthenticated, activeTab, allChallenges, joinedChallenges, myChallenges, notJoinedChallenges]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -168,8 +171,8 @@ export default function ChallengesScreen() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric',
       year: 'numeric'
     });
@@ -184,18 +187,18 @@ export default function ChallengesScreen() {
         const now = new Date();
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
-        
+
         if (now < startDate) return { label: 'Upcoming', color: C.warning };
         if (now > endDate) return { label: 'Ended', color: C.textSecondary };
         return { label: 'Inactive', color: C.textSecondary };
       }
     }
-    
+
     // Fallback to date-based logic if is_currently_active not available
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
-    
+
     if (now < startDate) return { label: 'Upcoming', color: C.warning };
     if (now > endDate) return { label: 'Ended', color: C.textSecondary };
     return { label: 'Active', color: C.success };
@@ -205,7 +208,7 @@ export default function ChallengesScreen() {
     const now = new Date();
     const startDate = new Date(challenge.start_date);
     const endDate = new Date(challenge.end_date);
-    
+
     if (now >= startDate && now <= endDate) {
       // Challenge has started
       return {
@@ -241,7 +244,7 @@ export default function ChallengesScreen() {
     const organizer = item.organizer || {};
     const organizerName = organizer.display_name || organizer.username || item.organizer_name || 'Unknown';
     const organizerUsername = organizer.username || '';
-    
+
     return (
       <TouchableOpacity
         style={[styles.challengeCard, { backgroundColor: C.card, borderColor: C.border }]}
@@ -276,17 +279,17 @@ export default function ChallengesScreen() {
             </View>
           </View>
         </LinearGradient>
-        
+
         <View style={styles.cardContent}>
-          
+
           {item.description && (
             <Text style={[styles.challengeDescription, { color: C.textSecondary }]} numberOfLines={3}>
               {item.description}
             </Text>
           )}
-          
+
           <View style={styles.challengeMeta}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.metaItem}
               onPress={() => {
                 setSelectedChallengeId(item.id);
@@ -307,7 +310,7 @@ export default function ChallengesScreen() {
               </Text>
             </View>
           </View>
-          
+
           {/* Date Information */}
           <View style={styles.dateRow}>
             <MaterialIcons name="event" size={14} color={C.textSecondary} />
@@ -322,7 +325,7 @@ export default function ChallengesScreen() {
               )}
             </View>
           </View>
-          
+
           {/* Organizer Information */}
           {(item.organizer || item.organizer_name) && (
             <TouchableOpacity
@@ -370,36 +373,42 @@ export default function ChallengesScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Create + Tabs */}
-      <View style={[styles.actionRow, { borderBottomColor: C.border, backgroundColor: C.card }]}>
-        <TouchableOpacity
-          style={[styles.createButton, { backgroundColor: C.primary }]}
-          onPress={() => setCreateModalVisible(true)}
-          activeOpacity={0.85}
-        >
-          <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
-          <Text style={styles.createButtonText}>Create Competition</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-        {TABS.map((tab) => (
+      {/* Create button - only for authenticated users */}
+      {isAuthenticated && (
+        <View style={[styles.actionRow, { borderBottomColor: C.border, backgroundColor: C.card }]}>
           <TouchableOpacity
-            key={tab.key}
-            style={[
-              styles.tabButton,
-              activeTab === tab.key && { borderBottomColor: C.primary, borderBottomWidth: 2 }
-            ]}
-            onPress={() => setActiveTab(tab.key)}
+            style={[styles.createButton, { backgroundColor: C.primary }]}
+            onPress={() => setCreateModalVisible(true)}
+            activeOpacity={0.85}
           >
-            <Text style={[
-              styles.tabLabel,
-              { color: activeTab === tab.key ? C.primary : C.textSecondary }
-            ]}>
-              {tab.label}
-            </Text>
+            <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
+            <Text style={styles.createButtonText}>Create Competition</Text>
           </TouchableOpacity>
-        ))}
-      </View>
+        </View>
+      )}
+
+      {/* Tabs - only for authenticated users */}
+      {isAuthenticated && (
+        <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
+          {TABS.map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              style={[
+                styles.tabButton,
+                activeTab === tab.key && { borderBottomColor: C.primary, borderBottomWidth: 2 }
+              ]}
+              onPress={() => setActiveTab(tab.key)}
+            >
+              <Text style={[
+                styles.tabLabel,
+                { color: activeTab === tab.key ? C.primary : C.textSecondary }
+              ]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -436,11 +445,13 @@ export default function ChallengesScreen() {
             <View style={styles.emptyContainer}>
               <MaterialIcons name="emoji-events" size={64} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                {activeTab === 'joined' 
-                  ? "You haven't joined any competitions yet"
-                  : activeTab === 'my'
-                    ? "You haven't created any competitions"
-                    : "No competitions available to join"}
+                {!isAuthenticated
+                  ? "No competitions available"
+                  : activeTab === 'joined'
+                    ? "You haven't joined any competitions yet"
+                    : activeTab === 'my'
+                      ? "You haven't created any competitions"
+                      : "No competitions available to join"}
               </Text>
             </View>
           }

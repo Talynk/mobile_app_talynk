@@ -41,7 +41,7 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
-import ChallengesTabView from '@/components/ChallengesTabView';
+import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 
 // expo-video handles video playback - no need for manual video ref management
@@ -212,6 +212,23 @@ const PostItem: React.FC<PostItemProps> = ({
 
     wasActiveRef.current = isActive;
   }, [isActive, isMuted, shouldPreload, videoPlayer, decoderErrorDetected]);
+
+  // Subscribe to video playing state to hide thumbnail overlay when video starts
+  useEffect(() => {
+    if (!videoPlayer) return;
+
+    const subscription = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
+      if (event.isPlaying && isActive) {
+        // Video is playing - hide the thumbnail overlay
+        setVideoLoading(false);
+        setVideoLoaded(true);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [videoPlayer, isActive]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -387,48 +404,62 @@ const PostItem: React.FC<PostItemProps> = ({
     >
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
-          videoError || !isActive ? (
-            <TouchableOpacity
-              style={styles.mediaWrapper}
-              activeOpacity={1}
-              onPress={() => setIsMuted(!isMuted)}
-            >
-              {mediaUrl ? (
-                <Image
-                  source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                  style={styles.media}
-                  resizeMode="contain"
-                />
-              ) : (
-                <View style={[styles.media, styles.placeholderContainer]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
+          <TouchableOpacity
+            style={styles.mediaWrapper}
+            activeOpacity={1}
+            onPress={() => setIsMuted(!isMuted)}
+          >
+            {/* LAYER 1 (BASE): Thumbnail - ALWAYS visible first, prevents black screen */}
+            {mediaUrl && (
+              <Image
+                source={{ uri: getThumbnailUrl(item) || mediaUrl }}
+                style={[styles.media, { position: 'absolute', zIndex: 1 }]}
+                resizeMode="contain"
+              />
+            )}
+
+            {/* LAYER 2: VideoView - renders on top when preloading or active */}
+            {videoPlayer && (shouldPreload || isActive) && !videoError && (
+              <VideoView
+                player={videoPlayer}
+                style={[styles.media, { position: 'absolute', zIndex: videoLoaded ? 3 : 2 }]}
+                contentFit="contain"
+                nativeControls={useNativeControls}
+              />
+            )}
+
+            {/* LAYER 3: Play icon overlay when not active */}
+            {!isActive && !videoError && (
+              <View style={[styles.playIconOverlay, { zIndex: 4 }]}>
+                <View style={styles.playIconCircle}>
+                  <Feather name="play" size={32} color="#fff" />
                 </View>
-              )}
-              {!videoError && !isActive && (
-                <View style={styles.playIconOverlay}>
-                  <View style={styles.playIconCircle}>
-                    <Feather name="play" size={32} color="#fff" />
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.mediaWrapper}
-              activeOpacity={1}
-              onPress={() => setIsMuted(!isMuted)}
-            >
-              {videoPlayer && (
-                <VideoView
-                  player={videoPlayer}
-                  style={styles.media}
-                  contentFit="contain"
-                  nativeControls={useNativeControls}
-                />
-              )}
-            </TouchableOpacity>
-          )
+              </View>
+            )}
+
+            {/* Loading indicator - brief spinner while video buffers (only when active and loading) */}
+            {isActive && videoLoading && !videoError && (
+              <View style={[styles.loadingOverlay, { zIndex: 5 }]}>
+                <ActivityIndicator size="large" color="#fff" />
+              </View>
+            )}
+
+            {/* Show error state */}
+            {videoError && (
+              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                <Feather name="video-off" size={48} color="#666" />
+                <Text style={styles.placeholderText}>Video unavailable</Text>
+              </View>
+            )}
+
+            {/* Show placeholder if no media URL */}
+            {!mediaUrl && (
+              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                <Feather name="video-off" size={48} color="#666" />
+                <Text style={styles.placeholderText}>Video unavailable</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         ) : (
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
@@ -1081,7 +1112,7 @@ export default function FeedScreen() {
 
       {activeTab === 'challenges' ? (
         <>
-          <ChallengesTabView
+          <ChallengesList
             onCreateChallenge={() => setCreateChallengeVisible(true)}
             refreshTrigger={challengesRefreshTrigger}
           />
@@ -1541,6 +1572,10 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
     marginTop: 12,
+  },
+  thumbnailOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   playIconOverlay: {
     ...StyleSheet.absoluteFillObject,

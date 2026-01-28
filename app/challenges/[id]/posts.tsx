@@ -46,7 +46,7 @@ export default function ChallengePostsScreen() {
   const { id, open, openIndex } = useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
-  
+
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,7 +54,7 @@ export default function ChallengePostsScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Fullscreen post viewing state
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
@@ -62,7 +62,7 @@ export default function ChallengePostsScreen() {
 
   const loadPosts = async (page = 1, refresh = false) => {
     if (!id) return;
-    
+
     try {
       if (refresh) {
         setRefreshing(true);
@@ -73,20 +73,20 @@ export default function ChallengePostsScreen() {
       } else {
         setLoadingMore(true);
       }
-      
+
       setError(null);
-      
+
       const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
       const response = await challengesApi.getPosts(id as string, page, limit);
-      
+
       if (response.status === 'success') {
         // API client already normalizes posts (extracts item.post)
         const postsList = response.data?.posts || [];
-        
+
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsList.length === limit;
         setHasMore(hasMoreData);
-        
+
         if (page === 1 || refresh) {
           setPosts(postsList);
         } else {
@@ -176,7 +176,7 @@ export default function ChallengePostsScreen() {
     // For videos, use the mediaUrl directly; for images, also use mediaUrl
     const videoUrl = isVideo ? mediaUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
-    
+
     const fallbackImageUrl =
       getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
     const generatedThumbnail = useVideoThumbnail(
@@ -198,7 +198,7 @@ export default function ChallengePostsScreen() {
         setShowVideo(false);
         setIsLoaded(false);
         if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => {});
+          videoRef.current.pauseAsync().catch(() => { });
         }
       }
     }, [isActive, isVideo, videoUrl]);
@@ -272,7 +272,7 @@ export default function ChallengePostsScreen() {
   const FullscreenPostViewer = ({ item, index }: { item: Post; index: number }) => {
     const videoRef = useRef<Video>(null);
     const [isLoaded, setIsLoaded] = useState(false);
-    const [isMuted, setIsMuted] = useState(true);
+    const [isMuted, setIsMuted] = useState(false); // Default: sound ON
     const [videoProgress, setVideoProgress] = useState(0);
     const [videoDuration, setVideoDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -280,7 +280,7 @@ export default function ChallengePostsScreen() {
 
     // Get media URL using the utility function
     const mediaUrl = getPostMediaUrl(item) || '';
-    
+
     // Debug logging
     if (__DEV__) {
       console.log('🎬 [FullscreenPostViewer] Post:', {
@@ -290,7 +290,7 @@ export default function ChallengePostsScreen() {
         mediaUrl: mediaUrl,
       });
     }
-    
+
     const isVideo =
       item.type === 'video' ||
       (mediaUrl !== null &&
@@ -302,7 +302,7 @@ export default function ChallengePostsScreen() {
     // For videos, use the mediaUrl directly; for images, also use mediaUrl
     const videoUrl = isVideo ? mediaUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
-    
+
     const fallbackImageUrl =
       getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
     const generatedThumbnail = useVideoThumbnail(
@@ -317,11 +317,11 @@ export default function ChallengePostsScreen() {
     useEffect(() => {
       if (isVideo && videoUrl && videoRef.current) {
         // Auto-play when component mounts
-        videoRef.current.playAsync().catch(() => {});
+        videoRef.current.playAsync().catch(() => { });
       }
       return () => {
         if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => {});
+          videoRef.current.pauseAsync().catch(() => { });
         }
       };
     }, [isVideo, videoUrl]);
@@ -377,7 +377,7 @@ export default function ChallengePostsScreen() {
             >
               <Video
                 ref={videoRef}
-                source={{ 
+                source={{
                   uri: videoUrl,
                   headers: {
                     'Cache-Control': 'public, max-age=31536000, immutable'
@@ -402,10 +402,10 @@ export default function ChallengePostsScreen() {
                 }}
                 onLoad={() => {
                   if (__DEV__) console.log('✅ [Video] Loaded:', videoUrl);
-                  videoRef.current?.playAsync().catch(() => {});
+                  videoRef.current?.playAsync().catch(() => { });
                 }}
               />
-              
+
               {/* Mute indicator - click to toggle */}
               {isMuted && (
                 <View style={styles.muteIndicatorOverlay}>
@@ -449,14 +449,14 @@ export default function ChallengePostsScreen() {
           <View style={styles.postInfo}>
             {item.user && (
               <View style={styles.userSection}>
-                <Avatar 
+                <Avatar
                   user={{
                     ...item.user,
                     // Ensure profile_picture is undefined if null, to satisfy Avatar type
-                    profile_picture: item.user.profile_picture ?? undefined, 
-                  }} 
-                  size={44} 
-                  style={styles.avatar} 
+                    profile_picture: item.user.profile_picture ?? undefined,
+                  }}
+                  size={44}
+                  style={styles.avatar}
                 />
                 <View style={styles.userDetails}>
                   <Text style={styles.username}>{item.user.username || 'Unknown'}</Text>
@@ -464,7 +464,6 @@ export default function ChallengePostsScreen() {
                   {(item.user.name || item.user.username) && (
                     <Text style={styles.displayName}>{item.user.name ?? item.user.username}</Text>
                   )}
-                  ){'}'}
                 </View>
               </View>
             )}
@@ -536,7 +535,7 @@ export default function ChallengePostsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
       <StatusBar barStyle="light-content" />
-      
+
       {/* Grid View */}
       <FlatList
         data={posts}
@@ -615,7 +614,7 @@ export default function ChallengePostsScreen() {
             onMomentumScrollEnd={(event) => {
               const index = Math.round(
                 event.nativeEvent.contentOffset.y /
-                  event.nativeEvent.layoutMeasurement.height
+                event.nativeEvent.layoutMeasurement.height
               );
               setFullscreenIndex(index);
             }}

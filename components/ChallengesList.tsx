@@ -36,10 +36,12 @@ interface ChallengesListProps {
     activeTab?: 'created' | 'joined' | 'not-joined';
 }
 
-export default function ChallengesList({ onCreateChallenge, refreshTrigger, activeTab = 'created' }: ChallengesListProps) {
+export default function ChallengesList({ onCreateChallenge, refreshTrigger }: ChallengesListProps) {
     const [challenges, setChallenges] = useState<Challenge[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [internalTab, setInternalTab] = useState<'active' | 'ended' | 'created'>('active');
+    const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
     const { user } = useAuth();
 
     const fetchChallenges = async () => {
@@ -47,63 +49,112 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
             setLoading(true);
             setRefreshing(true);
 
-            if (!user) {
-                setChallenges([]);
-                setLoading(false);
-                setRefreshing(false);
-                return;
-            }
-
             let challengesToDisplay: Challenge[] = [];
+            let userJoinedIds = new Set<string>();
+            const now = new Date();
 
-            if (activeTab === 'created') {
-                // Fetch user's CREATED challenges
-                const response = await challengesApi.getMyChallenges();
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
-                    challengesToDisplay = Array.isArray(data) ? data : [];
-                }
-            } else if (activeTab === 'joined') {
-                // Fetch user's joined challenges
-                const response = await challengesApi.getJoinedChallenges();
-                if (response.status === 'success') {
-                    const data = response.data || [];
-                    // Extract challenge from participations wrapper if needed
-                    challengesToDisplay = Array.isArray(data)
-                        ? data.map((item: any) => item.challenge || item)
-                        : [];
-                }
-            } else if (activeTab === 'not-joined') {
-                // Fetch NOT-JOINED challenges (user hasn't created or joined)
-                const allResponse = await challengesApi.getAll('active');
-                const createdResponse = await challengesApi.getMyChallenges();
-                const joinedResponse = await challengesApi.getJoinedChallenges();
-
-                let allChallenges: Challenge[] = [];
-                if (allResponse.status === 'success') {
-                    const data = allResponse.data?.challenges || allResponse.data || [];
-                    allChallenges = Array.isArray(data) ? data : [];
-                }
-
-                const createdIds = new Set<string>();
-                if (createdResponse.status === 'success') {
-                    const created = createdResponse.data?.challenges || [];
-                    Array.isArray(created) && created.forEach((ch: any) => createdIds.add(ch.id));
-                }
-
-                const joinedIds = new Set<string>();
-                if (joinedResponse.status === 'success') {
-                    const joined = joinedResponse.data || [];
+            // Always fetch joined challenges to show badges correctly
+            if (user) {
+                const joinedRes = await challengesApi.getJoinedChallenges();
+                if (joinedRes.status === 'success') {
+                    const joined = joinedRes.data || [];
                     Array.isArray(joined) && joined.forEach((item: any) => {
                         const ch = item.challenge || item;
-                        joinedIds.add(ch.id);
+                        userJoinedIds.add(ch.id);
+                    });
+                }
+                setJoinedIds(userJoinedIds);
+            }
+
+            // For unauthenticated users: fetch ALL active challenges (public API)
+            if (!user) {
+                const response = await challengesApi.getAll('active');
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    const all = Array.isArray(data) ? data : [];
+                    // Strict filter: must be active
+                    challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) >= now);
+                }
+            } else if (internalTab === 'active') {
+                // Fetch 'active' from API but strictly filter client-side
+                const response = await challengesApi.getAll('active');
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    const all = Array.isArray(data) ? data : [];
+
+                    // Strict filter: End date must be in future
+                    challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) >= now);
+                }
+
+            } else if (internalTab === 'ended') {
+                // Fetch 'active' (which returns active + approved) because ended challenges still have 'approved' status
+                // We CANNOT rely on getAll('ended') as it returns empty
+                const response = await challengesApi.getAll('active');
+                let endedChallenges: Challenge[] = [];
+
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    const all = Array.isArray(data) ? data : [];
+                    // Filter for ended challenges
+                    endedChallenges = all.filter((ch: any) => new Date(ch.end_date) < now);
+                }
+
+                // Also include any JOINED challenges that have ended (even if not in public list)
+                if (userJoinedIds.size > 0) {
+                    const joinedRes = await challengesApi.getJoinedChallenges();
+                    if (joinedRes.status === 'success') {
+                        const joined = joinedRes.data || [];
+                        const joinedChallenges = Array.isArray(joined) ? joined.map((item: any) => item.challenge || item) : [];
+
+                        // Add joined ended challenges to the list if not already present
+                        joinedChallenges.forEach((ch: any) => {
+                            if (new Date(ch.end_date) < now) {
+                                if (!endedChallenges.some(e => e.id === ch.id)) {
+                                    endedChallenges.push(ch);
+                                }
+                            }
+                        });
+                    }
+                }
+
+                challengesToDisplay = endedChallenges;
+
+            } else if (internalTab === 'created') {
+                // Fetch user's CREATED challenges
+                // We fetch both specific 'my-challenges' endpoint AND public 'active' list
+                // This ensures we get:
+                // 1. Pending/Rejected challenges (from my-challenges)
+                // 2. Ended/Approved challenges (from active list, in case my-challenges filters them out)
+                const [myRes, publicRes] = await Promise.all([
+                    challengesApi.getMyChallenges(),
+                    challengesApi.getAll('active')
+                ]);
+
+                let myChallenges: Challenge[] = [];
+
+                if (myRes.status === 'success') {
+                    const data = myRes.data?.challenges || myRes.data || [];
+                    myChallenges = Array.isArray(data) ? data : [];
+                }
+
+                if (publicRes.status === 'success') {
+                    const data = publicRes.data?.challenges || publicRes.data || [];
+                    const allPublic = Array.isArray(data) ? data : [];
+
+                    // Find my challenges in public list
+                    const myPublic = allPublic.filter((ch: any) =>
+                        ch.organizer?.id === user?.id || ch.organizer_id === user?.id
+                    );
+
+                    // Merge unique challenges
+                    myPublic.forEach((ch: any) => {
+                        if (!myChallenges.some(m => m.id === ch.id)) {
+                            myChallenges.push(ch);
+                        }
                     });
                 }
 
-                // Filter: not created by user AND not joined by user
-                challengesToDisplay = allChallenges.filter((ch: any) =>
-                    !createdIds.has(ch.id) && !joinedIds.has(ch.id)
-                );
+                challengesToDisplay = myChallenges;
             }
 
             // Sort by creation date (newest first)
@@ -116,9 +167,10 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
             setChallenges(challengesToDisplay);
 
             if (__DEV__) {
-                console.log('📋 [ChallengesList] Fetched challenges for tab:', {
-                    tab: activeTab,
+                console.log('📋 [ChallengesList] Fetched challenges:', {
+                    tab: user ? internalTab : 'ALL (unauthenticated)',
                     count: challengesToDisplay.length,
+                    joinedCount: userJoinedIds.size,
                 });
             }
         } catch (error) {
@@ -132,7 +184,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
 
     useEffect(() => {
         fetchChallenges();
-    }, [activeTab, user, refreshTrigger]);
+    }, [internalTab, user, refreshTrigger]);
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -212,11 +264,14 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
         const participantCount = (item as any)._count?.participants || item.participants_count || 0;
         const postCount = (item as any)._count?.posts || item.posts_count || 0;
 
+        // Check if user has joined this challenge (for showing badge)
+        const isJoined = user ? joinedIds.has(item.id) : false;
+        const isEnded = internalTab === 'ended' || status.label === 'Ended';
+
         return (
             <TouchableOpacity
                 style={styles.card}
                 onPress={() => {
-                    const { router } = require('expo-router');
                     router.push({
                         pathname: '/challenges/[id]',
                         params: { id: item.id }
@@ -246,6 +301,13 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
                         </View>
                     </View>
                     <View style={styles.badgesContainer}>
+                        {/* "JOINED" badge for active tab when user has joined */}
+                        {isJoined && !isEnded && (
+                            <View style={styles.joinedBadge}>
+                                <Feather name="check-circle" size={12} color="#fff" />
+                                <Text style={styles.joinedBadgeText}>Joined</Text>
+                            </View>
+                        )}
                         <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
                             <Text style={styles.statusText}>{status.label}</Text>
                         </View>
@@ -298,44 +360,87 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, acti
         );
     };
 
-    const filteredChallenges = challenges;
+    const TABS = [
+        { key: 'active' as const, label: 'Active', icon: 'zap' as const },
+        { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
+        { key: 'created' as const, label: 'Created by Me', icon: 'user' as const },
+    ];
 
     return (
         <View style={styles.container}>
-            <View style={styles.actionsContainer}>
-                <TouchableOpacity
-                    style={styles.createButton}
-                    onPress={onCreateChallenge}
-                >
-                    <Feather name="plus" size={20} color="#fff" />
-                    <Text style={styles.createButtonText}>Create Competition</Text>
-                </TouchableOpacity>
-            </View>
+            {/* Only show Create button for authenticated users */}
+            {user && (
+                <View style={styles.actionsContainer}>
+                    <TouchableOpacity
+                        style={styles.createButton}
+                        onPress={onCreateChallenge}
+                    >
+                        <Feather name="plus" size={20} color="#fff" />
+                        <Text style={styles.createButtonText}>Create Competition</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
-            <FlatList
-                data={filteredChallenges}
-                renderItem={renderChallengeItem}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.listContent}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Feather name="award" size={48} color="#333" />
-                        <Text style={styles.emptyText}>
-                            {activeTab === 'created' ? 'No challenges created' :
-                                activeTab === 'joined' ? 'No challenges joined' :
-                                    'No challenges available'}
-                        </Text>
-                        <Text style={styles.emptySubtext}>
-                            {activeTab === 'created' ? 'Create one to get started!' :
-                                activeTab === 'joined' ? 'Join a challenge to participate!' :
-                                    'Check back later!'}
-                        </Text>
-                    </View>
-                }
-            />
+            {/* Tabs for authenticated users only */}
+            {user && (
+                <View style={styles.tabsContainer}>
+                    {TABS.map((tab) => (
+                        <TouchableOpacity
+                            key={tab.key}
+                            style={[
+                                styles.tabButton,
+                                internalTab === tab.key && styles.tabButtonActive
+                            ]}
+                            onPress={() => setInternalTab(tab.key)}
+                        >
+                            <Feather
+                                name={tab.icon}
+                                size={14}
+                                color={internalTab === tab.key ? '#fff' : '#888'}
+                            />
+                            <Text style={[
+                                styles.tabButtonText,
+                                internalTab === tab.key && styles.tabButtonTextActive
+                            ]}>
+                                {tab.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            )}
+
+            {loading && challenges.length === 0 ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#60a5fa" />
+                </View>
+            ) : (
+                <FlatList
+                    data={challenges}
+                    renderItem={renderChallengeItem}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.listContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
+                    }
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Feather name="award" size={48} color="#333" />
+                            <Text style={styles.emptyText}>
+                                {!user ? 'No competitions available' :
+                                    internalTab === 'created' ? 'No competitions created yet' :
+                                        internalTab === 'ended' ? 'No ended competitions' :
+                                            'No active competitions'}
+                            </Text>
+                            <Text style={styles.emptySubtext}>
+                                {!user ? 'Check back later for new competitions!' :
+                                    internalTab === 'created' ? 'Create one to get started!' :
+                                        internalTab === 'ended' ? 'Completed competitions will appear here' :
+                                            'Check back later or create your own!'}
+                            </Text>
+                        </View>
+                    }
+                />
+            )}
         </View>
     );
 }
@@ -368,6 +473,34 @@ const styles = StyleSheet.create({
     createButtonText: {
         color: '#fff',
         fontSize: 16,
+        fontWeight: '600',
+    },
+    tabsContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#1a1a1a',
+        gap: 8,
+    },
+    tabButton: {
+        flex: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        backgroundColor: '#1a1a1a',
+        alignItems: 'center',
+    },
+    tabButtonActive: {
+        backgroundColor: '#60a5fa',
+    },
+    tabButtonText: {
+        color: '#666',
+        fontSize: 13,
+        fontWeight: '500',
+    },
+    tabButtonTextActive: {
+        color: '#fff',
         fontWeight: '600',
     },
     listContent: {
@@ -439,6 +572,20 @@ const styles = StyleSheet.create({
         flexShrink: 0,
         marginTop: 4,
         width: 150,
+    },
+    joinedBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#10b981',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+        gap: 4,
+    },
+    joinedBadgeText: {
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: '600',
     },
     pendingBadge: {
         flexDirection: 'row',
