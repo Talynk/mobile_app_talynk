@@ -131,7 +131,7 @@ export default function ChallengePostsScreen() {
   }, [open, openIndex, posts.length]);
 
   // Preload next 3 videos when viewing in fullscreen
-  useVideoPreload(posts, showFullscreen && fullscreenIndex >= 0 ? fullscreenIndex : -1, {
+  const { getCachedUri } = useVideoPreload(posts, showFullscreen && fullscreenIndex >= 0 ? fullscreenIndex : -1, {
     preloadCount: 3,
     enabled: showFullscreen,
   });
@@ -269,7 +269,7 @@ export default function ChallengePostsScreen() {
   };
 
   // Fullscreen post viewer component
-  const FullscreenPostViewer = ({ item, index }: { item: Post; index: number }) => {
+  const FullscreenPostViewer = ({ item, index, cachedMediaUrl }: { item: Post; index: number; cachedMediaUrl?: string | null }) => {
     const videoRef = useRef<Video>(null);
     const [isLoaded, setIsLoaded] = useState(false);
     const [isMuted, setIsMuted] = useState(false); // Default: sound ON
@@ -378,7 +378,7 @@ export default function ChallengePostsScreen() {
               <Video
                 ref={videoRef}
                 source={{
-                  uri: videoUrl,
+                  uri: cachedMediaUrl || videoUrl, // CRITICAL: Use cached file if available
                   headers: {
                     'Cache-Control': 'public, max-age=31536000, immutable'
                   }
@@ -604,9 +604,13 @@ export default function ChallengePostsScreen() {
           <FlatList
             ref={fullscreenListRef}
             data={posts}
-            renderItem={({ item, index }) => (
-              <FullscreenPostViewer item={item} index={index} />
-            )}
+            renderItem={({ item, index }) => {
+              const mediaUrl = getPostMediaUrl(item);
+              const cachedUrl = getCachedUri(mediaUrl);
+              return (
+                <FullscreenPostViewer item={item} index={index} cachedMediaUrl={cachedUrl} />
+              );
+            }}
             keyExtractor={(item) => item.id}
             pagingEnabled
             scrollEventThrottle={16}

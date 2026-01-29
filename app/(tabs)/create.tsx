@@ -108,6 +108,15 @@ export default function CreatePostScreen() {
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
 
+  // Track mount state to prevent state updates after unmount (fixes crash)
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -201,7 +210,7 @@ export default function CreatePostScreen() {
       if (!isAuthenticated || authLoading) {
         return;
       }
-      
+
       try {
         setLoadingChallenges(true);
         console.log('[Create] Fetching joined challenges...');
@@ -211,7 +220,7 @@ export default function CreatePostScreen() {
           dataLength: response.data?.length,
           data: response.data
         });
-        
+
         if (response.status === 'success' && response.data && Array.isArray(response.data)) {
           const challenges = response.data
             .map((item: any) => {
@@ -221,10 +230,10 @@ export default function CreatePostScreen() {
               return item;
             })
             .filter((challenge: any) => challenge && challenge.id && challenge.name);
-          
+
           console.log('[Create] Extracted challenges:', challenges.length, challenges);
           setJoinedChallenges(challenges);
-          
+
           if (params.challengeId && challenges.some((c: any) => c.id === params.challengeId)) {
             setSelectedChallengeId(params.challengeId as string);
             console.log('[Create] Auto-selected challenge:', params.challengeId);
@@ -245,7 +254,7 @@ export default function CreatePostScreen() {
         setLoadingChallenges(false);
       }
     };
-    
+
     fetchJoinedChallenges();
   }, [isAuthenticated, authLoading, params.challengeId]);
 
@@ -257,7 +266,7 @@ export default function CreatePostScreen() {
       const timeoutId = setTimeout(() => {
         console.log('[Camera] Reconfigured for mode:', cameraMode);
       }, 100);
-      
+
       return () => clearTimeout(timeoutId);
     }
   }, [cameraMode, showCamera]);
@@ -296,7 +305,7 @@ export default function CreatePostScreen() {
       setShowCamera(true);
       setRecordingDuration(0);
       setCameraMode('video');
-      
+
     } catch (error: any) {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
@@ -326,7 +335,7 @@ export default function CreatePostScreen() {
     const parent = mainCategories.find(c => c.name === selectedGroup);
     return parent?.children || [];
   };
-  
+
   const getSelectedCategoryName = () => {
     if (!selectedCategoryId) return '';
     const foundSub = subcategories.find(cat => String(cat.id) === selectedCategoryId);
@@ -351,19 +360,19 @@ export default function CreatePostScreen() {
       if (!verifiedInfo.exists) {
         throw new Error('Image file not found after capture');
       }
-      
+
       let destPath = imageUri;
       const timestamp = Date.now();
       const fileName = `photo_${timestamp}.jpg`;
       const cacheDir = FileSystem.cacheDirectory;
-      
+
       try {
         destPath = `${cacheDir}${fileName}`;
         await FileSystem.copyAsync({
           from: imageUri,
           to: destPath,
         });
-        
+
         const copiedInfo = await FileSystem.getInfoAsync(destPath);
         if (!copiedInfo.exists || ((copiedInfo as any).size < 1000)) {
           console.warn('[Camera] Cache copy failed, using original URI');
@@ -373,15 +382,15 @@ export default function CreatePostScreen() {
         console.warn('[Camera] Could not copy to cache:', copyError);
         destPath = imageUri;
       }
-      
+
       console.log('[Camera] Image ready:', destPath);
-      
+
       setRecordedVideoUri(null);
       setEditedVideoUri(null);
       setShowCamera(false);
       setCapturedImageUri(destPath);
       showToast('Image captured successfully!');
-      
+
     } catch (processError: any) {
       console.error('Image processing error:', processError);
       Alert.alert('Processing Error', 'Failed to process captured image. Please try again.');
@@ -412,16 +421,16 @@ export default function CreatePostScreen() {
           return;
         }
       }
-      
+
       // Verify we're in picture mode before capturing
       if (cameraMode !== 'picture') {
         console.error('[Camera] Camera is not in picture mode:', cameraMode);
         Alert.alert('Error', 'Camera must be in picture mode to take photos.');
         return;
       }
-      
+
       console.log('[Camera] Taking picture with mode:', cameraMode, 'facing:', cameraFacing);
-      
+
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.9,
         base64: false,
@@ -431,7 +440,7 @@ export default function CreatePostScreen() {
         scale: 1,
         isImageMirror: cameraFacing === 'front',
       });
-      
+
       // Check if photo is null/undefined
       if (!photo) {
         console.error('[Camera] takePictureAsync returned null/undefined');
@@ -444,14 +453,14 @@ export default function CreatePostScreen() {
         Alert.alert('Error', 'Failed to capture image. Camera returned no data. Please try again.');
         return;
       }
-      
+
       console.log('[Camera] Photo captured successfully:', {
         uri: photo.uri,
         width: photo.width,
         height: photo.height,
         exif: photo.exif ? 'yes' : 'no'
       });
-      
+
       if (photo && photo.uri) {
         const fileInfo = await FileSystem.getInfoAsync(photo.uri);
         console.log('[Camera] Image file info:', {
@@ -459,17 +468,17 @@ export default function CreatePostScreen() {
           size: fileInfo.exists ? (fileInfo as any).size : 0,
           uri: photo.uri
         });
-        
+
         if (!fileInfo.exists || ((fileInfo as any).size < 1000)) {
           console.error('[Camera] Image file is too small or invalid:', (fileInfo as any).size);
-          
+
           // Attempt fallback capture
           try {
             const fallbackPhoto = await cameraRef.current?.takePictureAsync({
               quality: 0.8,
               skipProcessing: true,
             });
-            
+
             if (fallbackPhoto?.uri) {
               const fallbackInfo = await FileSystem.getInfoAsync(fallbackPhoto.uri);
               if (fallbackInfo.exists && ((fallbackInfo as any).size > 1000)) {
@@ -481,11 +490,11 @@ export default function CreatePostScreen() {
           } catch (fallbackError) {
             console.error('[Camera] Fallback capture failed:', fallbackError);
           }
-          
+
           Alert.alert('Error', 'Failed to capture valid image. Please try again.');
           return;
         }
-        
+
         await processCapturedImage(photo.uri);
       } else {
         Alert.alert('Error', 'No image data returned from camera.');
@@ -516,7 +525,7 @@ export default function CreatePostScreen() {
 
       setIsRecording(true);
       setRecordingDuration(0);
-      
+
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
@@ -536,16 +545,16 @@ export default function CreatePostScreen() {
           playThroughEarpieceAndroid: false,
           staysActiveInBackground: false,
         });
-        
+
         if (!microphonePermission?.granted) {
           console.error('Microphone permission not granted before recording');
           Alert.alert('Error', 'Microphone permission is required for audio recording.');
           setIsRecording(false);
           return;
         }
-        
+
         await new Promise(resolve => setTimeout(resolve, 200));
-        
+
         console.log('Audio mode set for recording, microphone permission verified');
       } catch (audioError) {
         console.error('Error setting audio mode:', audioError);
@@ -559,7 +568,7 @@ export default function CreatePostScreen() {
         mute: false,
         quality: 'high',
       };
-      
+
       if (Platform.OS === 'ios') {
         recordingOptions.codec = 'h264';
         recordingOptions.extension = '.mov';
@@ -575,49 +584,68 @@ export default function CreatePostScreen() {
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
       }
-      
+
       console.log('Starting recording with options:', recordingOptions);
       console.log('Audio mode set, microphone permission:', microphonePermission?.granted);
-      
+
       const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
-      
-      recordingPromise.then((video) => {
+
+      recordingPromise.then(async (video) => {
+        // Check if component is still mounted before any state updates
+        if (!isMountedRef.current) {
+          console.log('[Recording] Component unmounted, skipping state updates');
+          return;
+        }
+
         setIsRecording(false);
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
           recordingTimerRef.current = null;
         }
-        
+
         if (video && video.uri) {
           if (recordingDuration > 150) {
             Alert.alert(
               'Video Too Long',
               'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
             );
-            setShowCamera(false);
-            setRecordingDuration(0);
+            if (isMountedRef.current) {
+              setShowCamera(false);
+              setRecordingDuration(0);
+            }
             return;
           }
 
-          setRecordedVideoUri(video.uri);
-          setEditedVideoUri(null);
-          setCapturedImageUri(null);
-          
-          generateThumbnail(video.uri).then((thumb) => {
-            setThumbnailUri(thumb);
-          }).catch((thumbError) => {
+          // Generate thumbnail BEFORE closing camera (prevents crash)
+          let thumbnail: string | null = null;
+          try {
+            thumbnail = await generateThumbnail(video.uri);
+          } catch (thumbError) {
             console.error('Thumbnail generation error:', thumbError);
-          });
-          
-          setShowCamera(false);
-          setRecordingDuration(0);
+          }
+
+          // Now update state if still mounted
+          if (isMountedRef.current) {
+            setRecordedVideoUri(video.uri);
+            setEditedVideoUri(null);
+            setCapturedImageUri(null);
+            if (thumbnail) {
+              setThumbnailUri(thumbnail);
+            }
+            setShowCamera(false);
+            setRecordingDuration(0);
+          }
         } else {
           Alert.alert('Error', 'Failed to save video. Please try again.');
-          setShowCamera(false);
-          setRecordingDuration(0);
+          if (isMountedRef.current) {
+            setShowCamera(false);
+            setRecordingDuration(0);
+          }
         }
       }).catch((error: any) => {
         console.error('Recording promise error:', error);
+        if (!isMountedRef.current) return;
+
         setIsRecording(false);
         if (recordingTimerRef.current) {
           clearInterval(recordingTimerRef.current);
@@ -626,8 +654,10 @@ export default function CreatePostScreen() {
         if (error?.message && !error.message.includes('cancel')) {
           Alert.alert('Error', 'Failed to record video. Please try again.');
         }
-        setShowCamera(false);
-        setRecordingDuration(0);
+        if (isMountedRef.current) {
+          setShowCamera(false);
+          setRecordingDuration(0);
+        }
       });
     } catch (error: any) {
       console.error('Recording error:', error);
@@ -712,9 +742,9 @@ export default function CreatePostScreen() {
     if (!recordedVideoUri && !editedVideoUri && !capturedImageUri) {
       newErrors.media = 'Please record a video or take a picture';
     }
-    
+
     setErrors(newErrors);
-    
+
     return Object.keys(newErrors).length === 0;
   };
 
@@ -745,10 +775,10 @@ export default function CreatePostScreen() {
 
     const isValid = await validate();
     if (!isValid) return;
-    
+
     const rawVideoUri = editedVideoUri || recordedVideoUri;
     const imageUri = capturedImageUri;
-    
+
     if (!rawVideoUri && !imageUri) {
       Alert.alert('Error', 'No media to upload');
       return;
@@ -758,10 +788,10 @@ export default function CreatePostScreen() {
     if (!hasPermission) {
       console.log('Notification permissions not granted');
     }
-    
+
     setUploading(true);
     setUploadProgress(0);
-    
+
     try {
       const categoryName = getSelectedCategoryName();
       if (!categoryName || categoryName.trim() === '') {
@@ -784,7 +814,7 @@ export default function CreatePostScreen() {
       const isVideo = !!rawVideoUri;
       const fileName = mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
       const fileType = isVideo ? 'video/mp4' : 'image/jpeg';
-      
+
       const mediaInfo = await FileSystem.getInfoAsync(mediaUri);
       if (!mediaInfo.exists) {
         throw new Error(`Media file not found at: ${mediaUri}`);
@@ -815,7 +845,7 @@ export default function CreatePostScreen() {
         formData.append('caption', caption);
         formData.append('post_category', categoryName);
         formData.append('file', fileData as any);
-        
+
         console.log('[Upload] Creating post in challenge:', {
           challengeId: selectedChallengeId,
           title: caption.trim().substring(0, 50),
@@ -823,15 +853,15 @@ export default function CreatePostScreen() {
           fileName,
           fileType
         });
-        
+
         const xhr = new XMLHttpRequest();
         const apiUrl = `${API_BASE_URL}/api/challenges/${selectedChallengeId}/posts`;
-        
+
         xhr.open('POST', apiUrl);
         xhr.setRequestHeader('Accept', 'application/json');
-        
+
         const authToken = await AsyncStorage.getItem('talynk_token');
-        
+
         if (!authToken) {
           setUploading(false);
           setUploadProgress(0);
@@ -839,28 +869,28 @@ export default function CreatePostScreen() {
           router.push('/auth/login');
           return;
         }
-        
+
         const cleanToken = authToken.trim();
         xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
-        
+
         let lastLoggedPercent = -10;
         xhr.upload.onprogress = async (event) => {
           if (event.lengthComputable) {
             const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
             setUploadProgress(percent);
             await uploadNotificationService.showUploadProgress(percent, fileName);
-            
+
             if (percent - lastLoggedPercent >= 10 || percent === 100) {
               console.log(`Upload progress: ${percent}%`);
               lastLoggedPercent = percent;
             }
           }
         };
-        
+
         xhr.onload = async () => {
           setUploading(false);
           setUploadProgress(0);
-          
+
           if (xhr.status === 401) {
             await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
             Alert.alert(
@@ -870,34 +900,34 @@ export default function CreatePostScreen() {
             );
             return;
           }
-          
+
           try {
             const response = JSON.parse(xhr.responseText);
             console.log('[Upload] Challenge post response:', response);
-            
+
             if (response.status === 'success') {
               await uploadNotificationService.showUploadComplete(fileName);
-              
+
               // Extract media URL from response for preview
               // Backend returns: response.data.post.video_url
               const postData = response.data?.post || response.data;
               let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
-              
+
               // CRITICAL FIX: For images, we need to ensure proper URL handling
               // Verify the URL is complete and valid before setting
               if (mediaUrl) {
                 // Add cache busting for fresh image loads
-                const cacheBustUrl = mediaUrl.includes('?') 
+                const cacheBustUrl = mediaUrl.includes('?')
                   ? `${mediaUrl}&t=${Date.now()}`
                   : `${mediaUrl}?t=${Date.now()}`;
-                
+
                 console.log('[Upload] Challenge post - URL Details:', {
                   originalUrl: mediaUrl,
                   cacheBustUrl: cacheBustUrl,
                   fileType: postData?.type || 'unknown',
                   isImage: postData?.type === 'image'
                 });
-                
+
                 // Use original URL without cache bust to keep it clean
                 // But log both for debugging
                 setServerMediaUrl(mediaUrl);
@@ -909,7 +939,7 @@ export default function CreatePostScreen() {
                   allKeys: postData ? Object.keys(postData) : []
                 });
               }
-              
+
               setRecordedVideoUri(null);
               // Keep capturedImageUri for preview display
               setEditedVideoUri(null);
@@ -919,7 +949,7 @@ export default function CreatePostScreen() {
               setSelectedCategoryId('');
               setSelectedChallengeId(null);
               setIsVideoPlaying(false);
-              
+
               // Delay navigation to show the server image
               setTimeout(() => {
                 setServerMediaUrl(null);
@@ -937,31 +967,31 @@ export default function CreatePostScreen() {
             Alert.alert('Upload Error', 'Failed to create post in competition. Please try again.');
           }
         };
-        
+
         xhr.onerror = async () => {
           setUploading(false);
           setUploadProgress(0);
           await uploadNotificationService.showUploadError('Network error. Please check your connection.', fileName);
           Alert.alert('Upload Error', 'Network error. Please check your connection and try again.');
         };
-        
+
         xhr.send(formData);
         return;
       }
-      
+
       const formData = new FormData();
       const autoTitle = caption.trim().substring(0, 50) || 'My Post';
       formData.append('title', autoTitle);
       formData.append('caption', caption);
-      
+
       const categoryId = getSelectedCategoryId();
-      
+
       formData.append('post_category', categoryName);
       formData.append('category_id', categoryId);
       formData.append('status', status);
-      
+
       formData.append('file', fileData as any);
-      
+
       console.log('[Upload] FormData prepared:', {
         title: autoTitle,
         caption: caption.substring(0, 50) + '...',
@@ -971,15 +1001,15 @@ export default function CreatePostScreen() {
         fileName,
         fileType
       });
-      
+
       const xhr = new XMLHttpRequest();
       const apiUrl = `${API_BASE_URL}/api/posts`;
-      
+
       xhr.open('POST', apiUrl);
       xhr.setRequestHeader('Accept', 'application/json');
-      
+
       const authToken = await AsyncStorage.getItem('talynk_token');
-      
+
       if (!authToken) {
         setUploading(false);
         setUploadProgress(0);
@@ -987,28 +1017,28 @@ export default function CreatePostScreen() {
         router.push('/auth/login');
         return;
       }
-      
+
       const cleanToken = authToken.trim();
       xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
-      
+
       let lastLoggedPercent = -10;
       xhr.upload.onprogress = async (event) => {
         if (event.lengthComputable) {
           const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           setUploadProgress(percent);
           await uploadNotificationService.showUploadProgress(percent, fileName);
-          
+
           if (percent - lastLoggedPercent >= 10 || percent === 100) {
             console.log(`Upload progress: ${percent}%`);
             lastLoggedPercent = percent;
           }
         }
       };
-      
+
       xhr.onload = async () => {
         setUploading(false);
         setUploadProgress(0);
-        
+
         if (xhr.status === 401) {
           await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
           Alert.alert(
@@ -1023,33 +1053,33 @@ export default function CreatePostScreen() {
           );
           return;
         }
-        
+
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = JSON.parse(xhr.responseText);
             if (response.status === 'success') {
               await uploadNotificationService.showUploadComplete(fileName);
-              
+
               // Extract media URL from response for preview
               // Backend returns: response.data.post.video_url
               const postData = response.data?.post || response.data;
               let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
-              
+
               // CRITICAL FIX: For images, we need to ensure proper URL handling
               // Verify the URL is complete and valid before setting
               if (mediaUrl) {
                 // Add cache busting for fresh image loads
-                const cacheBustUrl = mediaUrl.includes('?') 
+                const cacheBustUrl = mediaUrl.includes('?')
                   ? `${mediaUrl}&t=${Date.now()}`
                   : `${mediaUrl}?t=${Date.now()}`;
-                
+
                 console.log('[Upload] Regular post - URL Details:', {
                   originalUrl: mediaUrl,
                   cacheBustUrl: cacheBustUrl,
                   fileType: postData?.type || 'unknown',
                   isImage: postData?.type === 'image'
                 });
-                
+
                 // Use original URL without cache bust to keep it clean
                 // But log both for debugging
                 setServerMediaUrl(mediaUrl);
@@ -1061,17 +1091,17 @@ export default function CreatePostScreen() {
                   allKeys: postData ? Object.keys(postData) : []
                 });
               }
-              
-              const successMessage = status === 'draft' 
+
+              const successMessage = status === 'draft'
                 ? 'Draft saved successfully! You can publish it later from your profile.'
                 : 'Post published successfully! It is now live and visible to all users.';
-              
+
               Alert.alert(
-                'Success', 
-                successMessage, 
+                'Success',
+                successMessage,
                 [
-                  { 
-                    text: 'View Profile', 
+                  {
+                    text: 'View Profile',
                     onPress: () => {
                       setServerMediaUrl(null);
                       setCapturedImageUri(null);
@@ -1080,7 +1110,7 @@ export default function CreatePostScreen() {
                   }
                 ]
               );
-              
+
               setCaption('');
               setSelectedGroup('');
               setSelectedCategoryId('');
@@ -1102,9 +1132,9 @@ export default function CreatePostScreen() {
                     { text: 'OK' }
                   ]
                 );
-            } else {
-              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
-              Alert.alert('Error', response.message || 'Failed to create post');
+              } else {
+                await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
+                Alert.alert('Error', response.message || 'Failed to create post');
               }
             }
           } catch (e) {
@@ -1122,7 +1152,7 @@ export default function CreatePostScreen() {
           Alert.alert('Error', serverMessage);
         }
       };
-      
+
       xhr.onerror = async () => {
         setUploading(false);
         setUploadProgress(0);
@@ -1136,7 +1166,7 @@ export default function CreatePostScreen() {
         await uploadNotificationService.showUploadError('Network or server error', fileName);
         Alert.alert('Error', 'Failed to create post. Network or server error. Please check your internet connection and try again.');
       };
-      
+
       xhr.ontimeout = async () => {
         setUploading(false);
         setUploadProgress(0);
@@ -1144,7 +1174,7 @@ export default function CreatePostScreen() {
         await uploadNotificationService.showUploadError('Upload timeout', fileName);
         Alert.alert('Error', 'Upload timed out. Please try again.');
       };
-      
+
       xhr.send(formData);
     } catch (error: any) {
       setUploading(false);
@@ -1168,7 +1198,7 @@ export default function CreatePostScreen() {
           shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,
         });
-        
+
         await videoRef.current.setIsMutedAsync(false);
         await videoRef.current.setVolumeAsync(1.0);
         await videoRef.current.playAsync();
@@ -1227,7 +1257,7 @@ export default function CreatePostScreen() {
   return (
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
-      
+
       {/* Camera Modal */}
       {showCamera && (
         <View
@@ -1258,7 +1288,7 @@ export default function CreatePostScreen() {
               >
                 <MaterialIcons name="close" size={24} color="#fff" />
               </TouchableOpacity>
-              
+
               {isRecording && (
                 <View style={styles.recordingIndicator}>
                   <View style={styles.recordingDot} />
@@ -1280,10 +1310,10 @@ export default function CreatePostScreen() {
                   accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
                   accessibilityRole="button"
                 >
-                  <MaterialIcons 
-                    name={cameraMode === 'video' ? 'photo-camera' : 'videocam'} 
-                    size={28} 
-                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                  <MaterialIcons
+                    name={cameraMode === 'video' ? 'photo-camera' : 'videocam'}
+                    size={28}
+                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'}
                   />
                 </TouchableOpacity>
 
@@ -1325,10 +1355,10 @@ export default function CreatePostScreen() {
                   accessibilityLabel="Flip camera"
                   accessibilityRole="button"
                 >
-                  <MaterialIcons 
-                    name="flip-camera-ios" 
-                    size={28} 
-                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'} 
+                  <MaterialIcons
+                    name="flip-camera-ios"
+                    size={28}
+                    color={isRecording ? 'rgba(255,255,255,0.3)' : '#fff'}
                   />
                 </TouchableOpacity>
               </View>
@@ -1383,19 +1413,19 @@ export default function CreatePostScreen() {
 
       {/* STAGE 2: DETAILS FORM (AFTER MEDIA CONFIRMED) */}
       {currentMediaUri && (
-        <KeyboardAvoidingView 
-          style={{ flex: 1 }} 
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 20 : 0}
         >
-        <ScrollView
-          style={[styles.scrollView, { backgroundColor: C.background }]}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-          nestedScrollEnabled={true}
-        >
+          <ScrollView
+            style={[styles.scrollView, { backgroundColor: C.background }]}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            nestedScrollEnabled={true}
+          >
             <View style={[styles.videoPreviewSection, { paddingTop: insets.top + 8 }]}>
               <View style={styles.videoPreviewContainer}>
                 {currentVideoUri ? (
@@ -1415,7 +1445,7 @@ export default function CreatePostScreen() {
                         }
                       }}
                     />
-                    
+
                     <TouchableOpacity
                       style={styles.videoPlayOverlay}
                       onPress={handlePlayPause}
@@ -1498,7 +1528,7 @@ export default function CreatePostScreen() {
                     <MaterialIcons name={currentVideoUri ? "videocam" : "photo-camera"} size={20} color="#fff" />
                     <Text style={styles.videoControlText}>{currentVideoUri ? "Re-record" : "Retake"}</Text>
                   </TouchableOpacity>
-                  
+
                   <TouchableOpacity
                     style={[styles.videoControlButton, styles.discardButton]}
                     onPress={() => {
@@ -1534,9 +1564,9 @@ export default function CreatePostScreen() {
                 </View>
                 <View style={[
                   styles.captionInputContainer,
-                  { 
+                  {
                     backgroundColor: C.inputBg,
-                    borderColor: errors.caption ? C.error : C.inputBorder 
+                    borderColor: errors.caption ? C.error : C.inputBorder
                   }
                 ]}>
                   <TextInput
@@ -1561,12 +1591,12 @@ export default function CreatePostScreen() {
                     </View>
                   )}
                 </View>
-              {errors.caption && (
-                <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>
-              )}
-            </View>
+                {errors.caption && (
+                  <Text style={[styles.errorText, { color: C.error }]}>{errors.caption}</Text>
+                )}
+              </View>
 
-            <View style={styles.inputGroup}>
+              <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
                   <Text style={[styles.label, { color: C.text }]}>Category 🏷️</Text>
                   {selectedGroup && selectedCategoryId && (
@@ -1577,197 +1607,197 @@ export default function CreatePostScreen() {
                     </View>
                   )}
                 </View>
-                
+
                 <Text style={[styles.subLabel, { color: C.textSecondary }]}>Select a group</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.pillRow}
-              >
-                {loadingCategories ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.pillRow}
+                >
+                  {loadingCategories ? (
                     [1, 2, 3, 4, 5].map((i) => (
-                    <View
-                      key={`cat-skel-${i}`}
+                      <View
+                        key={`cat-skel-${i}`}
                         style={[styles.pillSkeleton, { backgroundColor: C.inputBg, borderColor: C.inputBorder }]}
-                    />
-                  ))
-                ) : mainCategories.length > 0 ? (
-                  mainCategories.map((c) => c.name).map(
-                    (group) => (
-                      <TouchableOpacity
-                        key={group}
-                        style={[
+                      />
+                    ))
+                  ) : mainCategories.length > 0 ? (
+                    mainCategories.map((c) => c.name).map(
+                      (group) => (
+                        <TouchableOpacity
+                          key={group}
+                          style={[
                             styles.categoryPill,
                             { borderColor: C.border },
-                          selectedGroup === group && {
-                            backgroundColor: C.primary,
-                            borderColor: C.primary,
-                          },
-                        ]}
-                        onPress={() => {
-                          setSelectedGroup(group);
-                          setSelectedCategoryId('');
-                        }}
+                            selectedGroup === group && {
+                              backgroundColor: C.primary,
+                              borderColor: C.primary,
+                            },
+                          ]}
+                          onPress={() => {
+                            setSelectedGroup(group);
+                            setSelectedCategoryId('');
+                          }}
                           accessibilityLabel={`Select ${group} category`}
                           accessibilityRole="button"
                           accessibilityState={{ selected: selectedGroup === group }}
-                      >
-                        <Text
-                          style={[
+                        >
+                          <Text
+                            style={[
                               styles.categoryPillText,
                               { color: selectedGroup === group ? '#fff' : C.text },
-                          ]}
-                        >
-                          {group}
-                        </Text>
-                      </TouchableOpacity>
+                            ]}
+                          >
+                            {group}
+                          </Text>
+                        </TouchableOpacity>
+                      )
                     )
-                  )
-                ) : (
-                  <View style={{ paddingVertical: 8 }}>
-                    <Text style={{ color: C.textSecondary, fontSize: 13 }}>
-                      No categories available. Please try again later.
-                    </Text>
-                  </View>
+                  ) : (
+                    <View style={{ paddingVertical: 8 }}>
+                      <Text style={{ color: C.textSecondary, fontSize: 13 }}>
+                        No categories available. Please try again later.
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+                {errors.group && (
+                  <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
                 )}
-              </ScrollView>
-              {errors.group && (
-                <Text style={[styles.errorText, { color: C.error }]}>{errors.group}</Text>
-              )}
 
-            {selectedGroup && (
+                {selectedGroup && (
                   <View style={styles.subcategorySection}>
                     <Text style={[styles.subLabel, { color: C.textSecondary }]}>
                       Select a specific category
                     </Text>
                     <View style={styles.subcategoryGrid}>
-                  {loadingSubcategories ? (
+                      {loadingSubcategories ? (
                         [1, 2, 3, 4, 5, 6].map((i) => (
-                      <View
-                        key={`subcat-skel-${i}`}
+                          <View
+                            key={`subcat-skel-${i}`}
                             style={[styles.subcategoryPillSkeleton, { backgroundColor: C.inputBg }]}
-                      />
-                    ))
-                  ) : (
-                    (subcategories.length ? subcategories : getCategoriesForGroup()).map(
-                      (cat: { id: number; name: string }) => (
-                        <TouchableOpacity
-                          key={cat.id}
-                          style={[
+                          />
+                        ))
+                      ) : (
+                        (subcategories.length ? subcategories : getCategoriesForGroup()).map(
+                          (cat: { id: number; name: string }) => (
+                            <TouchableOpacity
+                              key={cat.id}
+                              style={[
                                 styles.subcategoryPill,
                                 { backgroundColor: C.card, borderColor: C.border },
-                            selectedCategoryId === String(cat.id) && {
+                                selectedCategoryId === String(cat.id) && {
                                   backgroundColor: C.primary + '20',
-                              borderColor: C.primary,
-                            },
-                          ]}
-                          onPress={() => setSelectedCategoryId(String(cat.id))}
+                                  borderColor: C.primary,
+                                },
+                              ]}
+                              onPress={() => setSelectedCategoryId(String(cat.id))}
                               accessibilityLabel={`Select ${cat.name}`}
                               accessibilityRole="button"
                               accessibilityState={{ selected: selectedCategoryId === String(cat.id) }}
-                        >
+                            >
                               {selectedCategoryId === String(cat.id) && (
                                 <MaterialIcons name="check-circle" size={16} color={C.primary} style={{ marginRight: 4 }} />
                               )}
-                          <Text
-                            style={[
+                              <Text
+                                style={[
                                   styles.subcategoryPillText,
                                   { color: selectedCategoryId === String(cat.id) ? C.primary : C.text },
-                            ]}
-                          >
-                            {cat.name}
-                          </Text>
-                        </TouchableOpacity>
-                      )
-                    )
-                  )}
+                                ]}
+                              >
+                                {cat.name}
+                              </Text>
+                            </TouchableOpacity>
+                          )
+                        )
+                      )}
                     </View>
-                {errors.category && (
-                  <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                    {errors.category && (
+                      <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
+                    )}
+                  </View>
                 )}
-              </View>
-            )}
 
-            {(recordedVideoUri || capturedImageUri) && (
-              <View style={styles.inputGroup}>
-                {loadingChallenges ? (
-                  <View style={{ paddingVertical: 12 }}>
-                    <ActivityIndicator size="small" color={C.primary} />
-                    <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
-                      Loading challenges...
-                    </Text>
-                  </View>
-                ) : joinedChallenges.length > 0 ? (
-                  <>
-                    <View style={styles.labelRow}>
-                      <Text style={[styles.label, { color: C.text }]}>Post to Competition 🏆</Text>
-                      <Text style={[styles.labelHint, { color: C.textSecondary }]}>
-                        Optional
-                      </Text>
-                    </View>
-                    <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 12 }]}>
-                      Select a challenge to submit this post to
-                    </Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={styles.pillRow}
-                    >
-                      <TouchableOpacity
-                        style={[
-                          styles.challengePill,
-                          { borderColor: C.border },
-                          !selectedChallengeId && {
-                            backgroundColor: C.primary,
-                            borderColor: C.primary,
-                          },
-                        ]}
-                        onPress={() => setSelectedChallengeId(null)}
-                      >
-                        <Text
-                          style={[
-                            styles.challengePillText,
-                            { color: !selectedChallengeId ? '#fff' : C.text },
-                          ]}
-                        >
-                          No Challenge
+                {(recordedVideoUri || capturedImageUri) && (
+                  <View style={styles.inputGroup}>
+                    {loadingChallenges ? (
+                      <View style={{ paddingVertical: 12 }}>
+                        <ActivityIndicator size="small" color={C.primary} />
+                        <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
+                          Loading challenges...
                         </Text>
-                      </TouchableOpacity>
-                      {joinedChallenges.map((challenge: any) => (
-                        <TouchableOpacity
-                          key={challenge.id}
-                          style={[
-                            styles.challengePill,
-                            { borderColor: C.border },
-                            selectedChallengeId === challenge.id && {
-                              backgroundColor: C.primary,
-                              borderColor: C.primary,
-                            },
-                          ]}
-                          onPress={() => setSelectedChallengeId(challenge.id)}
-                        >
-                          <Text
-                            style={[
-                              styles.challengePillText,
-                              { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {challenge.name}
+                      </View>
+                    ) : joinedChallenges.length > 0 ? (
+                      <>
+                        <View style={styles.labelRow}>
+                          <Text style={[styles.label, { color: C.text }]}>Post to Competition 🏆</Text>
+                          <Text style={[styles.labelHint, { color: C.textSecondary }]}>
+                            Optional
                           </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
-                  </>
-                ) : (
-                  <View style={{ paddingVertical: 8 }}>
-                    <Text style={[styles.subLabel, { color: C.textSecondary }]}>
-                      No challenges joined yet. Join a challenge to post in it.
-                    </Text>
+                        </View>
+                        <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 12 }]}>
+                          Select a challenge to submit this post to
+                        </Text>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.pillRow}
+                        >
+                          <TouchableOpacity
+                            style={[
+                              styles.challengePill,
+                              { borderColor: C.border },
+                              !selectedChallengeId && {
+                                backgroundColor: C.primary,
+                                borderColor: C.primary,
+                              },
+                            ]}
+                            onPress={() => setSelectedChallengeId(null)}
+                          >
+                            <Text
+                              style={[
+                                styles.challengePillText,
+                                { color: !selectedChallengeId ? '#fff' : C.text },
+                              ]}
+                            >
+                              No Challenge
+                            </Text>
+                          </TouchableOpacity>
+                          {joinedChallenges.map((challenge: any) => (
+                            <TouchableOpacity
+                              key={challenge.id}
+                              style={[
+                                styles.challengePill,
+                                { borderColor: C.border },
+                                selectedChallengeId === challenge.id && {
+                                  backgroundColor: C.primary,
+                                  borderColor: C.primary,
+                                },
+                              ]}
+                              onPress={() => setSelectedChallengeId(challenge.id)}
+                            >
+                              <Text
+                                style={[
+                                  styles.challengePillText,
+                                  { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {challenge.name}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </>
+                    ) : (
+                      <View style={{ paddingVertical: 8 }}>
+                        <Text style={[styles.subLabel, { color: C.textSecondary }]}>
+                          No challenges joined yet. Join a challenge to post in it.
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 )}
-              </View>
-            )}
               </View>
 
               <TouchableOpacity
@@ -1782,10 +1812,10 @@ export default function CreatePostScreen() {
                   <Text style={[styles.warningBannerTitle, { color: C.warning }]}>
                     Authenticity Required
                   </Text>
-                  <MaterialIcons 
-                    name={accordionOpen ? 'expand-less' : 'expand-more'} 
-                    size={20} 
-                    color={C.warning} 
+                  <MaterialIcons
+                    name={accordionOpen ? 'expand-less' : 'expand-more'}
+                    size={20}
+                    color={C.warning}
                   />
                 </View>
                 {accordionOpen && (
@@ -1805,19 +1835,19 @@ export default function CreatePostScreen() {
                       Uploading your talent...
                     </Text>
                   </View>
-                <View style={styles.uploadProgressBarContainer}>
-                  <View
-                    style={[
-                      styles.uploadProgressBar,
+                  <View style={styles.uploadProgressBarContainer}>
+                    <View
+                      style={[
+                        styles.uploadProgressBar,
                         { width: `${Math.min(Math.max(uploadProgress, 0), 100)}%`, backgroundColor: C.primary },
-                    ]}
-                  />
-                </View>
+                      ]}
+                    />
+                  </View>
                   <Text style={[styles.uploadProgressPercent, { color: C.primary }]}>
                     {Math.min(Math.round(uploadProgress), 100)}%
-                </Text>
-              </View>
-            )}
+                  </Text>
+                </View>
+              )}
 
               {selectedChallengeId ? (
                 <View style={styles.quickActionButtonsContainer}>
@@ -1974,8 +2004,8 @@ export default function CreatePostScreen() {
               )}
 
               <View style={{ height: insets.bottom + 20 }} />
-          </View>
-        </ScrollView>
+            </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       )}
 

@@ -44,7 +44,6 @@ const CONFIGURED_COUNTRIES = [
 ];
 
 export default function ExploreScreen() {
-  const [activeTab, setActiveTab] = useState<'grid' | 'search'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Grid state
@@ -63,6 +62,7 @@ export default function ExploreScreen() {
   // Search results
   const [searchUsers, setSearchUsers] = useState<User[]>([]);
   const [searchPosts, setSearchPosts] = useState<Post[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -85,9 +85,9 @@ export default function ExploreScreen() {
     return displayMap[name] || name;
   };
 
-  // Load posts when filters change (only for grid, not feed)
+  // Load posts when filters change (only if not searching)
   useEffect(() => {
-    if (activeTab === 'grid') {
+    if (!searchQuery) {
       // Immediately clear posts and show loading
       setGridPosts([]);
       setGridLoading(true);
@@ -102,7 +102,7 @@ export default function ExploreScreen() {
         setGridLoading(false);
       });
     }
-  }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, activeTab]);
+  }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, searchQuery]);
 
   useEffect(() => {
     if (searchQuery.trim().length > 0) {
@@ -110,6 +110,7 @@ export default function ExploreScreen() {
     } else {
       setSearchUsers([]);
       setSearchPosts([]);
+      setIsSearching(false);
     }
   }, [searchQuery]);
 
@@ -145,77 +146,82 @@ export default function ExploreScreen() {
   const loadInitialContent = async () => {
     setLoading(true);
     try {
-      const [categoriesRes, postsRes] = await Promise.all([
+      const [categoriesRes] = await Promise.all([
         categoriesApi.getAll(),
-        postsApi.getAll(1, 50),
       ]);
 
-      if (categoriesRes.status === 'success') {
-        setCategories(categoriesRes.data.categories || []);
+      if (categoriesRes.status === 'success' && (categoriesRes.data as any)?.categories) {
+        const rawCats = (categoriesRes.data as any).categories;
+        // Transform to hierarchical structure if needed, or use as is if already hierarchical
+        // Assuming API returns flat list or hierarchical. Let's ensure we have a good structure.
+        // For now, just setting them. logic for hierarchy is in render.
+        setCategories(rawCats);
       }
 
-      if (postsRes.status === 'success') {
-        const data = postsRes.data.posts || postsRes.data || [];
-        const postsList = Array.isArray(data) ? data : [];
-        setGridPosts(applyClientFilters(postsList));
-      }
+      // Initial grid posts are loaded by the useEffect when filters change (which includes initial load)
+      // if searchQuery is empty.
     } catch (error) {
-      // Silently handle errors
+      console.error('Error loading explore content:', error);
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
   const loadGridPosts = async () => {
     try {
-      let posts: Post[] = [];
+      // If we have filters, we might want to use a specific API endpoint or just client-side filter if dataset is small.
+      // But for scalability, we should use API.
+      // However, the current API seems to support basic filtering.
+      // Let's try to use getAll with some params if possible, or just client side for now as per previous implementation logic
+      // The previous implementation used client-side filtering on the initial fetch?
+      // Wait, applyClientFilters was used. Let's stick to fetching fresh data.
 
-      // Fetch all posts using the posts API (not search API)
-      // The posts API is designed to return all active posts
-      const response = await postsApi.getAll(1, 100);
-
-      if (response.status === 'success' && response.data) {
-        const data = response.data.posts || response.data || [];
-        const allPosts = Array.isArray(data) ? data : [];
-
-        // Apply client-side filters using the existing applyClientFilters function
-        // This handles category (main/sub) and country filtering
-        posts = applyClientFilters(allPosts);
+      const response = await postsApi.getAll(1, 50);
+      if (response.status === 'success') {
+        const allPosts = response.data.posts || [];
+        const filtered = applyClientFilters(allPosts);
+        setGridPosts(filtered);
       }
-
-      // Update state immediately with filtered posts
-      setGridPosts(posts);
     } catch (error) {
-      // Silently handle errors
-      setGridPosts([]);
+      console.error('Error loading grid posts:', error);
     } finally {
       setGridLoading(false);
     }
   };
 
   const performSearch = async () => {
-    try {
-      const response = await searchApi.search(searchQuery, {
-        type: 'all',
-        page: 1,
-        limit: 20,
-      });
+    if (!searchQuery.trim()) return;
 
-      if (response.status === 'success') {
-        setSearchUsers(response.data.users || []);
-        setSearchPosts(response.data.posts || []);
+    setIsSearching(true);
+    try {
+      const [usersRes, postsRes] = await Promise.all([
+        searchApi.search(searchQuery, { type: 'users' }),
+        searchApi.search(searchQuery, { type: 'posts' }),
+      ]);
+
+      if (usersRes.status === 'success') {
+        setSearchUsers(usersRes.data.users || []);
+      }
+
+      if (postsRes.status === 'success') {
+        setSearchPosts(postsRes.data.posts || []);
       }
     } catch (error) {
-      // Silently handle search errors
-      setSearchUsers([]);
-      setSearchPosts([]);
+      console.error('Search error:', error);
+    } finally {
+      setIsSearching(false);
     }
   };
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    loadInitialContent();
+    if (searchQuery.length > 0) {
+      await performSearch();
+    } else {
+      await loadInitialContent();
+      await loadGridPosts(); // Reload grid posts after initial content
+    }
+    setRefreshing(false);
   };
 
   const handleFollow = async (userId: string) => {
@@ -348,58 +354,33 @@ export default function ExploreScreen() {
       <View style={styles.searchUserInfo}>
         <Text style={styles.searchUserName}>{item.name || item.username}</Text>
         <Text style={styles.searchUserHandle}>@{item.username}</Text>
+        <Text style={styles.searchUserFollowers}>
+          {item.followers_count || 0} followers
+        </Text>
       </View>
-      {user && user.id !== item.id && (
-        <TouchableOpacity
-          style={[
-            styles.searchFollowButton,
-            followedUsers.has(item.id) && styles.searchFollowingButton,
-          ]}
-          onPress={() => handleFollow(item.id)}
-        >
-          <Text
-            style={[
-              styles.searchFollowButtonText,
-              followedUsers.has(item.id) && styles.searchFollowingButtonText,
-            ]}
-          >
-            {followedUsers.has(item.id) ? 'Following' : 'Follow'}
-          </Text>
-        </TouchableOpacity>
-      )}
+      <Feather name="chevron-right" size={20} color="#666" />
     </TouchableOpacity>
   );
 
-  const SearchPostCard = ({ item, index }: { item: Post; index: number }) => {
-    const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
-    const mediaUrl = getPostMediaUrl(item) || '';
+  const SearchPostRow = ({ item }: { item: Post }) => {
+    const mediaUrl = getPostMediaUrl(item);
+    const isVideo = item.type === 'video' || (mediaUrl && mediaUrl.includes('.mp4'));
     const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const isVideo =
-      item.type === 'video' ||
-      (mediaUrl !== null &&
-        mediaUrl !== '' &&
-        (mediaUrl.toLowerCase().includes('.mp4') ||
-          mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm')));
 
     // Use video thumbnail hook for videos
     const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+      isVideo && mediaUrl ? mediaUrl : null,
       fallbackImageUrl || '',
       1000
     );
 
-    // Determine the final thumbnail URL to display
-    const staticThumbnailUrl = isVideo
+    const thumbnailUrl = isVideo
       ? (generatedThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
 
-    // Check if we're still loading the thumbnail
-    const isLoadingThumbnail = isVideo && !staticThumbnailUrl && videoUrl;
-
     return (
       <TouchableOpacity
-        style={styles.gridCard}
+        style={styles.searchPostRow}
         onPress={() =>
           router.push({
             pathname: '/post/[id]',
@@ -407,32 +388,38 @@ export default function ExploreScreen() {
           })
         }
       >
-        {isLoadingThumbnail ? (
-          <View style={[styles.gridMedia, styles.gridNoMedia]}>
-            <ActivityIndicator size="small" color="#60a5fa" />
-            <MaterialIcons
-              name="video-library"
-              size={28}
-              color="#444"
-              style={{ marginTop: 8 }}
-            />
-          </View>
-        ) : staticThumbnailUrl ? (
-          <Image
-            source={{ uri: staticThumbnailUrl }}
-            style={styles.gridMedia}
-            resizeMode="cover"
-          />
+        {thumbnailUrl ? (
+          <Image source={{ uri: thumbnailUrl }} style={styles.searchPostImage} />
         ) : (
-          <View style={[styles.gridMedia, styles.gridNoMedia]}>
-            <MaterialIcons name={isVideo ? 'video-library' : 'image'} size={28} color="#444" />
+          <View style={[styles.searchPostImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+            <MaterialIcons name={isVideo ? "video-library" : "image"} size={24} color="#666" />
           </View>
         )}
-        {isVideo && (
-          <View style={styles.gridPlayIcon}>
-            <Feather name="play" size={16} color="#fff" />
+        <View style={styles.searchPostInfo}>
+          <Text style={styles.searchPostTitle} numberOfLines={2}>
+            {item.title || item.description || 'Untitled Post'}
+          </Text>
+          <View style={styles.searchPostMeta}>
+            <Avatar
+              user={
+                item.user
+                  ? {
+                    ...item.user,
+                    profile_picture: item.user.profile_picture || undefined,
+                  }
+                  : undefined
+              }
+              size={20}
+            />
+            <Text style={styles.searchPostAuthor}>@{item.user?.username}</Text>
           </View>
-        )}
+          <View style={styles.searchPostStats}>
+            <Feather name="heart" size={12} color="#999" />
+            <Text style={styles.searchPostStatText}>{item.likes || 0}</Text>
+            <Feather name="message-circle" size={12} color="#999" style={{ marginLeft: 12 }} />
+            <Text style={styles.searchPostStatText}>{item.comment_count || 0}</Text>
+          </View>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -449,63 +436,69 @@ export default function ExploreScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        {activeTab === 'search' ? (
-          <View style={styles.searchBar}>
-            <Feather name="search" size={20} color="#666" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search users, videos..."
-              placeholderTextColor="#666"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              returnKeyType="search"
-              onSubmitEditing={() => {
-                setActiveTab('search');
-                performSearch();
+        <View style={styles.searchBar}>
+          <Feather name="search" size={20} color="#666" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search users, videos..."
+            placeholderTextColor="#666"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            returnKeyType="search"
+            onSubmitEditing={performSearch}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setSearchQuery('');
+                Keyboard.dismiss();
               }}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => {
-                  setSearchQuery('');
-                  Keyboard.dismiss();
-                }}
-              >
-                <Feather name="x" size={18} color="#666" />
-              </TouchableOpacity>
-            )}
-          </View>
-        ) : (
-          <View style={{ height: 44 }} />
-        )}
+            >
+              <Feather name="x" size={18} color="#666" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
-      {/* Tab buttons */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'grid' && styles.tabButtonActive]}
-          onPress={() => {
-            setActiveTab('grid');
-            setSearchQuery('');
-          }}
+      {/* Content Area */}
+      {searchQuery.length > 0 ? (
+        // SEARCH RESULTS VIEW
+        <ScrollView
+          style={styles.searchResults}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
-          <Text style={[styles.tabText, activeTab === 'grid' && styles.tabTextActive]}>
-            Explore
-          </Text>
-        </TouchableOpacity>
+          {isSearching && (
+            <ActivityIndicator size="small" color="#60a5fa" style={{ marginVertical: 20 }} />
+          )}
 
-        <TouchableOpacity
-          style={[styles.tabButton, activeTab === 'search' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('search')}
-        >
-          <Text style={[styles.tabText, activeTab === 'search' && styles.tabTextActive]}>
-            Search
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {!isSearching && searchUsers.length === 0 && searchPosts.length === 0 && (
+            <View style={styles.emptySearch}>
+              <Feather name="search" size={48} color="#333" />
+              <Text style={styles.emptySearchText}>No results found for "{searchQuery}"</Text>
+            </View>
+          )}
 
-      {/* GRID TAB - Explore with filters */}
-      {activeTab === 'grid' && (
+          {searchUsers.length > 0 && (
+            <View style={styles.resultSection}>
+              <Text style={styles.sectionTitle}>Users</Text>
+              {searchUsers.map(user => (
+                <SearchUserRow key={user.id} item={user} />
+              ))}
+            </View>
+          )}
+
+          {searchPosts.length > 0 && (
+            <View style={styles.resultSection}>
+              <Text style={styles.sectionTitle}>Posts</Text>
+              {searchPosts.map(post => (
+                <SearchPostRow key={post.id} item={post} />
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      ) : (
+        // GRID VIEW WITH FILTERS
         <ScrollView
           ref={gridScrollViewRef}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -550,6 +543,7 @@ export default function ExploreScreen() {
                   All
                 </Text>
               </TouchableOpacity>
+
               {categories.map((cat) => (
                 <TouchableOpacity
                   key={cat.id}
@@ -568,14 +562,16 @@ export default function ExploreScreen() {
                       selectedMainCategoryId === cat.id && styles.categoryPillTextActive,
                     ]}
                   >
-                    {cat.name}
+                    {getCategoryDisplayName(cat.name)}
                   </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
+          </View>
 
-            {/* Subcategory filter (only when a main category is selected) */}
-            {!!selectedMainCategoryId && (
+          {/* Subcategories (if main selected) */}
+          {selectedMainCategoryId && (
+            <View style={styles.subCategorySection}>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -583,111 +579,75 @@ export default function ExploreScreen() {
               >
                 <TouchableOpacity
                   style={[
-                    styles.categoryPill,
-                    !selectedSubCategoryId && styles.categoryPillActive,
+                    styles.subCategoryPill,
+                    !selectedSubCategoryId && styles.subCategoryPillActive,
                   ]}
                   onPress={() => setSelectedSubCategoryId(null)}
                 >
                   <Text
                     style={[
-                      styles.categoryPillText,
-                      !selectedSubCategoryId && styles.categoryPillTextActive,
+                      styles.subCategoryPillText,
+                      !selectedSubCategoryId && styles.subCategoryPillTextActive,
                     ]}
                   >
-                    All in category
+                    All {getCategoryDisplayName(categories.find(c => c.id === selectedMainCategoryId)?.name || '')}
                   </Text>
                 </TouchableOpacity>
-                {(categories.find((c: any) => c.id === selectedMainCategoryId)?.children || []).map((sub: any) => (
-                  <TouchableOpacity
-                    key={sub.id}
-                    style={[
-                      styles.categoryPill,
-                      selectedSubCategoryId === sub.id && styles.categoryPillActive,
-                    ]}
-                    onPress={() => setSelectedSubCategoryId(sub.id)}
-                  >
-                    <Text
-                      style={[
-                        styles.categoryPillText,
-                        selectedSubCategoryId === sub.id && styles.categoryPillTextActive,
-                      ]}
-                    >
-                      {getCategoryDisplayName(sub.name)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-          </View>
 
-          {/* Grid */}
+                {categories
+                  .find((c) => c.id === selectedMainCategoryId)
+                  ?.children?.map((sub: any) => (
+                    <TouchableOpacity
+                      key={sub.id}
+                      style={[
+                        styles.subCategoryPill,
+                        selectedSubCategoryId === sub.id && styles.subCategoryPillActive,
+                      ]}
+                      onPress={() => setSelectedSubCategoryId(sub.id)}
+                    >
+                      <Text
+                        style={[
+                          styles.subCategoryPillText,
+                          selectedSubCategoryId === sub.id && styles.subCategoryPillTextActive,
+                        ]}
+                      >
+                        {sub.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Grid Content */}
           {gridLoading ? (
-            <View style={styles.gridLoadingContainer}>
+            <View style={{ padding: 40 }}>
               <ActivityIndicator size="large" color="#60a5fa" />
             </View>
-          ) : (
-            <FlatList
-              data={gridPosts}
-              renderItem={({ item, index }) => (
-                <GridPostCard item={item} index={index} />
-              )}
-              keyExtractor={(item) => item.id}
-              numColumns={3}
-              scrollEnabled={false}
-              contentContainerStyle={styles.gridContent}
-            />
-          )}
-        </ScrollView>
-      )}
-
-      {/* SEARCH TAB */}
-      {activeTab === 'search' && (
-        <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
-          {searchQuery.length > 0 ? (
-            <>
-              {/* Users */}
-              {searchUsers.length > 0 && (
-                <View style={styles.searchSection}>
-                  <Text style={styles.searchSectionTitle}>Users</Text>
-                  <FlatList
-                    data={searchUsers}
-                    renderItem={({ item }) => <SearchUserRow item={item} />}
-                    keyExtractor={(item) => item.id}
-                    scrollEnabled={false}
-                  />
-                </View>
-              )}
-
-              {/* Posts */}
-              {searchPosts.length > 0 && (
-                <View style={styles.searchSection}>
-                  <Text style={styles.searchSectionTitle}>Posts</Text>
-                  <FlatList
-                    data={searchPosts}
-                    renderItem={({ item, index }) => (
-                      <SearchPostCard item={item} index={index} />
-                    )}
-                    keyExtractor={(item) => item.id}
-                    numColumns={3}
-                    scrollEnabled={false}
-                    contentContainerStyle={styles.gridContent}
-                  />
-                </View>
-              )}
-
-              {searchUsers.length === 0 && searchPosts.length === 0 && (
-                <View style={styles.emptyContainer}>
-                  <Feather name="search" size={48} color="#666" />
-                  <Text style={styles.emptyText}>No results found</Text>
-                </View>
-              )}
-            </>
-          ) : (
+          ) : gridPosts.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Feather name="search" size={48} color="#666" />
-              <Text style={styles.emptyText}>Start searching</Text>
+              <MaterialIcons name="grid-off" size={48} color="#333" />
+              <Text style={styles.emptyText}>No posts found</Text>
+              <TouchableOpacity
+                style={styles.resetButton}
+                onPress={() => {
+                  setSelectedMainCategoryId(null);
+                  setSelectedSubCategoryId(null);
+                  setSelectedCountryId(null);
+                }}
+              >
+                <Text style={styles.resetButtonText}>Clear Filters</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.gridContainer}>
+              {gridPosts.map((item, index) => (
+                <GridPostCard key={item.id} item={item} index={index} />
+              ))}
             </View>
           )}
+
+          <View style={{ height: 100 }} />
         </ScrollView>
       )}
 
@@ -1171,5 +1131,130 @@ const styles = StyleSheet.create({
   countryItemTextActive: {
     color: '#60a5fa',
     fontWeight: '600',
+  },
+  resetButton: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  resetButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  gridContainer: {
+    padding: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  searchPostRow: {
+    flexDirection: 'row',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  searchPostImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#333',
+  },
+  searchPostInfo: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: 'center',
+  },
+  searchPostTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  searchPostMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  searchPostAuthor: {
+    color: '#999',
+    fontSize: 12,
+    marginLeft: 6,
+  },
+  searchPostStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  searchPostStatText: {
+    color: '#999',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  modalSearch: {
+    backgroundColor: '#252525',
+    margin: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    color: '#fff',
+    fontSize: 16,
+  },
+  subCategorySection: {
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  subCategoryPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#222',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  subCategoryPillActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.1)',
+    borderColor: '#60a5fa',
+  },
+  subCategoryPillText: {
+    color: '#999',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  subCategoryPillTextActive: {
+    color: '#60a5fa',
+    fontWeight: '600',
+  },
+  searchResults: {
+    flex: 1,
+  },
+  emptySearch: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100,
+  },
+  emptySearchText: {
+    marginTop: 16,
+    color: '#666',
+    fontSize: 16,
+  },
+  resultSection: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    marginTop: 16,
+  },
+  searchUserFollowers: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 2,
   },
 });

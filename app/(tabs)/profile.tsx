@@ -32,6 +32,8 @@ import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { getFileUrl, getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { getCachedVideoUri } from '@/lib/utils/video-cache';
+import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -70,6 +72,16 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
   const staticThumbnailUrl = isVideo
     ? (generatedThumbnail || fallbackImageUrl)
     : getPostMediaUrl(post) || '';
+
+  const [cachedVideoUrl, setCachedVideoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isVideo && videoUrl) {
+      getCachedVideoUri(videoUrl).then(uri => {
+        if (uri) setCachedVideoUrl(uri);
+      });
+    }
+  }, [isVideo, videoUrl]);
 
   useEffect(() => {
     if (isActive && isVideo && videoUrl) {
@@ -132,7 +144,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       {showVideo && isVideo && videoUrl && isActive && (
         <Video
           ref={videoRef}
-          source={{ uri: videoUrl }}
+          source={{ uri: cachedVideoUrl || videoUrl }}
           style={[styles.postMedia, styles.teaserVideo]}
           resizeMode={ResizeMode.COVER}
           shouldPlay={isActive}
@@ -293,6 +305,14 @@ export default function ProfileScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
+  const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
+
+  // Preload videos based on scroll position (dynamic preloading)
+  useVideoPreload(posts, firstVisibleIndex, {
+    preloadCount: 6, // Preload 2 rows ahead (3 cols x 2 rows = 6 items)
+    direction: 'forward',
+    enabled: activeTab === 'active',
+  });
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -1059,160 +1079,168 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <FlatList
+        data={posts}
+        renderItem={renderPost}
+        keyExtractor={(item) => item.id}
+        numColumns={3}
+        contentContainerStyle={styles.postsGrid}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
         }
-      >
-        {/* Profile Info */}
-        <View style={styles.profileSection}>
-          <Avatar
-            user={profile}
-            size={100}
-            style={styles.avatar}
-          />
-          <Text style={styles.username}>@{profile.username}</Text>
-          {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
-
-          {/* Stats */}
-          <View style={styles.statsContainer}>
-            <TouchableOpacity style={styles.stat}>
-              <Text style={styles.statValue}>{profile.posts_count || 0}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.stat}
-              onPress={() => router.push({
-                pathname: '/followers/[id]',
-                params: { id: profile.id, type: 'followers' }
-              })}
-            >
-              <Text style={styles.statValue}>{profile.followers_count || 0}</Text>
-              <Text style={styles.statLabel}>Followers</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.stat}
-              onPress={() => router.push({
-                pathname: '/followers/[id]',
-                params: { id: profile.id, type: 'following' }
-              })}
-            >
-              <Text style={styles.statValue}>{profile.following_count || 0}</Text>
-              <Text style={styles.statLabel}>Following</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.stat}
-              onPress={async () => {
-                setLikesModalVisible(true);
-                setLoadingLikes(true);
-                try {
-                  // Fetch likes for all posts and combine
-                  const allLikers = new Map<string, any>();
-                  for (const post of posts) {
-                    try {
-                      const response = await likesApi.getLikers(post.id, 1, 50);
-                      if (response.status === 'success' && response.data?.users) {
-                        response.data.users.forEach((user: any) => {
-                          if (!allLikers.has(user.id)) {
-                            allLikers.set(user.id, {
-                              ...user,
-                              likedPosts: [post.id],
-                              totalLikesGiven: 1,
-                            });
-                          } else {
-                            const existing = allLikers.get(user.id);
-                            if (!existing.likedPosts.includes(post.id)) {
-                              existing.likedPosts.push(post.id);
-                              existing.totalLikesGiven += 1;
-                            }
-                          }
-                        });
-                      }
-                    } catch (error) {
-                      console.error('Error fetching likers for post:', post.id, error);
-                    }
-                  }
-                  setLikesData(Array.from(allLikers.values()));
-                } catch (error) {
-                  console.error('Error loading likes data:', error);
-                  Alert.alert('Error', 'Failed to load likes data');
-                } finally {
-                  setLoadingLikes(false);
-                }
-              }}
-            >
-              <Text style={styles.statValue}>{totalLikes}</Text>
-              <Text style={styles.statLabel}>Likes</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Edit Profile Button */}
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => setEditModalVisible(true)}
-          >
-            <Text style={styles.editButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tabs */}
-        <View style={styles.tabsContainer}>
-          {PROFILE_TABS.map((tab) => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[
-                styles.tab,
-                activeTab === tab.key && styles.tabActive
-              ]}
-              onPress={() => {
-                if (__DEV__) {
-                  console.log('🔄 [Tab Change] Switching to tab:', {
-                    from: activeTab,
-                    to: tab.key,
-                  });
-                }
-                setActiveTab(tab.key);
-              }}
-            >
-              <MaterialIcons
-                name={tab.icon as any}
-                size={16}
-                color={activeTab === tab.key ? '#60a5fa' : '#666'}
-              />
-              <Text style={[
-                styles.tabText,
-                activeTab === tab.key && styles.tabTextActive
-              ]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Posts Grid */}
-        <FlatList
-          data={posts}
-          renderItem={renderPost}
-          keyExtractor={(item) => item.id}
-          numColumns={3}
-          scrollEnabled={false}
-          contentContainerStyle={styles.postsGrid}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <MaterialIcons name="video-library" size={48} color="#666" />
-              <Text style={styles.emptyText}>No {activeTab} posts</Text>
-              {activeTab === 'active' && (
-                <TouchableOpacity
-                  style={styles.createButton}
-                  onPress={() => router.push('/(tabs)/create')}
-                >
-                  <Text style={styles.createButtonText}>Create your first post</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+        onViewableItemsChanged={useRef(({ viewableItems }: any) => {
+          if (viewableItems && viewableItems.length > 0) {
+            // Get the first visible item index
+            const firstIndex = viewableItems[0].index || 0;
+            setFirstVisibleIndex(firstIndex);
           }
-        />
-      </ScrollView>
+        }).current}
+        viewabilityConfig={{
+          itemVisiblePercentThreshold: 10
+        }}
+        ListHeaderComponent={
+          <>
+            {/* Profile Info */}
+            <View style={styles.profileSection}>
+              <Avatar
+                user={profile}
+                size={100}
+                style={styles.avatar}
+              />
+              <Text style={styles.username}>@{profile.username}</Text>
+              {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
+
+              {/* Stats */}
+              <View style={styles.statsContainer}>
+                <TouchableOpacity style={styles.stat}>
+                  <Text style={styles.statValue}>{profile.posts_count || 0}</Text>
+                  <Text style={styles.statLabel}>Posts</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stat}
+                  onPress={() => router.push({
+                    pathname: '/followers/[id]',
+                    params: { id: profile.id, type: 'followers' }
+                  })}
+                >
+                  <Text style={styles.statValue}>{profile.followers_count || 0}</Text>
+                  <Text style={styles.statLabel}>Followers</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stat}
+                  onPress={() => router.push({
+                    pathname: '/followers/[id]',
+                    params: { id: profile.id, type: 'following' }
+                  })}
+                >
+                  <Text style={styles.statValue}>{profile.following_count || 0}</Text>
+                  <Text style={styles.statLabel}>Following</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stat}
+                  onPress={async () => {
+                    setLikesModalVisible(true);
+                    setLoadingLikes(true);
+                    try {
+                      // Fetch likes for all posts and combine
+                      const allLikers = new Map<string, any>();
+                      for (const post of posts) {
+                        try {
+                          const response = await likesApi.getLikers(post.id, 1, 50);
+                          if (response.status === 'success' && response.data?.users) {
+                            response.data.users.forEach((user: any) => {
+                              if (!allLikers.has(user.id)) {
+                                allLikers.set(user.id, {
+                                  ...user,
+                                  likedPosts: [post.id],
+                                  totalLikesGiven: 1,
+                                });
+                              } else {
+                                const existing = allLikers.get(user.id);
+                                if (!existing.likedPosts.includes(post.id)) {
+                                  existing.likedPosts.push(post.id);
+                                  existing.totalLikesGiven += 1;
+                                }
+                              }
+                            });
+                          }
+                        } catch (error) {
+                          console.error('Error fetching likers for post:', post.id, error);
+                        }
+                      }
+                      setLikesData(Array.from(allLikers.values()));
+                    } catch (error) {
+                      console.error('Error loading likes data:', error);
+                      Alert.alert('Error', 'Failed to load likes data');
+                    } finally {
+                      setLoadingLikes(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.statValue}>{totalLikes}</Text>
+                  <Text style={styles.statLabel}>Likes</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Edit Profile Button */}
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={() => setEditModalVisible(true)}
+              >
+                <Text style={styles.editButtonText}>Edit Profile</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Tabs */}
+            <View style={styles.tabsContainer}>
+              {PROFILE_TABS.map((tab) => (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={[
+                    styles.tab,
+                    activeTab === tab.key && styles.tabActive
+                  ]}
+                  onPress={() => {
+                    if (__DEV__) {
+                      console.log('🔄 [Tab Change] Switching to tab:', {
+                        from: activeTab,
+                        to: tab.key,
+                      });
+                    }
+                    setActiveTab(tab.key);
+                  }}
+                >
+                  <MaterialIcons
+                    name={tab.icon as any}
+                    size={16}
+                    color={activeTab === tab.key ? '#60a5fa' : '#666'}
+                  />
+                  <Text style={[
+                    styles.tabText,
+                    activeTab === tab.key && styles.tabTextActive
+                  ]}>
+                    {tab.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="video-library" size={48} color="#666" />
+            <Text style={styles.emptyText}>No {activeTab} posts</Text>
+            {activeTab === 'active' && (
+              <TouchableOpacity
+                style={styles.createButton}
+                onPress={() => router.push('/(tabs)/create')}
+              >
+                <Text style={styles.createButtonText}>Create your first post</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        }
+      />
 
       {/* Menu Modal */}
       <Modal visible={menuVisible} transparent animationType="fade">

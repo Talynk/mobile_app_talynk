@@ -1,27 +1,27 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
 import { Post } from '@/types';
+import { getCachedVideoUri, isVideoCached, preloadVideos, initVideoCache } from '@/lib/utils/video-cache';
 
 interface PreloadConfig {
-  preloadCount?: number; // Number of videos to preload ahead (default: 3)
+  preloadCount?: number; // Number of videos to preload ahead (default: 8)
+  backwardCount?: number; // Number of videos to keep cached behind (default: 3)
   enabled?: boolean; // Whether preloading is enabled (default: true)
-  chunkSize?: number; // Size of video chunk to preload in bytes (default: 800KB)
-  direction?: 'forward' | 'backward' | 'both'; // Preload direction (default: 'forward')
+  direction?: 'forward' | 'backward' | 'both'; // Preload direction (default: 'both')
 }
 
-interface PreloadedVideo {
-  url: string;
-  blob: Blob;
-  timestamp: number;
+interface CachedVideoMap {
+  [remoteUrl: string]: string; // remoteUrl -> localPath
 }
 
 /**
- * Hook to aggressively preload videos ahead of the current playing video
- * Downloads the first chunk of video data (default 800KB) for instant playback
+ * Hook for aggressive video preloading with FileSystem caching
+ * Downloads entire videos to local storage for instant playback
  * 
  * @param posts - Array of posts
  * @param activeIndex - Current active video index
  * @param config - Preload configuration
+ * @returns Object with cached URLs mapping and cache status
  */
 export const useVideoPreload = (
   posts: Post[],
@@ -29,248 +29,154 @@ export const useVideoPreload = (
   config: PreloadConfig = {}
 ) => {
   const {
-    preloadCount = 3,
+    preloadCount = 8, // Instagram-style: preload 8 videos ahead for instant playback
+    backwardCount = 3, // Keep 3 behind for instant back-scroll
     enabled = true,
-    chunkSize = 800 * 1024, // 800KB default
-    direction = 'forward'
+    direction = 'both' // Changed to 'both' for instant back-scroll
   } = config;
 
-  const preloadedVideosRef = useRef<Map<string, PreloadedVideo>>(new Map());
-  const preloadControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const [cachedUrls, setCachedUrls] = useState<CachedVideoMap>({});
   const lastActiveIndexRef = useRef(activeIndex);
+  const isPreloadingRef = useRef(false);
 
-  // Cleanup old cache entries (older than 3 minutes)
-  const cleanupOldCache = () => {
-    const now = Date.now();
-    const maxAge = 3 * 60 * 1000; // 3 minutes
-
-    preloadedVideosRef.current.forEach((video, url) => {
-      if (now - video.timestamp > maxAge) {
-        preloadedVideosRef.current.delete(url);
-        if (__DEV__) {
-          console.log('🧹 [Preload] Cleaned up old cache:', url.substring(0, 50) + '...');
-        }
-      }
-    });
-  };
-
-  // Cancel preload for a specific URL
-  const cancelPreload = (url: string) => {
-    const controller = preloadControllersRef.current.get(url);
-    if (controller) {
-      controller.abort();
-      preloadControllersRef.current.delete(url);
-      if (__DEV__) {
-        console.log('❌ [Preload] Cancelled:', url.substring(0, 50) + '...');
-      }
-    }
-  };
-
-  // Preload a single video chunk
-  const preloadVideoChunk = async (url: string, priority: number): Promise<boolean> => {
-    // Skip if already preloaded
-    if (preloadedVideosRef.current.has(url)) {
-      if (__DEV__) {
-        console.log('✅ [Preload] Already cached:', url.substring(0, 50) + '...');
-      }
-      return true;
-    }
-
-    // Skip if already preloading
-    if (preloadControllersRef.current.has(url)) {
-      return false;
-    }
-
-    try {
-      const controller = new AbortController();
-      preloadControllersRef.current.set(url, controller);
-
-      if (__DEV__) {
-        console.log(`📥 [Preload] Starting (priority ${priority}):`, url.substring(0, 50) + '...');
-      }
-
-      // Try Range request first (for partial content)
-      const response = await fetch(url, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Range': `bytes=0-${chunkSize - 1}`,
-          'Cache-Control': 'public, max-age=31536000, immutable',
-        },
-      });
-
-      // Accept both 206 (Partial Content) and 200 (Full Content)
-      if (response.ok || response.status === 206) {
-        const blob = await response.blob();
-
-        preloadedVideosRef.current.set(url, {
-          url,
-          blob,
-          timestamp: Date.now(),
-        });
-
-        if (__DEV__) {
-          const sizeKB = Math.round(blob.size / 1024);
-          console.log(`✅ [Preload] Success (${sizeKB}KB):`, url.substring(0, 50) + '...');
-        }
-
-        preloadControllersRef.current.delete(url);
-        return true;
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (error: any) {
-      preloadControllersRef.current.delete(url);
-
-      // Don't log aborted requests (user scrolled away)
-      if (error.name !== 'AbortError') {
-        if (__DEV__) {
-          console.warn('⚠️ [Preload] Failed:', url.substring(0, 50) + '...', error.message);
-        }
-      }
-      return false;
-    }
-  };
+  // Initialize cache on mount
+  useEffect(() => {
+    initVideoCache();
+  }, []);
 
   useEffect(() => {
     if (!enabled || !posts.length || activeIndex < 0) return;
 
-    const preloadVideos = async () => {
-      // Determine which videos to preload based on direction
-      const videosToPreload: { post: Post; url: string; priority: number }[] = [];
+    const preloadNearbyVideos = async () => {
+      if (isPreloadingRef.current) return;
+      isPreloadingRef.current = true;
 
-      // Forward preloading (next N videos)
-      if (direction === 'forward' || direction === 'both') {
-        for (let i = 1; i <= preloadCount && activeIndex + i < posts.length; i++) {
-          const post = posts[activeIndex + i];
-          const mediaUrl = getPostMediaUrl(post);
+      try {
+        const videosToPreload: { url: string; priority: number }[] = [];
 
-          if (!mediaUrl) continue;
+        // Forward preloading (next N videos) - PRIORITY
+        if (direction === 'forward' || direction === 'both') {
+          for (let i = 1; i <= preloadCount && activeIndex + i < posts.length; i++) {
+            const post = posts[activeIndex + i];
+            const mediaUrl = getPostMediaUrl(post);
 
-          const isVideo =
-            post.type === 'video' ||
-            (mediaUrl !== null &&
-              (mediaUrl.toLowerCase().includes('.mp4') ||
-                mediaUrl.toLowerCase().includes('.mov') ||
-                mediaUrl.toLowerCase().includes('.webm')));
+            if (!mediaUrl) continue;
 
-          if (isVideo) {
-            videosToPreload.push({
-              post,
-              url: mediaUrl,
-              priority: i, // Lower number = higher priority
-            });
-          }
-        }
-      }
-
-      // Backward preloading (previous video for back-scroll)
-      if (direction === 'backward' || direction === 'both') {
-        if (activeIndex > 0) {
-          const post = posts[activeIndex - 1];
-          const mediaUrl = getPostMediaUrl(post);
-
-          if (mediaUrl) {
             const isVideo =
               post.type === 'video' ||
-              (mediaUrl !== null &&
-                (mediaUrl.toLowerCase().includes('.mp4') ||
-                  mediaUrl.toLowerCase().includes('.mov') ||
-                  mediaUrl.toLowerCase().includes('.webm')));
+              (mediaUrl.toLowerCase().includes('.mp4') ||
+                mediaUrl.toLowerCase().includes('.mov') ||
+                mediaUrl.toLowerCase().includes('.webm'));
 
-            if (isVideo) {
-              videosToPreload.push({
-                post,
-                url: mediaUrl,
-                priority: 99, // Lower priority than forward
-              });
+            if (isVideo && !isVideoCached(mediaUrl)) {
+              videosToPreload.push({ url: mediaUrl, priority: i });
             }
           }
         }
-      }
 
-      // Cancel preloads for videos that are now too far away
-      const maxDistance = preloadCount + 2;
-      preloadControllersRef.current.forEach((controller, url) => {
-        const videoIndex = posts.findIndex(p => getPostMediaUrl(p) === url);
-        if (videoIndex !== -1) {
-          const distance = Math.abs(videoIndex - activeIndex);
-          if (distance > maxDistance) {
-            cancelPreload(url);
+        // Backward preloading (previous videos for back-scroll)
+        if (direction === 'backward' || direction === 'both') {
+          for (let i = 1; i <= backwardCount && activeIndex - i >= 0; i++) {
+            const post = posts[activeIndex - i];
+            const mediaUrl = getPostMediaUrl(post);
+
+            if (!mediaUrl) continue;
+
+            const isVideo =
+              post.type === 'video' ||
+              (mediaUrl.toLowerCase().includes('.mp4') ||
+                mediaUrl.toLowerCase().includes('.mov') ||
+                mediaUrl.toLowerCase().includes('.webm'));
+
+            if (isVideo && !isVideoCached(mediaUrl)) {
+              videosToPreload.push({ url: mediaUrl, priority: 99 + i });
+            }
           }
         }
-      });
 
-      // Sort by priority and preload
-      videosToPreload.sort((a, b) => a.priority - b.priority);
+        // Sort by priority and preload
+        videosToPreload.sort((a, b) => a.priority - b.priority);
 
-      // Preload in sequence (highest priority first)
-      for (const { url, priority } of videosToPreload) {
-        await preloadVideoChunk(url, priority);
+        // Preload in parallel batches for faster caching (Instagram-style)
+        const PARALLEL_BATCH_SIZE = 3;
+        for (let i = 0; i < videosToPreload.length; i += PARALLEL_BATCH_SIZE) {
+          const batch = videosToPreload.slice(i, i + PARALLEL_BATCH_SIZE);
+          const results = await Promise.all(
+            batch.map(async ({ url }) => {
+              const cachedPath = await getCachedVideoUri(url);
+              return { url, cachedPath };
+            })
+          );
+
+          const newCached: CachedVideoMap = {};
+          for (const { url, cachedPath } of results) {
+            if (cachedPath) {
+              newCached[url] = cachedPath;
+            }
+          }
+          if (Object.keys(newCached).length > 0) {
+            setCachedUrls(prev => ({ ...prev, ...newCached }));
+          }
+        }
+
+        // Also cache current video if not cached
+        const currentPost = posts[activeIndex];
+        const currentUrl = getPostMediaUrl(currentPost);
+        if (currentUrl && !cachedUrls[currentUrl]) {
+          const isVideo =
+            currentPost.type === 'video' ||
+            (currentUrl.toLowerCase().includes('.mp4') ||
+              currentUrl.toLowerCase().includes('.mov') ||
+              currentUrl.toLowerCase().includes('.webm'));
+
+          if (isVideo) {
+            const cachedPath = await getCachedVideoUri(currentUrl);
+            if (cachedPath) {
+              setCachedUrls(prev => ({ ...prev, [currentUrl]: cachedPath }));
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Preload] Error:', error);
+      } finally {
+        isPreloadingRef.current = false;
       }
-
-      // Cleanup old cache entries
-      cleanupOldCache();
     };
 
-    preloadVideos();
-
+    preloadNearbyVideos();
     lastActiveIndexRef.current = activeIndex;
-  }, [posts, activeIndex, preloadCount, enabled, chunkSize, direction]);
+  }, [posts, activeIndex, preloadCount, enabled, direction]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      // Cancel all ongoing preloads
-      preloadControllersRef.current.forEach((controller) => {
-        controller.abort();
-      });
-      preloadControllersRef.current.clear();
-      preloadedVideosRef.current.clear();
+  /**
+   * Get cached local URI for a remote URL
+   * Returns the local file:// path if cached, otherwise the remote URL
+   */
+  const getCachedUri = (remoteUrl: string | null): string | null => {
+    if (!remoteUrl) return null;
+    return cachedUrls[remoteUrl] || remoteUrl;
+  };
 
-      if (__DEV__) {
-        console.log('🧹 [Preload] Cleanup on unmount');
-      }
-    };
-  }, []);
+  /**
+   * Check if a URL is cached
+   */
+  const isCached = (url: string): boolean => {
+    return !!cachedUrls[url] || isVideoCached(url);
+  };
 
-  // Return preload stats for debugging
   return {
-    preloadedCount: preloadedVideosRef.current.size,
-    activePreloads: preloadControllersRef.current.size,
+    cachedUrls,
+    getCachedUri,
+    isCached,
+    preloadedCount: Object.keys(cachedUrls).length,
   };
 };
 
 /**
- * Utility function to preload a specific video URL
- * Useful for manual preloading outside of the hook
+ * Utility function to preload specific video URLs
  */
-export const preloadVideoUrl = async (
-  url: string,
-  chunkSize: number = 800 * 1024
-): Promise<boolean> => {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+export const preloadVideoUrls = preloadVideos;
 
-    const response = await fetch(url, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: {
-        'Range': `bytes=0-${chunkSize - 1}`,
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok || response.status === 206) {
-      await response.blob(); // Download the chunk
-      return true;
-    }
-
-    return false;
-  } catch (error) {
-    return false;
-  }
-};
+/**
+ * Utility to get cached URI (can be used outside hook)
+ */
+export { getCachedVideoUri, isVideoCached };

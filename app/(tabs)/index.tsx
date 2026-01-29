@@ -43,6 +43,7 @@ import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
+import { useVideoPreload, getCachedVideoUri } from '@/lib/hooks/use-video-preload';
 
 // expo-video handles video playback - no need for manual video ref management
 
@@ -86,6 +87,7 @@ interface PostItemProps {
   isActive: boolean;
   shouldPreload: boolean;
   availableHeight: number;
+  cachedMediaUrl?: string | null; // CRITICAL: Cached local file:// URI for instant playback
 }
 
 const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
@@ -128,7 +130,8 @@ const PostItem: React.FC<PostItemProps> = ({
   isFollowing,
   isActive,
   shouldPreload,
-  availableHeight
+  availableHeight,
+  cachedMediaUrl // CRITICAL: Use this instead of mediaUrl for playback!
 }) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -175,12 +178,13 @@ const PostItem: React.FC<PostItemProps> = ({
         mediaUrl.includes('.mov') ||
         mediaUrl.includes('.webm')));
 
-  // expo-video: useVideoPlayer with conditional source for preloading
-  // When shouldPreload || isActive: video starts buffering
-  // When neither: null source frees memory
+  // expo-video: useVideoPlayer with cached source for INSTANT playback
+  // CRITICAL: Use cachedMediaUrl (local file) instead of mediaUrl (remote URL)
+  // This is what saves 1GB+ of data - videos play from local cache!
   const shouldLoadVideo = isVideo && (shouldPreload || isActive);
+  const videoSourceUrl = cachedMediaUrl || mediaUrl; // Prefer cached file
   const videoPlayer = useVideoPlayer(
-    shouldLoadVideo && mediaUrl ? mediaUrl : null,
+    shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null,
     (player) => {
       player.loop = true;
       player.muted = isMuted;
@@ -670,14 +674,21 @@ export default function FeedScreen() {
   const likesManager = useLikesManager();
   const { isOffline } = useNetworkStatus();
 
+  // Video preloading with FileSystem caching (5 forward, 2 backward)
+  const { getCachedUri, isCached, preloadedCount } = useVideoPreload(posts, currentIndex, {
+    preloadCount: 5,
+    direction: 'both',
+    enabled: activeTab !== 'challenges',
+  });
+
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
   const headerHeight = insets.top + headerTabsHeight + headerPaddingVertical;
   const bottomNavHeight = 60 + insets.bottom;
   const availableHeight = screenHeight - headerHeight;
 
-  const INITIAL_LIMIT = 10;
-  const LOAD_MORE_LIMIT = 10;
+  const INITIAL_LIMIT = 50; // Request all posts to ensure we get everything from DB
+  const LOAD_MORE_LIMIT = 20;
 
   // Dynamic limit based on scroll velocity
   const getDynamicLimit = useCallback(() => {
@@ -745,8 +756,22 @@ export default function FeedScreen() {
         }
 
         const pagination = response.data.pagination || {};
-        const hasMoreData = pagination.hasNextPage !== false && postsArray.length === limit;
+        // Fix: Better hasMore logic - check totalCount, hasNextPage, AND received count
+        const totalReceived = page === 1 ? postsArray.length : posts.length + postsArray.length;
+        const hasMoreByCount = pagination.totalCount ? totalReceived < pagination.totalCount : true;
+        const hasMoreByPage = pagination.hasNextPage !== false;
+        const hasMoreByLimit = postsArray.length >= limit;
+        // Only stop pagination if we have definitive evidence there's no more
+        const hasMoreData = postsArray.length > 0 && (hasMoreByPage || (hasMoreByLimit && hasMoreByCount));
         setHasMore(hasMoreData);
+
+        if (__DEV__) {
+          console.log('📊 [Pagination] hasMore check:', {
+            page, limit, received: postsArray.length,
+            totalCount: pagination.totalCount, totalReceived,
+            hasMoreByPage, hasMoreByLimit, hasMoreByCount, hasMoreData
+          });
+        }
 
         const likeCountsMap: Record<string, number> = {};
         postsArray.forEach((post: Post) => {
@@ -1167,6 +1192,10 @@ export default function FeedScreen() {
                 const distance = index - currentIndex;
                 const shouldPreload = !isActive && distance > 0 && distance <= 5;
 
+                // CRITICAL: Get cached local file URI for this video
+                const postMediaUrl = getPostMediaUrl(item);
+                const cachedUrl = getCachedUri(postMediaUrl);
+
                 return (
                   <PostItem
                     item={item}
@@ -1182,6 +1211,7 @@ export default function FeedScreen() {
                     isActive={isActive}
                     shouldPreload={shouldPreload}
                     availableHeight={availableHeight}
+                    cachedMediaUrl={cachedUrl} // CRITICAL: Pass cached local file for playback
                   />
                 );
               }}
