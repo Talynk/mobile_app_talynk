@@ -24,10 +24,10 @@ import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { 
-  addLikedPost, 
-  removeLikedPost, 
-  setPostLikeCount, 
+import {
+  addLikedPost,
+  removeLikedPost,
+  setPostLikeCount,
   setPostLikeCounts,
 } from '@/lib/store/slices/likesSlice';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
@@ -42,7 +42,7 @@ import CommentsModal from '@/components/CommentsModal';
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 // Global mute context
-const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => {} });
+const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => { } });
 const useMute = () => useContext(MuteContext);
 
 // Global video manager to ensure only one video plays at a time
@@ -104,8 +104,8 @@ const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: nu
 
   return (
     <View>
-      <Text 
-        style={styles.caption} 
+      <Text
+        style={styles.caption}
         numberOfLines={expanded ? undefined : maxLines}
       >
         {text}
@@ -121,34 +121,34 @@ const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: nu
   );
 };
 
-const PostItem: React.FC<PostItemProps> = ({ 
-  item, 
-  index, 
-  onLike, 
-  onComment, 
-  onShare, 
+const PostItem = React.memo(({
+  item,
+  index,
+  onLike,
+  onComment,
+  onShare,
   onReport,
-  isLiked, 
+  isLiked,
   isActive,
   availableHeight
-}) => {
+}: PostItemProps) => {
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
-  
+
   const isPostLiked = likedPosts.includes(item.id);
   const cachedLikeCount = postLikeCounts[item.id];
   const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
-  
+
   const { likes, comments, isLiked: realtimeIsLiked, updateLikesLocally } = useRealtimePost({
     postId: item.id,
     initialLikes: initialLikeCount,
     initialComments: item.comments_count || 0,
     initialIsLiked: isPostLiked || isLiked,
   });
-  
+
   const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -162,12 +162,12 @@ const PostItem: React.FC<PostItemProps> = ({
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const insets = useSafeAreaInsets();
-  
+
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
 
   const mediaUrl = getMediaUrl(item);
-  
+
   // Log post item structure for debugging (only first 3 items to avoid spam)
   if (__DEV__ && index < 3) {
     console.log(`📄 [ProfileFeed PostItem ${index}] Post data:`, {
@@ -190,15 +190,15 @@ const PostItem: React.FC<PostItemProps> = ({
 
   useEffect(() => {
     if (!videoRef.current || useNativeControls || !isVideo) return;
-    
+
     const managePlayback = async () => {
       try {
         const currentVideo = videoRef.current;
         if (!currentVideo) return;
-        
+
         const status = await currentVideo.getStatusAsync();
         if (!status?.isLoaded) return;
-        
+
         if (isActive) {
           await pauseAllVideosExcept(currentVideo);
           if (!status.isPlaying) {
@@ -216,7 +216,7 @@ const PostItem: React.FC<PostItemProps> = ({
         // Silently handle errors
       }
     };
-    
+
     managePlayback();
   }, [isActive, useNativeControls, isVideo]);
 
@@ -226,7 +226,7 @@ const PostItem: React.FC<PostItemProps> = ({
         if (activeVideoRef.current === videoRef.current) {
           activeVideoRef.current = null;
         }
-        videoRef.current.unloadAsync().catch(() => {});
+        videoRef.current.unloadAsync().catch(() => { });
       }
     };
   }, []);
@@ -247,13 +247,13 @@ const PostItem: React.FC<PostItemProps> = ({
       );
       return;
     }
-    
+
     if (isLiking) return;
     setIsLiking(true);
-    
+
     const currentIsLiked = isPostLiked;
     const newIsLiked = !currentIsLiked;
-    
+
     Animated.sequence([
       Animated.timing(likeScale, {
         toValue: 1.3,
@@ -281,10 +281,10 @@ const PostItem: React.FC<PostItemProps> = ({
         }),
       ]).start();
     }
-    
+
     sendLikeAction(item.id, newIsLiked);
     await onLike(item.id);
-    
+
     setIsLiking(false);
   };
 
@@ -320,9 +320,9 @@ const PostItem: React.FC<PostItemProps> = ({
         {isVideo ? (
           videoError || !isActive ? (
             // Show thumbnail when video has error OR when not active (memory optimization)
-            <TouchableOpacity 
-              style={styles.mediaWrapper} 
-              activeOpacity={1} 
+            <TouchableOpacity
+              style={styles.mediaWrapper}
+              activeOpacity={1}
               onPress={handleVideoTap}
             >
               {mediaUrl ? (
@@ -351,14 +351,14 @@ const PostItem: React.FC<PostItemProps> = ({
             </TouchableOpacity>
           ) : (
             // Only load Video component when active
-            <TouchableOpacity 
-              style={styles.mediaWrapper} 
-              activeOpacity={1} 
+            <TouchableOpacity
+              style={styles.mediaWrapper}
+              activeOpacity={1}
               onPress={handleVideoTap}
             >
               <Video
                 ref={videoRef}
-                source={{ 
+                source={{
                   uri: mediaUrl || '',
                   headers: {
                     'Cache-Control': 'public, max-age=31536000, immutable'
@@ -382,7 +382,7 @@ const PostItem: React.FC<PostItemProps> = ({
                   setVideoLoading(false);
                   if (!useNativeControls && videoRef.current && isActive) {
                     pauseAllVideosExcept(videoRef.current).then(() => {
-                      videoRef.current?.playAsync().catch(() => {});
+                      videoRef.current?.playAsync().catch(() => { });
                     });
                   }
                 }}
@@ -407,8 +407,8 @@ const PostItem: React.FC<PostItemProps> = ({
                         setIsPlaying(status.isPlaying);
                       }
                       if (status.durationMillis && status.positionMillis !== undefined) {
-                        const progress = status.durationMillis > 0 
-                          ? status.positionMillis / status.durationMillis 
+                        const progress = status.durationMillis > 0
+                          ? status.positionMillis / status.durationMillis
                           : 0;
                         setVideoProgress(progress);
                         setVideoDuration(status.durationMillis);
@@ -450,7 +450,7 @@ const PostItem: React.FC<PostItemProps> = ({
 
 
         {/* Heart animation overlay */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.heartOverlay,
             { opacity: likeOpacity }
@@ -474,10 +474,10 @@ const PostItem: React.FC<PostItemProps> = ({
           {/* Like */}
           <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-              <MaterialIcons 
-                name={isPostLiked ? 'favorite' : 'favorite-border'} 
-                size={28} 
-                color={isPostLiked ? '#ef4444' : '#fff'} 
+              <MaterialIcons
+                name={isPostLiked ? 'favorite' : 'favorite-border'}
+                size={28}
+                color={isPostLiked ? '#ef4444' : '#fff'}
               />
             </Animated.View>
             <Text style={styles.actionText}>{formatNumber(cachedLikeCount ?? likes)}</Text>
@@ -506,12 +506,12 @@ const PostItem: React.FC<PostItemProps> = ({
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
-            
+
             {/* Show caption/description only once - prefer caption, then description, then title */}
             {(item.caption || item.description || item.title) && (
-              <ExpandableCaption 
-                text={item.caption || item.description || item.title || ''} 
-                maxLines={2} 
+              <ExpandableCaption
+                text={item.caption || item.description || item.title || ''}
+                maxLines={2}
               />
             )}
             {/* Timestamp */}
@@ -553,17 +553,18 @@ const PostItem: React.FC<PostItemProps> = ({
       </View>
     </View>
   );
-};
+});
 
 export default function ProfileFeedScreen() {
   const { userId, initialPostId, status } = useLocalSearchParams();
-  
+
   return (
     <RealtimeProvider>
-      <ProfileFeedContent 
-        userId={userId as string} 
-        initialPostId={initialPostId as string} 
-        status={status as string} 
+      <ProfileFeedContent
+        userId={userId as string}
+        initialPostId={initialPostId as string}
+        status={status as string}
+        initialPostData={useLocalSearchParams().initialPostData as string}
       />
     </RealtimeProvider>
   );
@@ -573,11 +574,17 @@ interface ProfileFeedContentProps {
   userId: string;
   initialPostId?: string;
   status?: string;
+  initialPostData?: string;
 }
 
-function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedContentProps) {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
+function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: ProfileFeedContentProps) {
+  // Parse initial post data if available for instant loading
+  const initialPost = initialPostData ? (() => {
+    try { return JSON.parse(initialPostData); } catch (e) { return null; }
+  })() : null;
+
+  const [posts, setPosts] = useState<Post[]>(initialPost ? [initialPost] : []);
+  const [loading, setLoading] = useState(!initialPost);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -600,15 +607,16 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const insets = useSafeAreaInsets();
-  
+
   const likesManager = useLikesManager();
-  
+
   // Calculate available height for posts
   const headerHeight = insets.top + 50;
   const bottomNavHeight = 0; // No bottom nav in this screen
   const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
-  const LIMIT = 20;
+  // CRITICAL FIX: Increased limit to fetch all posts from database
+  const LIMIT = 100; // Fetch all posts, not just 20
 
   const loadPosts = useCallback(async (page = 1, refresh = false) => {
     try {
@@ -617,17 +625,18 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         setCurrentPage(1);
         setHasMore(true);
       } else if (page === 1) {
-        setLoading(true);
+        // Only set loading if we don't have posts (prevent hiding initial post)
+        if (posts.length === 0) setLoading(true);
       } else {
         setLoadingMore(true);
       }
-      
+
       const postStatus = status || 'active';
       const isOwnProfile = user && user.id === userId;
-      
+
       let response;
       let postsArray: Post[] = [];
-      
+
       if (isOwnProfile) {
         // Use getOwnPosts for current user's posts (has full data including media URLs)
         response = await userApi.getOwnPosts();
@@ -636,8 +645,8 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           // Filter by status
           if (postStatus === 'active') {
             // Show active posts (or legacy approved posts, or posts with no status default to active)
-            postsArray = allPosts.filter((p: any) => 
-              p.status === 'active' || 
+            postsArray = allPosts.filter((p: any) =>
+              p.status === 'active' ||
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
@@ -645,8 +654,8 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
             postsArray = allPosts.filter((p: any) => p.status === 'draft');
           } else if (postStatus === 'suspended') {
             // Show suspended posts (or legacy rejected/reported posts)
-            postsArray = allPosts.filter((p: any) => 
-              p.status === 'suspended' || 
+            postsArray = allPosts.filter((p: any) =>
+              p.status === 'suspended' ||
               p.status === 'rejected' || // Legacy support
               p.status === 'reported' // Legacy support
             );
@@ -673,7 +682,7 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           postsArray = Array.isArray(postsData) ? postsData : [];
         }
       }
-      
+
       // Log posts structure for debugging
       if (__DEV__) {
         console.log('📥 [ProfileFeed fetchPosts] API Response:', {
@@ -693,12 +702,12 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           samplePost: postsArray[0],
         });
       }
-      
+
       if (response?.status === 'success' && postsArray.length >= 0) {
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsArray.length === LIMIT;
         setHasMore(hasMoreData);
-        
+
         // Update like counts in Redux
         const likeCountsMap: Record<string, number> = {};
         postsArray.forEach((post: Post) => {
@@ -709,23 +718,23 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         if (Object.keys(likeCountsMap).length > 0) {
           dispatch(setPostLikeCounts(likeCountsMap));
         }
-        
+
         // Sync liked posts from server if user is logged in
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
         }
-        
+
         // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
         if (postsArray.length > 0 && (page === 1 || refresh)) {
           const videoPosts = postsArray
             .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
             .slice(0, 3); // Prefetch first 3 videos
-          
+
           // Videos will be cached automatically when loaded by Expo AV
           // The cache headers in source will ensure proper caching
         }
-        
+
         if (page === 1 || refresh) {
           // Ensure posts are in correct order (newest first typically)
           const sortedPosts = [...postsArray].sort((a, b) => {
@@ -733,14 +742,23 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
             const dateB = new Date(b.createdAt || b.uploadDate || 0).getTime();
             return dateB - dateA; // Newest first
           });
-          
-          setPosts(sortedPosts);
-          
+
+          // OPTIMIZATION: Preserve the initial post object reference if it exists
+          // This prevents the playing video from re-rendering/flickering when API returns
+          if (initialPost && page === 1) {
+            const mergedPosts = sortedPosts.map(p =>
+              p.id === initialPost.id ? initialPost : p
+            );
+            setPosts(mergedPosts);
+          } else {
+            setPosts(sortedPosts);
+          }
+
           // Get username from first post
           if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {
             setUsername(sortedPosts[0].user.username);
           }
-          
+
           // Scroll to initial post if provided
           if (initialPostId && !initialScrollDone) {
             const initialIndex = sortedPosts.findIndex((p: Post) => p.id === initialPostId);
@@ -799,14 +817,15 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
 
   // Track current index with ref to avoid infinite loops
   const currentIndexRef = useRef(0);
-  
+
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
-  // Preload next 3 videos when a video becomes active
+  // CRITICAL FIX: Optimized preloading for profile feed
   useVideoPreload(posts, currentIndex >= 0 ? currentIndex : -1, {
-    preloadCount: 3,
+    preloadCount: 5, // Preload 5 videos ahead for instant playback
+    backwardCount: 2, // Keep 2 behind for instant back-scroll
     enabled: isScreenFocused,
   });
 
@@ -846,11 +865,11 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
     }
 
     await likesManager.toggleLike(postId);
-    
+
     const newLikeCount = likesManager.getLikeCount(postId);
-    setPosts(prevPosts => 
-      prevPosts.map(post => 
-        post.id === postId 
+    setPosts(prevPosts =>
+      prevPosts.map(post =>
+        post.id === postId
           ? { ...post, likes: newLikeCount }
           : post
       )
@@ -859,7 +878,7 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
-    
+
     const post = posts.find(p => p.id === postId);
     setCommentsPostId(postId);
     setCommentsPostTitle(post?.title || post?.description || '');
@@ -932,11 +951,11 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
       const visibleItem = viewableItems[0];
       const newIndex = visibleItem.index || 0;
       const postId = visibleItem.item?.id;
-      
+
       if (postId) {
         likesManager.onPostVisible(postId);
       }
-      
+
       if (activeVideoRef.current) {
         pauseAllVideosExcept(null);
       }
@@ -965,10 +984,10 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" translucent />
-      
+
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top }]}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
           accessibilityLabel="Go back"
@@ -976,11 +995,11 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
         >
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        
+
         <Text style={styles.headerTitle}>
           {username ? `@${username}'s Posts` : 'Posts'}
         </Text>
-        
+
         <View style={styles.headerSpacer} />
       </View>
 
@@ -1052,9 +1071,9 @@ function ProfileFeedContent({ userId, initialPostId, status }: ProfileFeedConten
           }
           onScrollToIndexFailed={(info) => {
             setTimeout(() => {
-              flatListRef.current?.scrollToIndex({ 
-                index: Math.min(info.index, posts.length - 1), 
-                animated: false 
+              flatListRef.current?.scrollToIndex({
+                index: Math.min(info.index, posts.length - 1),
+                animated: false
               });
             }, 100);
           }}

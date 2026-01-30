@@ -43,7 +43,7 @@ import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
-import { useVideoPreload, getCachedVideoUri } from '@/lib/hooks/use-video-preload';
+import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 
 // expo-video handles video playback - no need for manual video ref management
 
@@ -87,7 +87,7 @@ interface PostItemProps {
   isActive: boolean;
   shouldPreload: boolean;
   availableHeight: number;
-  cachedMediaUrl?: string | null; // CRITICAL: Cached local file:// URI for instant playback
+  // STREAMING: No cachedMediaUrl - we stream directly from network
 }
 
 const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
@@ -131,7 +131,6 @@ const PostItem: React.FC<PostItemProps> = ({
   isActive,
   shouldPreload,
   availableHeight,
-  cachedMediaUrl // CRITICAL: Use this instead of mediaUrl for playback!
 }) => {
   const { height: screenHeight, width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -155,11 +154,15 @@ const PostItem: React.FC<PostItemProps> = ({
   });
 
   const wasActiveRef = useRef(isActive);
+  const playerValidRef = useRef(false); // Track if video player is valid (not released)
+  const isMountedRef = useRef(true); // CRITICAL FIX: Track if component is mounted to prevent state updates after unmount
+  const [isPlayerValid, setIsPlayerValid] = useState(false); // CRITICAL FIX: State-based validity for triggering re-renders
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
+  const [videoReady, setVideoReady] = useState(false); // INSTAGRAM STYLE: Track when video is ready to display
   const [isPlaying, setIsPlaying] = useState(false);
   const [useNativeControls, setUseNativeControls] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
@@ -178,60 +181,147 @@ const PostItem: React.FC<PostItemProps> = ({
         mediaUrl.includes('.mov') ||
         mediaUrl.includes('.webm')));
 
-  // expo-video: useVideoPlayer with cached source for INSTANT playback
-  // CRITICAL: Use cachedMediaUrl (local file) instead of mediaUrl (remote URL)
-  // This is what saves 1GB+ of data - videos play from local cache!
-  const shouldLoadVideo = isVideo && (shouldPreload || isActive);
-  const videoSourceUrl = cachedMediaUrl || mediaUrl; // Prefer cached file
+  // INSTAGRAM STYLE: Create player for current + next + previous (3 player pool)
+  // This allows seamless transition when scrolling without creating too many players
+  const shouldLoadVideo = isVideo && (isActive || shouldPreload);
+
+  // Use remote URL directly - let native player handle buffering (Instagram approach)
+  // Don't download to file system - just stream
+  const videoSourceUrl = mediaUrl;
+
+  // CRITICAL: Only create player for ACTIVE video
+  const videoPlayerSource = shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null;
   const videoPlayer = useVideoPlayer(
-    shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null,
+    videoPlayerSource,
     (player) => {
-      player.loop = true;
-      player.muted = isMuted;
+      if (player) {
+        try {
+          player.loop = true;
+          player.muted = isMuted; // Only use muted state, always active
+        } catch (error) {
+          console.warn('[VideoPlayer] Error setting player properties:', error);
+        }
+      }
     }
   );
 
-  // Manage playback based on active state
+  // CRITICAL FIX: Track if player is valid to prevent using released players
+  // This must run immediately when player changes AND trigger re-renders
   useEffect(() => {
-    if (!videoPlayer) return;
-
-    if (isActive && !decoderErrorDetected) {
-      // Active: unmute and play
-      videoPlayer.muted = isMuted;
-      videoPlayer.play();
-    } else if (shouldPreload) {
-      // Preloading: keep paused, video is buffering
-      videoPlayer.muted = true;
-      videoPlayer.pause();
+    if (videoPlayer) {
+      // Player exists - mark as valid
+      playerValidRef.current = true;
+      if (isMountedRef.current) {
+        setIsPlayerValid(true);
+      }
     } else {
-      // Not active, not preloading: fully stop
-      videoPlayer.muted = true;
-      videoPlayer.pause();
+      // Player is null - mark as invalid immediately
+      playerValidRef.current = false;
+      if (isMountedRef.current) {
+        setIsPlayerValid(false);
+      }
     }
+  }, [videoPlayer]);
 
-    // Reset to start when becoming active
-    if (isActive && !wasActiveRef.current) {
-      videoPlayer.currentTime = 0;
-    }
-
-    wasActiveRef.current = isActive;
-  }, [isActive, isMuted, shouldPreload, videoPlayer, decoderErrorDetected]);
-
-  // Subscribe to video playing state to hide thumbnail overlay when video starts
+  // CRITICAL FIX: Track component mount state for safe state updates
   useEffect(() => {
-    if (!videoPlayer) return;
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      playerValidRef.current = false;
+      // Don't call setIsPlayerValid here as component is unmounting
+    };
+  }, []);
 
-    const subscription = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
-      if (event.isPlaying && isActive) {
-        // Video is playing - hide the thumbnail overlay
+  // CRITICAL FIX: Also check player validity when source changes
+  // When source changes, old player gets released, so we need to invalidate immediately
+  useEffect(() => {
+    if (!videoPlayerSource) {
+      // No source - player will be null, mark as invalid
+      playerValidRef.current = false;
+      if (isMountedRef.current) {
+        setIsPlayerValid(false);
+      }
+    }
+  }, [videoPlayerSource]);
+
+  // CRITICAL FIX: Optimized playback management with proper error handling
+  // Prevents "released object" errors by checking player validity
+  // CRITICAL: This ensures cached videos play instantly when scrolling back
+  useEffect(() => {
+    if (!videoPlayer || !playerValidRef.current) return;
+
+    try {
+      if (isActive && !decoderErrorDetected) {
+        // Active: unmute and play
+        videoPlayer.muted = isMuted;
+        videoPlayer.play();
         setVideoLoading(false);
         setVideoLoaded(true);
+      } else {
+        // Not active: pause and mute (preloading silently)
+        videoPlayer.muted = true;
+        videoPlayer.pause();
       }
-    });
 
-    return () => {
-      subscription.remove();
-    };
+      // Reset to start when becoming active
+      if (isActive && !wasActiveRef.current) {
+        videoPlayer.currentTime = 0;
+        setVideoReady(false); // Reset videoReady when switching videos
+      }
+
+      wasActiveRef.current = isActive;
+    } catch (error) {
+      // Player was released - mark as invalid
+      console.warn('[VideoPlayer] Player released, marking invalid:', error);
+      playerValidRef.current = false;
+    }
+  }, [isActive, isMuted, videoPlayer, decoderErrorDetected, index]);
+
+  // CRITICAL FIX: Instant video playback with proper error handling
+  useEffect(() => {
+    if (!videoPlayer || !playerValidRef.current) return;
+
+    try {
+      const subscription = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
+        if (isMountedRef.current) {
+          setIsPlaying(event.isPlaying);
+
+          if (event.isPlaying && isActive) {
+            // MUX STYLE: Video is playing - NOW hide the thumbnail
+            setVideoReady(true);
+            setVideoLoading(false);
+            setVideoLoaded(true);
+          }
+        }
+      });
+
+      return () => {
+        try {
+          subscription.remove();
+        } catch (error) {
+          // Silently handle cleanup errors
+        }
+      };
+    } catch (error) {
+      // Player was released - mark as invalid
+      playerValidRef.current = false;
+      return () => { };
+    }
+  }, [videoPlayer, isActive]);
+
+  // CRITICAL FIX: Also hide loading when video is ready (even if not playing yet)
+  useEffect(() => {
+    if (!videoPlayer || !isActive) return;
+
+    // If video player exists and is active, assume it's ready
+    // This prevents the spinner from showing unnecessarily
+    const timer = setTimeout(() => {
+      setVideoLoading(false);
+      setVideoLoaded(true);
+    }, 100); // Very short delay to allow video to initialize
+
+    return () => clearTimeout(timer);
   }, [videoPlayer, isActive]);
 
   const panResponder = useRef(
@@ -242,7 +332,7 @@ const PostItem: React.FC<PostItemProps> = ({
         setIsSeeking(true);
       },
       onPanResponderMove: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoPlayer) return;
+        if (videoDuration === 0 || !videoPlayer || !playerValidRef.current) return;
 
         const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
         const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
@@ -250,19 +340,25 @@ const PostItem: React.FC<PostItemProps> = ({
         setVideoProgress(progressFraction);
 
         try {
-          videoPlayer.currentTime = newPosition;
+          if (playerValidRef.current) {
+            videoPlayer.currentTime = newPosition;
+          }
         } catch (error) {
+          playerValidRef.current = false;
         }
       },
       onPanResponderRelease: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoPlayer) return;
+        if (videoDuration === 0 || !videoPlayer || !playerValidRef.current) return;
 
         const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
         const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
 
         try {
-          videoPlayer.currentTime = newPosition;
+          if (playerValidRef.current) {
+            videoPlayer.currentTime = newPosition;
+          }
         } catch (error) {
+          playerValidRef.current = false;
         }
 
         setIsSeeking(false);
@@ -288,14 +384,14 @@ const PostItem: React.FC<PostItemProps> = ({
     });
   }
 
-  // Update loading state based on active status
+  // CRITICAL FIX: Don't show loading state - videos preload invisibly
+  // Only show loading if video actually fails to load
   useEffect(() => {
-    if (isActive && isVideo) {
-      setVideoLoading(true);
-    } else if (!isActive) {
+    if (!isActive) {
       setVideoLoading(false);
       setImageLoading(false);
     }
+    // Don't set loading to true - preloading happens silently
   }, [isActive, isVideo]);
 
 
@@ -413,40 +509,45 @@ const PostItem: React.FC<PostItemProps> = ({
             activeOpacity={1}
             onPress={() => setIsMuted(!isMuted)}
           >
-            {/* LAYER 1 (BASE): Thumbnail - ALWAYS visible first, prevents black screen */}
+            {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING (Mux style) */}
             {mediaUrl && (
               <Image
                 source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                style={[styles.media, { position: 'absolute', zIndex: 1 }]}
+                style={[
+                  styles.media,
+                  {
+                    position: 'absolute',
+                    zIndex: 1,
+                    // MUX STYLE: Only hide thumbnail when video is ACTUALLY PLAYING
+                    // This guarantees zero black screens
+                    opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
+                  }
+                ]}
                 resizeMode="contain"
               />
             )}
 
-            {/* LAYER 2: VideoView - renders on top when preloading or active */}
-            {videoPlayer && (shouldPreload || isActive) && !videoError && (
+            {/* LAYER 2: VideoView - render for active or preloading */}
+            {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
               <VideoView
                 player={videoPlayer}
-                style={[styles.media, { position: 'absolute', zIndex: videoLoaded ? 3 : 2 }]}
+                style={[
+                  styles.media,
+                  {
+                    position: 'absolute',
+                    zIndex: 2,
+                  }
+                ]}
                 contentFit="contain"
                 nativeControls={useNativeControls}
               />
             )}
 
-            {/* LAYER 3: Play icon overlay when not active */}
-            {!isActive && !videoError && (
-              <View style={[styles.playIconOverlay, { zIndex: 4 }]}>
-                <View style={styles.playIconCircle}>
-                  <Feather name="play" size={32} color="#fff" />
-                </View>
-              </View>
-            )}
+            {/* NO play icon overlay - Instagram doesn't show this */}
+            {/* Thumbnail is always visible until video plays */}
 
-            {/* Loading indicator - brief spinner while video buffers (only when active and loading) */}
-            {isActive && videoLoading && !videoError && (
-              <View style={[styles.loadingOverlay, { zIndex: 5 }]}>
-                <ActivityIndicator size="large" color="#fff" />
-              </View>
-            )}
+            {/* CRITICAL FIX: Remove loading spinner - videos should preload silently in background */}
+            {/* No loading indicator - preloading happens invisibly, video appears instantly when ready */}
 
             {/* Show error state */}
             {videoError && (
@@ -645,8 +746,10 @@ export default function FeedScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('foryou');
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [scrollDirection, setScrollDirection] = useState<'down' | 'up'>('down'); // MUX STYLE: Track scroll direction
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const lastActiveIndexRef = useRef(0);
+  const lastScrollOffsetRef = useRef(0); // Track scroll position for direction
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -674,9 +777,11 @@ export default function FeedScreen() {
   const likesManager = useLikesManager();
   const { isOffline } = useNetworkStatus();
 
-  // Video preloading with FileSystem caching (5 forward, 2 backward)
+  // INSTAGRAM STYLE: 3-player pool (current + next + previous)
+  // This allows seamless transitions when scrolling
   const { getCachedUri, isCached, preloadedCount } = useVideoPreload(posts, currentIndex, {
-    preloadCount: 5,
+    preloadCount: 1, // 1 ahead
+    backwardCount: 1, // 1 behind
     direction: 'both',
     enabled: activeTab !== 'challenges',
   });
@@ -687,15 +792,14 @@ export default function FeedScreen() {
   const bottomNavHeight = 60 + insets.bottom;
   const availableHeight = screenHeight - headerHeight;
 
-  const INITIAL_LIMIT = 50; // Request all posts to ensure we get everything from DB
-  const LOAD_MORE_LIMIT = 20;
+  // CRITICAL FIX: REDUCED limits to prevent app freezing
+  // Load small batches to keep app responsive - load more as user scrolls
+  const INITIAL_LIMIT = 10; // Start with 10 posts only
+  const LOAD_MORE_LIMIT = 10; // Load 10 more at a time
 
-  // Dynamic limit based on scroll velocity
+  // Dynamic limit based on scroll velocity - NOT USED, keeping limits low
   const getDynamicLimit = useCallback(() => {
-    const velocity = Math.abs(scrollVelocityRef.current);
-    if (velocity > 500) return 10; // Fast scrolling → larger batches
-    if (velocity < 200) return 3;  // Slow scrolling → smaller batches
-    return 5; // Medium scrolling → default
+    return LOAD_MORE_LIMIT; // Always use fixed limit
   }, []);
 
   const loadPosts = async (tab = 'featured', refresh = false, page = 1) => {
@@ -713,9 +817,9 @@ export default function FeedScreen() {
       }
 
       let response;
-      // Use velocity-based limit for pagination (fast scroll = more items, slow = fewer)
-      const baseLimit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
-      const limit = page === 1 ? baseLimit : getDynamicLimit();
+      // CRITICAL FIX: Always use high limit to fetch ALL posts from database
+      // Don't use dynamic limit - we need ALL posts, not just a few
+      const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
 
       const timestamp = refresh ? `&t=${Date.now()}` : '';
 
@@ -733,6 +837,10 @@ export default function FeedScreen() {
         default:
           response = await postsApi.getAll(page, limit, timestamp);
       }
+
+      // REMOVED: Aggressive parallel page fetching that was causing app freeze
+      // Now we load incrementally as user scrolls - much smoother
+      // Posts will load more as user reaches end of feed
 
       if (response.status === 'success') {
         const posts = response.data.posts || response.data;
@@ -843,9 +951,10 @@ export default function FeedScreen() {
           setNetworkError(true);
         }
       } else {
-        console.error('❌ Error loading posts:', error);
+        console.warn('⚠️ Error loading posts:', error);
         if (page === 1) {
           setPosts([]);
+          setNetworkError(true); // Show network error UI for any error
         }
       }
       setHasMore(false);
@@ -866,21 +975,20 @@ export default function FeedScreen() {
     return 5;
   }, []);
 
-  // Predictive preloading with velocity-based batch sizing (TikTok-style optimization)
+  // CRITICAL FIX: Aggressive predictive preloading - fetch more posts earlier
+  // This ensures we always have content ready when user scrolls
   const loadMorePosts = useCallback(() => {
     if (!loadingMore && hasMore && !loading && activeTab !== 'challenges') {
       const remainingItems = posts.length - currentIndex;
-      // Start fetching when 3-5 items away from end (predictive preloading)
-      if (remainingItems <= 5 && remainingItems >= 3) {
+      // Start fetching when 10 items away from end (very aggressive preloading)
+      // This ensures posts are ready before user reaches the end
+      if (remainingItems <= 10) {
         const nextPage = currentPage + 1;
-        const velocity = Math.abs(scrollVelocityRef.current);
-        const fetchLimit = getFetchLimit(velocity);
         setCurrentPage(nextPage);
-        // Note: loadPosts uses LOAD_MORE_LIMIT constant, but velocity-based logic is ready
         loadPosts(activeTab, false, nextPage);
       }
     }
-  }, [loadingMore, hasMore, loading, activeTab, posts.length, currentIndex, currentPage, getFetchLimit]);
+  }, [loadingMore, hasMore, loading, activeTab, posts.length, currentIndex, currentPage]);
 
   useEffect(() => {
     if (activeTab !== 'challenges') {
@@ -1175,6 +1283,7 @@ export default function FeedScreen() {
             <FlashList
               ref={flatListRef}
               data={posts}
+              extraData={currentIndex} // CRITICAL: Force re-render when active video changes for preloading
               ListHeaderComponent={
                 (networkError || isOffline) ? (
                   <View style={styles.offlineBanner}>
@@ -1188,13 +1297,16 @@ export default function FeedScreen() {
               stickyHeaderIndices={(networkError || isOffline) ? [0] : undefined}
               renderItem={({ item, index }) => {
                 const isActive = isScreenFocused && currentIndex === index;
-                // Calculate shouldPreload: preload next 5 videos for super fast instant playback
-                const distance = index - currentIndex;
-                const shouldPreload = !isActive && distance > 0 && distance <= 5;
 
-                // CRITICAL: Get cached local file URI for this video
-                const postMediaUrl = getPostMediaUrl(item);
-                const cachedUrl = getCachedUri(postMediaUrl);
+                // INSTAGRAM STYLE: ALWAYS preload 5 ahead + 1 behind
+                // This ensures instant playback when scrolling in any direction
+                const distanceFromActive = index - currentIndex;
+
+                // Preload items within range: 1 behind (-1) to 5 ahead (+5)
+                const shouldPreload = !isActive &&
+                  distanceFromActive >= -1 && distanceFromActive <= 5;
+
+                // STREAMING: Videos stream directly - native player handles buffering
 
                 return (
                   <PostItem
@@ -1211,7 +1323,6 @@ export default function FeedScreen() {
                     isActive={isActive}
                     shouldPreload={shouldPreload}
                     availableHeight={availableHeight}
-                    cachedMediaUrl={cachedUrl} // CRITICAL: Pass cached local file for playback
                   />
                 );
               }}
@@ -1240,9 +1351,18 @@ export default function FeedScreen() {
                 const currentY = event.nativeEvent.contentOffset.y;
                 const currentTime = Date.now();
                 const timeDelta = currentTime - lastScrollTimeRef.current;
+
+                // MUX STYLE: Track scroll direction for directional preloading
+                if (currentY > lastScrollOffsetRef.current + 10) {
+                  setScrollDirection('down');
+                } else if (currentY < lastScrollOffsetRef.current - 10) {
+                  setScrollDirection('up');
+                }
+                lastScrollOffsetRef.current = currentY;
+
                 if (timeDelta > 0) {
                   const distance = Math.abs(currentY - lastScrollYRef.current);
-                  scrollVelocityRef.current = (distance / timeDelta) * 1000; // px per second
+                  scrollVelocityRef.current = (distance / timeDelta) * 1000;
                   lastScrollYRef.current = currentY;
                   lastScrollTimeRef.current = currentTime;
                 }

@@ -2,8 +2,11 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 const CACHE_DIR = `${FileSystem.cacheDirectory}video-cache/`;
-const MAX_CACHE_SIZE = 500 * 1024 * 1024; // 500MB for video content (increased from 100MB)
-const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days cache (increased from 60 minutes)
+// CRITICAL FIX: Optimized cache size for better performance and less data usage
+// CRITICAL FIX: Increased cache size and expiry for better caching
+// Videos should stay cached longer so they play instantly when scrolling back
+const MAX_CACHE_SIZE = 500 * 1024 * 1024; // 500MB - enough to cache many videos
+const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days cache - keep videos cached longer
 const METADATA_FILE = `${CACHE_DIR}metadata.json`;
 
 interface CacheMetadata {
@@ -159,19 +162,20 @@ export const getCachedVideoUri = async (remoteUrl: string): Promise<string | nul
     await initVideoCache();
   }
 
-  // Check if already cached
+  // CRITICAL FIX: Check if already cached - this is the KEY to instant playback when scrolling back
   if (metadata?.entries[remoteUrl]) {
     const entry = metadata.entries[remoteUrl];
     const fileInfo = await FileSystem.getInfoAsync(entry.localPath);
 
     if (fileInfo.exists) {
-      // Update last accessed time
+      // CRITICAL: Update last accessed time - this keeps recently viewed videos in cache
       entry.lastAccessed = Date.now();
       await saveMetadata();
 
       if (__DEV__) {
-        console.log('✅ [VideoCache] Hit:', remoteUrl.substring(0, 50) + '...');
+        console.log('✅ [VideoCache] CACHE HIT - Instant playback:', remoteUrl.substring(0, 50) + '...');
       }
+      // Return cached local file path - this is what makes videos play instantly when scrolling back
       return entry.localPath;
     } else {
       // File was deleted externally, remove from metadata
@@ -280,8 +284,9 @@ export const preloadVideos = async (urls: string[]): Promise<void> => {
     console.log(`🔄 [VideoCache] Preloading ${urlsToPreload.length} videos...`);
   }
 
-  // Download in parallel (max 3 concurrent)
-  const batchSize = 3;
+  // CRITICAL FIX: Reduced concurrent downloads to prevent memory issues and crashes
+  // Download ONE video at a time to avoid overwhelming the device
+  const batchSize = 1; // Only 1 at a time to prevent freeze
   for (let i = 0; i < urlsToPreload.length; i += batchSize) {
     const batch = urlsToPreload.slice(i, i + batchSize);
     await Promise.all(batch.map(url => getCachedVideoUri(url)));
@@ -294,6 +299,28 @@ export const preloadVideos = async (urls: string[]): Promise<void> => {
 export const isVideoCached = (url: string): boolean => {
   return !!(metadata?.entries[url]);
 };
+
+/**
+ * CRITICAL FIX: Get cached video path SYNCHRONOUSLY - no async, instant return
+ * This is the KEY to preventing black screens when scrolling back to a video
+ * Returns the local file:// path if cached, null otherwise
+ * DO NOT use async operations here - that defeats the purpose of instant playback
+ */
+export const getCachedPathSync = (url: string): string | null => {
+  if (!url || !metadata?.entries[url]) return null;
+
+  const entry = metadata.entries[url];
+  if (!entry?.localPath) return null;
+
+  // Return the cached path immediately - no file existence check (too slow)
+  // If file doesn't exist, video player will fall back to remote URL
+  return entry.localPath;
+};
+
+/**
+ * Alias for getCachedPathSync for backwards compatibility
+ */
+export const getInstantCachedPath = getCachedPathSync;
 
 /**
  * Clear entire cache

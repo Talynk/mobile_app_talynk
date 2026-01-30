@@ -53,38 +53,41 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
   const videoRef = useRef<Video>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
+  const [imageError, setImageError] = useState(false); // FIX: Track image load errors
+  const [imageLoaded, setImageLoaded] = useState(false); // FIX: Track image load state
 
-  const videoUrl = getFileUrl(post.video_url || post.videoUrl || '');
-  const isVideo = !!videoUrl;
+  // CRITICAL: Check what type this ACTUALLY is based on URL extension
+  const actualMediaUrl = (post as any).fullUrl || post.video_url || post.videoUrl || '';
+  const isActuallyVideo = actualMediaUrl.endsWith('.mp4') || actualMediaUrl.endsWith('.mov') || actualMediaUrl.endsWith('.webm');
 
-  // Get fallback image URL
-  const fallbackImageUrl = getThumbnailUrl(post) || getFileUrl(post.image || (post as any).thumbnail || '');
+  // For profile grid: Use fullUrl FIRST (it's the only field with data!)
+  // API returns: image=undefined, imageUrl=undefined, but fullUrl has the URL
+  const thumbnailUrl = (post as any).fullUrl || getThumbnailUrl(post) || getPostMediaUrl(post) || '';
 
-  // Generate thumbnail for videos, use image directly for non-videos
+  // Generate thumbnail for videos, use URL directly for images
   const generatedThumbnail = useVideoThumbnail(
-    isVideo ? videoUrl : null,
-    fallbackImageUrl || '',
-    1000 // Extract thumbnail at 1 second
+    isActuallyVideo ? actualMediaUrl : null,
+    thumbnailUrl,
+    1000
   );
 
-  // For videos: use generated thumbnail, fallback to provided image
-  // For images: use image directly
-  const staticThumbnailUrl = isVideo
-    ? (generatedThumbnail || fallbackImageUrl)
-    : getPostMediaUrl(post) || '';
+  // FINAL: Use generated thumbnail for videos, direct URL for images
+  const staticThumbnailUrl = isActuallyVideo
+    ? (generatedThumbnail || thumbnailUrl)
+    : thumbnailUrl;
 
   const [cachedVideoUrl, setCachedVideoUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isVideo && videoUrl) {
-      getCachedVideoUri(videoUrl).then(uri => {
+    if (isActuallyVideo && actualMediaUrl) {
+      getCachedVideoUri(actualMediaUrl).then(uri => {
         if (uri) setCachedVideoUrl(uri);
       });
     }
-  }, [isVideo, videoUrl]);
+  }, [isActuallyVideo, actualMediaUrl]);
 
   useEffect(() => {
-    if (isActive && isVideo && videoUrl) {
+    if (isActive && isActuallyVideo && actualMediaUrl) {
       // Small delay before showing video to ensure smooth transition
       const timer = setTimeout(() => {
         setShowVideo(true);
@@ -98,7 +101,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
         videoRef.current.pauseAsync().catch(() => { });
       }
     }
-  }, [isActive, isVideo, videoUrl]);
+  }, [isActive, isActuallyVideo, actualMediaUrl]);
 
   const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
     if (status.isLoaded) {
@@ -118,33 +121,29 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       activeOpacity={0.9}
     >
       {/* Static thumbnail image - always visible in background */}
-      {staticThumbnailUrl ? (
+      {staticThumbnailUrl && !imageError ? (
         <Image
           source={{ uri: staticThumbnailUrl }}
           style={styles.postMedia}
           resizeMode="cover"
+          onLoad={() => setImageLoaded(true)}
           onError={() => {
-            // If generated thumbnail fails, fallback to provided image
-            if (isVideo && fallbackImageUrl && staticThumbnailUrl !== fallbackImageUrl) {
-              // This will be handled by the hook's fallback
-            }
+            // FIX: Set error state to show fallback icon
+            setImageError(true);
           }}
         />
       ) : (
         <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-          {isVideo && !staticThumbnailUrl ? (
-            <ActivityIndicator size="small" color="#60a5fa" />
-          ) : (
-            <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
-          )}
+          {/* Show icon when no image or image failed */}
+          <MaterialIcons name={isActuallyVideo ? "video-library" : "image"} size={28} color="#666" />
         </View>
       )}
 
       {/* Video teaser overlay - only when active */}
-      {showVideo && isVideo && videoUrl && isActive && (
+      {showVideo && isActuallyVideo && actualMediaUrl && isActive && (
         <Video
           ref={videoRef}
-          source={{ uri: cachedVideoUrl || videoUrl }}
+          source={{ uri: cachedVideoUrl || actualMediaUrl }}
           style={[styles.postMedia, styles.teaserVideo]}
           resizeMode={ResizeMode.COVER}
           shouldPlay={isActive}
@@ -191,7 +190,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       </View>
 
       {/* Video play indicator / Active indicator */}
-      {isVideo && (
+      {isActuallyVideo && (
         <View style={[
           styles.videoPlayIndicator,
           isActive && styles.videoPlayIndicatorActive
@@ -307,11 +306,21 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState('active');
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
 
+  // CRITICAL FIX: Define onViewableItemsChanged outside JSX to fix React Hooks error
+  const onViewableItemsChangedRef = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      // Get the first visible item index
+      const firstIndex = viewableItems[0].index || 0;
+      setFirstVisibleIndex(firstIndex);
+    }
+  });
+
   // Preload videos based on scroll position (dynamic preloading)
+  // DISABLED to prevent app freeze
   useVideoPreload(posts, firstVisibleIndex, {
-    preloadCount: 6, // Preload 2 rows ahead (3 cols x 2 rows = 6 items)
+    preloadCount: 0, // DISABLED
     direction: 'forward',
-    enabled: activeTab === 'active',
+    enabled: false, // COMPLETELY DISABLED
   });
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -994,7 +1003,8 @@ export default function ProfileScreen() {
             params: {
               userId: user?.id || '',
               initialPostId: item.id,
-              status: activeTab
+              status: activeTab,
+              initialPostData: JSON.stringify(item) // CRITICAL: Pass data for instant loading
             }
           });
         }}
@@ -1088,13 +1098,7 @@ export default function ProfileScreen() {
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#60a5fa" />
         }
-        onViewableItemsChanged={useRef(({ viewableItems }: any) => {
-          if (viewableItems && viewableItems.length > 0) {
-            // Get the first visible item index
-            const firstIndex = viewableItems[0].index || 0;
-            setFirstVisibleIndex(firstIndex);
-          }
-        }).current}
+        onViewableItemsChanged={onViewableItemsChangedRef.current}
         viewabilityConfig={{
           itemVisiblePercentThreshold: 10
         }}

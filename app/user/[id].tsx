@@ -19,6 +19,7 @@ import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
+import { getPostMediaUrl } from '@/lib/utils/file-url';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { useRealtime } from '@/lib/realtime-context';
@@ -48,25 +49,25 @@ interface VideoThumbnailCardProps {
 const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
   const videoRef = useRef<Video>(null);
   const [showVideo, setShowVideo] = useState(false);
-  
+
   const videoUrl = post.video_url || post.videoUrl || '';
   const isVideo = !!videoUrl;
-  
+
   // Get fallback image URL
   const fallbackImageUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
-  
+
   // Generate thumbnail for videos, use image directly for non-videos
   const generatedThumbnail = useVideoThumbnail(
     isVideo ? videoUrl : null,
     fallbackImageUrl,
     1000 // Extract thumbnail at 1 second
   );
-  
+
   // For videos: use generated thumbnail, fallback to provided image
-  // For images: use image directly
-  const staticThumbnailUrl = isVideo 
+  // For images: use robust getPostMediaUrl which prioritizes fullUrl
+  const staticThumbnailUrl = isVideo
     ? (generatedThumbnail || fallbackImageUrl)
-    : (post.image || post.imageUrl || post.fullUrl || '');
+    : (getPostMediaUrl(post) || post.fullUrl || post.image || post.imageUrl || '');
 
   useEffect(() => {
     if (isActive && isVideo && videoUrl) {
@@ -76,7 +77,7 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
       setShowVideo(false);
       // Stop video when not active
       if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => {});
+        videoRef.current.pauseAsync().catch(() => { });
       }
     }
   }, [isActive, isVideo, videoUrl]);
@@ -88,7 +89,7 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
   };
 
   return (
-    <TouchableOpacity 
+    <TouchableOpacity
       onPress={onPress}
       style={[styles.postCard, { backgroundColor: cardColor }]}
       activeOpacity={0.9}
@@ -97,9 +98,9 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
       <View style={styles.videoThumbnail}>
         {/* Static thumbnail image - always visible in background */}
         {staticThumbnailUrl ? (
-          <Image 
-            source={{ uri: staticThumbnailUrl }} 
-            style={styles.postImage} 
+          <Image
+            source={{ uri: staticThumbnailUrl }}
+            style={styles.postImage}
             resizeMode="cover"
             onError={() => {
               // If generated thumbnail fails, fallback to provided image
@@ -117,7 +118,7 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
             )}
           </View>
         )}
-        
+
         {/* Video teaser overlay - only when active */}
         {showVideo && isVideo && videoUrl && isActive && (
           <Video
@@ -132,7 +133,7 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
             onPlaybackStatusUpdate={handlePlaybackStatus}
           />
         )}
-        
+
         {/* Play indicator */}
         {isVideo && (
           <View style={[styles.playIconOverlay, isActive && styles.playIconActive]}>
@@ -146,7 +147,7 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
           </View>
         )}
       </View>
-      
+
       {/* Caption and Stats */}
       <View style={styles.postFooter}>
         <Text style={[styles.postCaption, { color: '#fff' }]} numberOfLines={2}>
@@ -159,10 +160,10 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
         )}
         <View style={styles.postFooterActions}>
           <View style={styles.postAction}>
-            <Feather 
-              name="heart" 
-              size={14} 
-              color={(post.likes || 0) > 0 ? "#ff2d55" : "#999"} 
+            <Feather
+              name="heart"
+              size={14}
+              color={(post.likes || 0) > 0 ? "#ff2d55" : "#999"}
             />
             <Text style={[styles.postActionText, { color: secondaryColor }]}>
               {post.likes || 0}
@@ -239,12 +240,12 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const { sendFollowAction, isConnected } = useRealtime();
   const C = COLORS.dark; // Force dark mode
   const navigation = useNavigation();
-  
+
   // Video teaser playback state
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const teaserIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
 
@@ -252,20 +253,20 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   useEffect(() => {
     if (isScreenFocused && approvedPosts.length > 0) {
       const videoPosts = approvedPosts.filter(p => !!p.video_url);
-      
+
       if (videoPosts.length > 0) {
         if (teaserIntervalRef.current) {
           clearInterval(teaserIntervalRef.current);
         }
-        
+
         teaserIntervalRef.current = setInterval(() => {
           setActiveTeaserIndex(prev => {
             const videoIndices = approvedPosts
               .map((p, i) => p.video_url ? i : -1)
               .filter(i => i !== -1);
-            
+
             if (videoIndices.length === 0) return 0;
-            
+
             const currentPos = videoIndices.indexOf(prev);
             const nextPos = (currentPos + 1) % videoIndices.length;
             return videoIndices[nextPos] ?? 0;
@@ -273,7 +274,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         }, 4000);
       }
     }
-    
+
     return () => {
       if (teaserIntervalRef.current) {
         clearInterval(teaserIntervalRef.current);
@@ -326,8 +327,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         setProfileError(errorMsg);
         setError({
           type: isNetworkError ? 'network' : 'server',
-          message: isNetworkError 
-            ? 'No internet connection. Please check your network and try again.' 
+          message: isNetworkError
+            ? 'No internet connection. Please check your network and try again.'
             : errorMsg
         });
       } finally {
@@ -345,7 +346,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         // Check if I'm following them
         const response = await followsApi.checkFollowing(id as string);
         setIsFollowing(!!response.data?.isFollowing);
-        
+
         // Check if they follow me back by checking my followers list
         try {
           const myFollowersResponse = await followsApi.getFollowers(currentUser.id, 1, 100);
@@ -390,8 +391,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         console.log('Follow action detected for user:', id);
         // Update followers count
         if (profile) {
-          const newFollowersCount = data.action === 'follow' 
-            ? (profile.followers_count || 0) + 1 
+          const newFollowersCount = data.action === 'follow'
+            ? (profile.followers_count || 0) + 1
             : Math.max(0, (profile.followers_count || 0) - 1);
           setProfile(prev => prev ? { ...prev, followers_count: newFollowersCount } : null);
         }
@@ -406,8 +407,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         fetchApprovedPosts();
         // Update profile stats based on action
         if (profile) {
-          const newPostsCount = data.action === 'approve' 
-            ? (profile.posts_count || 0) + 1 
+          const newPostsCount = data.action === 'approve'
+            ? (profile.posts_count || 0) + 1
             : Math.max(0, (profile.posts_count || 0) - 1);
           setProfile(prev => prev ? { ...prev, posts_count: newPostsCount } : null);
         }
@@ -436,8 +437,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       const response = await userApi.getUserApprovedPosts(id as string);
       if (response.status === 'success' && response.data) {
         // Handle both array and object with posts property
-        const posts = Array.isArray(response.data) 
-          ? response.data 
+        const posts = Array.isArray(response.data)
+          ? response.data
           : (response.data as any)?.posts || [];
         // Normalize backend shapes so UI always has `user`, `fullUrl`, and consistent fields
         const normalized = (posts as any[]).map((p: any) => {
@@ -470,8 +471,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       }
     } catch (err: any) {
       const isNetworkError = err?.message?.includes('Network') || err?.code === 'NETWORK_ERROR';
-      setPostsError(isNetworkError 
-        ? 'Network error. Please check your connection.' 
+      setPostsError(isNetworkError
+        ? 'Network error. Please check your connection.'
         : err?.message || 'Failed to fetch posts');
     } finally {
       setLoadingPosts(false);
@@ -497,8 +498,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             setProfile(profileResponse.data);
           }
           if (postsResponse.status === 'success' && postsResponse.data) {
-            const posts = Array.isArray(postsResponse.data) 
-              ? postsResponse.data 
+            const posts = Array.isArray(postsResponse.data)
+              ? postsResponse.data
               : (postsResponse.data as any)?.posts || [];
             const normalized = (posts as any[]).map((p: any) => {
               const userFromPost = p.user;
@@ -535,7 +536,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   const handleFollow = async () => {
     if (!id || !currentUser) return;
-    
+
     setFollowLoading(true);
     try {
       const response = await followsApi.follow(id as string);
@@ -562,7 +563,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   const handleUnfollow = async () => {
     if (!id || !currentUser) return;
-    
+
     setFollowLoading(true);
     try {
       const response = await followsApi.unfollow(id as string);
@@ -591,10 +592,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     // Navigate to full-screen profile feed with current post as initial
     router.push({
       pathname: '/profile-feed/[userId]',
-      params: { 
-        userId: id as string, 
+      params: {
+        userId: id as string,
         initialPostId: post.id,
-        status: 'active'
+        status: 'active',
+        initialPostData: JSON.stringify(post) // CRITICAL: Pass data for instant loading
       }
     });
   };
@@ -613,7 +615,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   const handleSharePost = async () => {
     if (!selectedPost) return;
-    
+
     try {
       const mediaUrl = selectedPost.video_url || selectedPost.image;
       await Share.share({
@@ -628,7 +630,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   const handleDownloadPost = async () => {
     if (!selectedPost) return;
-    
+
     try {
       const mediaUrl = selectedPost.video_url || selectedPost.image;
       if (mediaUrl) {
@@ -696,8 +698,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               Please check your internet connection
             </Text>
           )}
-          <TouchableOpacity 
-            style={[styles.retryButton, { backgroundColor: C.primary }]} 
+          <TouchableOpacity
+            style={[styles.retryButton, { backgroundColor: C.primary }]}
             onPress={onRefresh}
           >
             <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
@@ -711,7 +713,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.header, { backgroundColor: C.background, borderBottomColor: C.border }]}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
         >
@@ -723,7 +725,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         refreshControl={
           <RefreshControl
@@ -785,7 +787,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
           {/* Stats */}
           <View style={[styles.statsRow, { borderTopColor: C.border, borderTopWidth: 1, paddingTop: 20, marginTop: 20 }]}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
                 router.push({
@@ -797,7 +799,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               <Text style={[styles.statValue, { color: C.text }]}>{approvedPosts.length}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Posts</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
                 router.push({
@@ -809,7 +811,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               <Text style={[styles.statValue, { color: C.text }]}>{profile?.followers_count ?? 0}</Text>
               <Text style={[styles.statLabel, { color: C.textSecondary }]}>Followers</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.statItem, { backgroundColor: C.background }]}
               onPress={() => {
                 router.push({
@@ -825,13 +827,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
           {/* Follow Button */}
           {currentUser && currentUser.id !== id && (
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={isFollowing ? handleUnfollow : handleFollow}
               disabled={followLoading}
               style={[
                 styles.followButton,
-                { 
-                  backgroundColor: isFollowing ? 'transparent' : C.primary, 
+                {
+                  backgroundColor: isFollowing ? 'transparent' : C.primary,
                   borderColor: C.primary,
                   borderWidth: 1,
                   marginTop: 20
@@ -864,8 +866,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             <View style={styles.loadingContainer}>
               <MaterialIcons name="error-outline" size={32} color={C.textSecondary} />
               <Text style={[styles.errorText, { color: C.textSecondary }]}>{postsError}</Text>
-              <TouchableOpacity 
-                style={[styles.retryButton, { backgroundColor: C.primary, marginTop: 12 }]} 
+              <TouchableOpacity
+                style={[styles.retryButton, { backgroundColor: C.primary, marginTop: 12 }]}
                 onPress={fetchApprovedPosts}
               >
                 <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
@@ -898,10 +900,10 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           )}
         </View>
       </ScrollView>
-      
+
       {/* Post Modal Overlay */}
       <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
-        <View style={[styles.overlayBackdrop, { backgroundColor: 'rgba(0,0,0,0.95)' }]}> 
+        <View style={[styles.overlayBackdrop, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
           <View style={styles.overlayContent}>
             <TouchableOpacity style={styles.overlayClose} onPress={handleClosePostModal}>
               <MaterialIcons name="close" size={28} color="#fff" />

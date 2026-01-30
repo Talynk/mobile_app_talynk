@@ -55,7 +55,7 @@ export default function PostDetailScreen() {
   const { isMuted, toggleMute } = useVideoMute();
   const videoRef = useRef<Video>(null);
   const insets = useSafeAreaInsets();
-  
+
   // Try to parse postData if it was passed
   let initialPost = null;
   if (postData && typeof postData === 'string') {
@@ -65,7 +65,7 @@ export default function PostDetailScreen() {
       initialPost = null;
     }
   }
-  
+
   const [post, setPost] = useState<any>(initialPost || null);
   const [loading, setLoading] = useState(!initialPost);
   const [comments, setComments] = useState<any[]>([]);
@@ -87,7 +87,7 @@ export default function PostDetailScreen() {
     try {
       setLoading(true);
       const response = await postsApi.getById(id as string);
-      
+
       // Log post structure for debugging
       if (__DEV__) {
         console.log('📥 [fetchPost] API Response:', {
@@ -104,7 +104,7 @@ export default function PostDetailScreen() {
           fullPost: response.data,
         });
       }
-      
+
       if (response.status === 'success' && response.data) {
         setPost(response.data);
       }
@@ -140,7 +140,7 @@ export default function PostDetailScreen() {
 
     try {
       const response = await likesApi.toggle(post.id);
-      
+
       if (response.status === 'success' && response.data) {
         setPost((prev: any) => ({
           ...prev,
@@ -156,7 +156,7 @@ export default function PostDetailScreen() {
     } catch (error: any) {
       // Revert on error
       updateLikedPosts(post.id, isCurrentlyLiked);
-      
+
       const isPostNotFound = error?.message?.includes('not found') || error?.message?.includes('Post not found');
       if (!isPostNotFound) {
         console.error('Like toggle error:', error);
@@ -173,12 +173,12 @@ export default function PostDetailScreen() {
 
     const isCurrentlyFollowing = followedUsers.has(post.user?.id || '');
     setFollowLoading(true);
-    
+
     try {
       const response = isCurrentlyFollowing
         ? await followsApi.unfollow(post.user.id)
         : await followsApi.follow(post.user.id);
-      
+
       if (response.status === 'success') {
         updateFollowedUsers(post.user.id, !isCurrentlyFollowing);
       }
@@ -196,7 +196,7 @@ export default function PostDetailScreen() {
     }
 
     if (!commentText.trim()) return;
-    
+
     setCommentLoading(true);
     try {
       const response = await postsApi.addComment(id as string, commentText);
@@ -250,7 +250,7 @@ export default function PostDetailScreen() {
   const getMediaUrl = () => {
     return getPostMediaUrl(post);
   };
-  
+
   const mediaUrl = getMediaUrl();
   const hasValidMedia = mediaUrl && mediaUrl.trim() !== '';
   const isVideo =
@@ -267,9 +267,9 @@ export default function PostDetailScreen() {
       toggleMute();
     }
   };
-  
+
   return (
-    <KeyboardAvoidingView 
+    <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
@@ -279,7 +279,7 @@ export default function PostDetailScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        
+
         <View style={styles.headerUserInfo}>
           <Avatar
             user={post.user}
@@ -287,9 +287,9 @@ export default function PostDetailScreen() {
             style={styles.headerAvatar}
           />
           <Text style={styles.headerUsername}>@{post.user?.username || post.user?.name || 'unknown'}</Text>
-          
+
           {user && user.id !== post.user?.id && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.followButton,
                 { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }
@@ -306,18 +306,18 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           )}
         </View>
-        
+
         <View style={styles.headerRight}>
           {/* Report Button - Directly visible */}
           {user && user.id !== post.user?.id && (
-            <TouchableOpacity 
-              onPress={() => setReportModalVisible(true)} 
+            <TouchableOpacity
+              onPress={() => setReportModalVisible(true)}
               style={styles.reportButton}
             >
               <Feather name="flag" size={20} color="#ef4444" />
             </TouchableOpacity>
           )}
-          
+
           {/* Menu Button */}
           <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.headerMenu}>
             <Feather name="more-vertical" size={24} color="#fff" />
@@ -341,12 +341,12 @@ export default function PostDetailScreen() {
                   style={styles.media}
                   resizeMode={ResizeMode.CONTAIN}
                   useNativeControls
-                  shouldPlay={false}
+                  shouldPlay={true}
                   isLooping={false}
                   isMuted={isMuted}
                   volume={isMuted ? 0 : 1}
                 />
-                
+
                 {/* Mute indicator - click to toggle */}
                 {isMuted && (
                   <View style={styles.muteIndicatorContainer}>
@@ -357,9 +357,9 @@ export default function PostDetailScreen() {
                 )}
               </TouchableOpacity>
             ) : (
-              <Image 
-                source={{ uri: mediaUrl! }} 
-                style={styles.media} 
+              <Image
+                source={{ uri: mediaUrl! }}
+                style={styles.media}
                 resizeMode="contain"
                 onError={() => {
                   console.error('[Post Detail] Failed to load image:', mediaUrl);
@@ -378,27 +378,27 @@ export default function PostDetailScreen() {
       {/* Actions Bar */}
       <View style={styles.actionsBar}>
         <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-          <Feather 
-            name="heart" 
-            size={24} 
-            color={isLiked ? "#ff2d55" : "#fff"} 
+          <Feather
+            name="heart"
+            size={24}
+            color={isLiked ? "#ff2d55" : "#fff"}
             fill={isLiked ? "#ff2d55" : "none"}
           />
           <Text style={styles.actionText}>{post.likes || 0}</Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity style={styles.actionButton}>
           <Feather name="message-circle" size={24} color="#fff" />
           <Text style={styles.actionText}>{comments.length}</Text>
         </TouchableOpacity>
-        
+
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
           <Feather name="share-2" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
 
       {/* Post Info and Comments - Scrollable */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={styles.scrollContentContainer}
         showsVerticalScrollIndicator={false}
@@ -409,7 +409,7 @@ export default function PostDetailScreen() {
             {post.caption || post.description || post.content || ''}
           </Text>
           {post.category && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.categoryBadge}
               onPress={() => router.push({
                 pathname: '/category/[name]',
@@ -431,7 +431,7 @@ export default function PostDetailScreen() {
         {/* Comments */}
         <View style={styles.commentsSection}>
           <Text style={styles.commentsTitle}>Comments</Text>
-          
+
           {comments.length > 0 ? (
             comments.map((item, index) => (
               <View key={item.comment_id?.toString() || `comment-${index}`} style={styles.commentItem}>
@@ -448,8 +448,8 @@ export default function PostDetailScreen() {
                     {item.comment_text || item.content || item.comment || ''}
                   </Text>
                   <Text style={styles.commentDate}>
-                    {item.comment_date || item.createdAt || item.created_at 
-                      ? new Date(item.comment_date || item.createdAt || item.created_at).toLocaleDateString() 
+                    {item.comment_date || item.createdAt || item.created_at
+                      ? new Date(item.comment_date || item.createdAt || item.created_at).toLocaleDateString()
                       : ''}
                   </Text>
                 </View>
@@ -471,7 +471,7 @@ export default function PostDetailScreen() {
           onChangeText={setCommentText}
           multiline
         />
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={handleAddComment}
           disabled={!commentText.trim() || commentLoading}
           style={[
@@ -489,13 +489,13 @@ export default function PostDetailScreen() {
 
       {/* Menu Modal */}
       <Modal visible={menuVisible} transparent animationType="fade">
-        <TouchableOpacity 
-          style={styles.menuOverlay} 
+        <TouchableOpacity
+          style={styles.menuOverlay}
           onPress={() => setMenuVisible(false)}
           activeOpacity={1}
         >
           <View style={styles.menuContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
@@ -505,8 +505,8 @@ export default function PostDetailScreen() {
               <Feather name="share-2" size={20} color="#fff" />
               <Text style={styles.menuItemText}>Share</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);

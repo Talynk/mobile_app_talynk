@@ -43,7 +43,7 @@ export default function SearchScreen() {
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
-    
+
     setLoading(true);
     try {
       if (activeTab === 'top') {
@@ -52,12 +52,12 @@ export default function SearchScreen() {
           userApi.search(searchQuery).catch(() => ({ status: 'error', data: { users: [] } })),
           postsApi.search(searchQuery).catch(() => ({ status: 'error', data: [] }))
         ]);
-        
+
         const users = usersRes.status === 'success' ? (usersRes.data.users || []) : [];
-        const posts = postsRes.status === 'success' 
+        const posts = postsRes.status === 'success'
           ? (postsRes.data.posts || (Array.isArray(postsRes.data) ? postsRes.data : []))
           : [];
-        
+
         setUsersResults(users);
         setPostsResults(posts);
         // Combine for display - users first, then posts
@@ -83,7 +83,7 @@ export default function SearchScreen() {
           setSearchResults([]);
         }
       }
-      
+
       // Add to recent searches
       setRecentSearches(prev => [
         searchQuery,
@@ -114,11 +114,14 @@ export default function SearchScreen() {
     const isVideo = !!(item.video_url || item.videoUrl);
 
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.postResult}
         onPress={() => router.push({
           pathname: '/post/[id]',
-          params: { id: item.id }
+          params: {
+            id: item.id,
+            postData: JSON.stringify(item) // CRITICAL: Pass data for instant loading 
+          }
         })}
       >
         {isVideo ? (
@@ -134,7 +137,7 @@ export default function SearchScreen() {
         ) : (
           <Image source={{ uri: mediaUrl }} style={styles.resultMedia} />
         )}
-        
+
         <View style={styles.resultOverlay}>
           <View style={styles.resultStats}>
             <View style={styles.resultStat}>
@@ -173,7 +176,7 @@ export default function SearchScreen() {
   const renderUserResult = ({ item }: { item: User }) => {
     const isFollowing = followedUsers.has(item.id);
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.userResult}
         onPress={() => router.push({
           pathname: '/user/[id]',
@@ -193,7 +196,7 @@ export default function SearchScreen() {
           </Text>
         </View>
         {user && user.id !== item.id && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.followButton,
               isFollowing && styles.followingButton
@@ -228,7 +231,7 @@ export default function SearchScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        
+
         <View style={styles.searchContainer}>
           <Feather name="search" size={20} color="#666" />
           <TextInput
@@ -259,10 +262,10 @@ export default function SearchScreen() {
             ]}
             onPress={() => setActiveTab(tab.key)}
           >
-            <Feather 
-              name={tab.icon as any} 
-              size={16} 
-              color={activeTab === tab.key ? '#60a5fa' : '#666'} 
+            <Feather
+              name={tab.icon as any}
+              size={16}
+              color={activeTab === tab.key ? '#60a5fa' : '#666'}
             />
             <Text style={[
               styles.searchTabText,

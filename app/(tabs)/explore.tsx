@@ -434,7 +434,7 @@ export default function ExploreScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* CRITICAL FIX: Header with search bar at top - no tabs */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.searchBar}>
           <Feather name="search" size={20} color="#666" style={styles.searchIcon} />

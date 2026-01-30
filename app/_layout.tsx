@@ -129,8 +129,9 @@ function RootLayoutNav() {
             <Stack 
               screenOptions={{ 
                 headerShown: false,
-                // Animation optimization
-                animation: 'fade',
+                // CRITICAL FIX: Use 'none' animation for instant navigation - no delays
+                animation: 'none', // Changed from 'fade' to 'none' for super fast navigation
+                animationDuration: 0, // Instant transitions
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

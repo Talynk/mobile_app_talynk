@@ -591,73 +591,100 @@ export default function CreatePostScreen() {
       const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
 
       recordingPromise.then(async (video) => {
-        // Check if component is still mounted before any state updates
-        if (!isMountedRef.current) {
-          console.log('[Recording] Component unmounted, skipping state updates');
-          return;
-        }
-
-        setIsRecording(false);
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-
-        if (video && video.uri) {
-          if (recordingDuration > 150) {
-            Alert.alert(
-              'Video Too Long',
-              'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
-            );
-            if (isMountedRef.current) {
-              setShowCamera(false);
-              setRecordingDuration(0);
-            }
+        // CRITICAL FIX: Prevent crash by ensuring all operations are safe
+        // Use setTimeout to defer state updates and prevent race conditions
+        setTimeout(async () => {
+          // Check if component is still mounted before any state updates
+          if (!isMountedRef.current) {
+            console.log('[Recording] Component unmounted, skipping state updates');
             return;
           }
 
-          // Generate thumbnail BEFORE closing camera (prevents crash)
-          let thumbnail: string | null = null;
-          try {
-            thumbnail = await generateThumbnail(video.uri);
-          } catch (thumbError) {
-            console.error('Thumbnail generation error:', thumbError);
+          setIsRecording(false);
+          if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
           }
 
-          // Now update state if still mounted
-          if (isMountedRef.current) {
-            setRecordedVideoUri(video.uri);
-            setEditedVideoUri(null);
-            setCapturedImageUri(null);
-            if (thumbnail) {
-              setThumbnailUri(thumbnail);
+          if (video && video.uri) {
+            // Verify video file exists before processing
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(video.uri);
+              if (!fileInfo.exists) {
+                console.error('[Recording] Video file does not exist:', video.uri);
+                if (isMountedRef.current) {
+                  Alert.alert('Error', 'Video file was not saved properly. Please try again.');
+                  setShowCamera(false);
+                  setRecordingDuration(0);
+                }
+                return;
+              }
+            } catch (fileCheckError) {
+              console.error('[Recording] Error checking video file:', fileCheckError);
+              // Continue anyway - file might still be valid
             }
-            setShowCamera(false);
-            setRecordingDuration(0);
+
+            if (recordingDuration > 150) {
+              Alert.alert(
+                'Video Too Long',
+                'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
+              );
+              if (isMountedRef.current) {
+                setShowCamera(false);
+                setRecordingDuration(0);
+              }
+              return;
+            }
+
+            // CRITICAL FIX: Generate thumbnail AFTER closing camera to prevent crash
+            // Don't block on thumbnail generation - do it asynchronously
+            if (isMountedRef.current) {
+              setRecordedVideoUri(video.uri);
+              setEditedVideoUri(null);
+              setCapturedImageUri(null);
+              setShowCamera(false);
+              setRecordingDuration(0);
+              
+              // Generate thumbnail in background (non-blocking)
+              generateThumbnail(video.uri)
+                .then(thumbnail => {
+                  if (isMountedRef.current && thumbnail) {
+                    setThumbnailUri(thumbnail);
+                  }
+                })
+                .catch(thumbError => {
+                  console.error('Thumbnail generation error (non-critical):', thumbError);
+                  // Don't show error - thumbnail is optional
+                });
+            }
+          } else {
+            if (isMountedRef.current) {
+              Alert.alert('Error', 'Failed to save video. Please try again.');
+              setShowCamera(false);
+              setRecordingDuration(0);
+            }
           }
-        } else {
-          Alert.alert('Error', 'Failed to save video. Please try again.');
-          if (isMountedRef.current) {
-            setShowCamera(false);
-            setRecordingDuration(0);
-          }
-        }
+        }, 100); // Small delay to ensure camera is fully stopped
       }).catch((error: any) => {
         console.error('Recording promise error:', error);
-        if (!isMountedRef.current) return;
+        
+        // CRITICAL FIX: Use setTimeout to prevent crash during error handling
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
 
-        setIsRecording(false);
-        if (recordingTimerRef.current) {
-          clearInterval(recordingTimerRef.current);
-          recordingTimerRef.current = null;
-        }
-        if (error?.message && !error.message.includes('cancel')) {
-          Alert.alert('Error', 'Failed to record video. Please try again.');
-        }
-        if (isMountedRef.current) {
-          setShowCamera(false);
-          setRecordingDuration(0);
-        }
+          setIsRecording(false);
+          if (recordingTimerRef.current) {
+            clearInterval(recordingTimerRef.current);
+            recordingTimerRef.current = null;
+          }
+          if (error?.message && !error.message.includes('cancel')) {
+            Alert.alert('Error', 'Failed to record video. Please try again.');
+          }
+          if (isMountedRef.current) {
+            setShowCamera(false);
+            setRecordingDuration(0);
+          }
+        }, 100);
       });
     } catch (error: any) {
       console.error('Recording error:', error);
