@@ -44,10 +44,11 @@ const COLORS = {
   },
 };
 
-const TABS: Array<{ key: 'my' | 'joined' | 'not_joined'; label: string }> = [
+const TABS: Array<{ key: 'active' | 'upcoming' | 'ended' | 'my'; label: string }> = [
+  { key: 'active', label: 'Active' },
+  { key: 'upcoming', label: 'Upcoming' },
+  { key: 'ended', label: 'Ended' },
   { key: 'my', label: 'Created by Me' },
-  { key: 'joined', label: 'Joined' },
-  { key: 'not_joined', label: 'Not Joined' },
 ];
 
 export default function ChallengesScreen() {
@@ -55,11 +56,11 @@ export default function ChallengesScreen() {
   const colorScheme = useColorScheme() || 'dark';
   const C = COLORS[colorScheme];
 
-  const [activeTab, setActiveTab] = useState<'my' | 'joined' | 'not_joined'>('not_joined');
-  const [allChallenges, setAllChallenges] = useState<any[]>([]);
-  const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'ended' | 'my'>('active');
+  const [activeChallenges, setActiveChallenges] = useState<any[]>([]);
+  const [upcomingChallenges, setUpcomingChallenges] = useState<any[]>([]);
+  const [endedChallenges, setEndedChallenges] = useState<any[]>([]);
   const [myChallenges, setMyChallenges] = useState<any[]>([]);
-  const [notJoinedChallenges, setNotJoinedChallenges] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,9 +84,9 @@ export default function ChallengesScreen() {
     setError(null);
 
     try {
-      const [allRes, joinedRes, myRes] = await Promise.all([
+      const [allRes, endedRes, myRes] = await Promise.all([
         challengesApi.getAll('active'),
-        isAuthenticated ? challengesApi.getJoinedChallenges() : Promise.resolve(null),
+        challengesApi.getAll('ended').catch(() => ({ status: 'success', data: { challenges: [] } })),
         isAuthenticated ? challengesApi.getMyChallenges() : Promise.resolve(null),
       ]);
 
@@ -96,30 +97,30 @@ export default function ChallengesScreen() {
       }
 
       const allListRaw = normalizeChallenges(allRes);
-      const allList = allListRaw.filter((ch: any) => ch.status === 'active' || ch.status === 'approved');
+      const now = new Date();
 
-      const joinedListRaw = joinedRes?.status === 'success' ? normalizeChallenges(joinedRes) : [];
-      const joinedList = joinedListRaw.map((item: any) => item.challenge || item);
+      // Separate active vs upcoming based on date
+      const activeList = allListRaw.filter((ch: any) => {
+        const startDate = new Date(ch.start_date);
+        const endDate = new Date(ch.end_date);
+        return (ch.status === 'active' || ch.status === 'approved') && startDate <= now && endDate >= now;
+      });
+
+      const upcomingList = allListRaw.filter((ch: any) => {
+        const startDate = new Date(ch.start_date);
+        return (ch.status === 'active' || ch.status === 'approved') && startDate > now;
+      });
+
+      const endedListRaw = normalizeChallenges(endedRes);
+      const endedList = endedListRaw.map((item: any) => item.challenge || item);
 
       const myListRaw = myRes?.status === 'success' ? normalizeChallenges(myRes) : [];
       const myList = myListRaw.map((item: any) => item.challenge || item);
 
-      const joinedIds = new Set(joinedList.map((c: any) => c.id));
-      const myIds = new Set([
-        ...myList.map((c: any) => c.id),
-        ...allList
-          .filter((c: any) => c.organizer_id === user?.id || c.organizer?.id === user?.id)
-          .map((c: any) => c.id),
-      ]);
-
-      const notJoined = allList.filter(
-        (c: any) => !joinedIds.has(c.id) && !myIds.has(c.id)
-      );
-
-      setAllChallenges(allList);
-      setJoinedChallenges(joinedList);
+      setActiveChallenges(activeList);
+      setUpcomingChallenges(upcomingList);
+      setEndedChallenges(endedList);
       setMyChallenges(myList);
-      setNotJoinedChallenges(notJoined);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch challenges');
     } finally {
@@ -138,13 +139,12 @@ export default function ChallengesScreen() {
   );
 
   const visibleChallenges = useMemo(() => {
-    // For unauthenticated users: show ALL challenges
-    if (!isAuthenticated) return allChallenges;
-    // For authenticated: show based on active tab
-    if (activeTab === 'joined') return joinedChallenges;
+    if (activeTab === 'active') return activeChallenges;
+    if (activeTab === 'upcoming') return upcomingChallenges;
+    if (activeTab === 'ended') return endedChallenges;
     if (activeTab === 'my') return myChallenges;
-    return notJoinedChallenges;
-  }, [isAuthenticated, activeTab, allChallenges, joinedChallenges, myChallenges, notJoinedChallenges]);
+    return activeChallenges;
+  }, [activeTab, activeChallenges, upcomingChallenges, endedChallenges, myChallenges]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -180,6 +180,14 @@ export default function ChallengesScreen() {
   };
 
   const getChallengeStatus = (challenge: any) => {
+    // Check explicit status field first (important for "Created by Me" tab)
+    if (challenge.status === 'pending' || challenge.status === 'draft') {
+      return { label: 'Pending Review', color: C.warning };
+    }
+    if (challenge.status === 'rejected') {
+      return { label: 'Rejected', color: '#ef4444' };
+    }
+
     // Use is_currently_active field from API if available
     if (challenge.is_currently_active !== undefined) {
       if (challenge.is_currently_active) {
@@ -446,13 +454,15 @@ export default function ChallengesScreen() {
             <View style={styles.emptyContainer}>
               <MaterialIcons name="emoji-events" size={64} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                {!isAuthenticated
-                  ? "No competitions available"
-                  : activeTab === 'joined'
-                    ? "You haven't joined any competitions yet"
-                    : activeTab === 'my'
-                      ? "You haven't created any competitions"
-                      : "No competitions available to join"}
+                {activeTab === 'active'
+                  ? "No active competitions right now"
+                  : activeTab === 'upcoming'
+                    ? "No upcoming competitions"
+                    : activeTab === 'ended'
+                      ? "No ended competitions"
+                      : activeTab === 'my'
+                        ? "You haven't created any competitions"
+                        : "No competitions available"}
               </Text>
             </View>
           }
@@ -538,10 +548,11 @@ export default function ChallengesScreen() {
         onClose={() => setCreateModalVisible(false)}
         onCreated={() => {
           setCreateModalVisible(false);
+          setActiveTab('my');
           fetchChallenges();
           Alert.alert(
-            'Competition Created Successfully! 🎉',
-            'You have successfully created a competition. Your created challenge will appear in the active tab after it has been approved by the system administrators as soon as possible. Thank you for waiting.',
+            'Competition Created! 🎉',
+            'Your competition has been submitted for review. An administrator will review it and you\'ll be notified once it\'s approved. If it gets approved it will appear in the "Created by Me" tab.',
             [{ text: 'OK' }]
           );
         }}

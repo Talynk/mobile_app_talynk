@@ -29,7 +29,8 @@ import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import { Video, ResizeMode, Audio } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Constants from 'expo-constants';
@@ -63,6 +64,152 @@ const COLORS = {
     buttonDisabled: '#444',
   },
 };
+
+/**
+ * Legacy multipart upload via XHR to POST /api/posts
+ * Used for: image uploads (no HLS needed) and fallback when signed URL is unavailable
+ */
+async function _legacyMultipartUpload(
+  mediaUri: string,
+  fileName: string,
+  fileType: string,
+  autoTitle: string,
+  categoryName: string,
+  status: string,
+  fileData: any,
+  categoryId: string,
+  uploadNotificationService: any,
+  setUploading: (v: boolean) => void,
+  setUploadProgress: (v: number) => void,
+  setServerMediaUrl: (v: string | null) => void,
+  setCaption: (v: string) => void,
+  setSelectedGroup: (v: string) => void,
+  setSelectedCategoryId: (v: string) => void,
+  setRecordedVideoUri: (v: string | null) => void,
+  setEditedVideoUri: (v: string | null) => void,
+  setThumbnailUri: (v: string | null) => void,
+  setIsVideoPlaying: (v: boolean) => void,
+  setCapturedImageUri: (v: string | null) => void,
+): Promise<void> {
+  return new Promise<void>((resolveUpload) => {
+    const formData = new FormData();
+    formData.append('title', autoTitle);
+    formData.append('caption', autoTitle); // caption field
+    formData.append('post_category', categoryName);
+    formData.append('category_id', categoryId);
+    formData.append('status', status);
+    formData.append('file', fileData as any);
+
+    const xhr = new XMLHttpRequest();
+    const apiUrl = `${API_BASE_URL}/api/posts`;
+    xhr.open('POST', apiUrl);
+    xhr.setRequestHeader('Accept', 'application/json');
+
+    AsyncStorage.getItem('talynk_token').then((authToken) => {
+      if (!authToken) {
+        setUploading(false);
+        setUploadProgress(0);
+        Alert.alert('Authentication Error', 'Please login again to create posts.');
+        resolveUpload();
+        return;
+      }
+
+      xhr.setRequestHeader('Authorization', `Bearer ${authToken.trim()}`);
+
+      let lastLoggedPercent = -10;
+      xhr.upload.onprogress = async (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
+          setUploadProgress(percent);
+          await uploadNotificationService.showUploadProgress(percent, fileName);
+          if (percent - lastLoggedPercent >= 10 || percent === 100) {
+            console.log(`[Upload] Legacy progress: ${percent}%`);
+            lastLoggedPercent = percent;
+          }
+        }
+      };
+
+      xhr.onload = async () => {
+        setUploading(false);
+        setUploadProgress(0);
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = JSON.parse(xhr.responseText);
+            if (response.status === 'success') {
+              await uploadNotificationService.showUploadComplete(fileName);
+
+              const postData = response.data?.post || response.data;
+              const mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
+              if (mediaUrl) {
+                setServerMediaUrl(mediaUrl);
+              }
+
+              const isVideoPost = postData?.type === 'video';
+              const successMessage = status === 'draft'
+                ? 'Draft saved successfully!'
+                : isVideoPost
+                  ? 'Post published! Video is being optimized for streaming.'
+                  : 'Post published successfully!';
+
+              Alert.alert('Success', successMessage, [
+                {
+                  text: 'View Profile',
+                  onPress: () => {
+                    setServerMediaUrl(null);
+                    setCapturedImageUri(null);
+                    router.replace('/(tabs)/profile');
+                  },
+                },
+              ]);
+
+              setCaption('');
+              setSelectedGroup('');
+              setSelectedCategoryId('');
+              setRecordedVideoUri(null);
+              setEditedVideoUri(null);
+              setThumbnailUri(null);
+              setIsVideoPlaying(false);
+            } else {
+              await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
+              Alert.alert('Error', response.message || 'Failed to create post');
+            }
+          } catch (e) {
+            await uploadNotificationService.showUploadError('Failed to parse server response', fileName);
+            Alert.alert('Error', 'Failed to parse server response.');
+          }
+        } else {
+          let serverMessage = `Server responded with status ${xhr.status}`;
+          try {
+            const parsed = JSON.parse(xhr.responseText);
+            if (parsed?.message) serverMessage = parsed.message;
+          } catch (_) { }
+          await uploadNotificationService.showUploadError(serverMessage, fileName);
+          Alert.alert('Error', serverMessage);
+        }
+        resolveUpload();
+      };
+
+      xhr.onerror = async () => {
+        setUploading(false);
+        setUploadProgress(0);
+        await uploadNotificationService.showUploadError('Network error', fileName);
+        Alert.alert('Error', 'Network error. Please check your connection.');
+        resolveUpload();
+      };
+
+      xhr.ontimeout = async () => {
+        setUploading(false);
+        setUploadProgress(0);
+        await uploadNotificationService.showUploadError('Upload timeout', fileName);
+        Alert.alert('Error', 'Upload timed out. Please try again.');
+        resolveUpload();
+      };
+
+      xhr.send(formData);
+    });
+  });
+}
 
 export default function CreatePostScreen() {
   const params = useLocalSearchParams();
@@ -100,7 +247,13 @@ export default function CreatePostScreen() {
   const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
   const [loadingSubcategories, setLoadingSubcategories] = useState<boolean>(false);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
-  const videoRef = useRef<Video>(null);
+  // expo-video preview player for recorded/captured video
+  const previewPlayer = useVideoPlayer(editedVideoUri || recordedVideoUri, (player) => {
+    if (player) {
+      player.loop = true;
+      player.muted = false;
+    }
+  });
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
@@ -644,7 +797,7 @@ export default function CreatePostScreen() {
               setCapturedImageUri(null);
               setShowCamera(false);
               setRecordingDuration(0);
-              
+
               // Generate thumbnail in background (non-blocking)
               generateThumbnail(video.uri)
                 .then(thumbnail => {
@@ -667,7 +820,7 @@ export default function CreatePostScreen() {
         }, 100); // Small delay to ensure camera is fully stopped
       }).catch((error: any) => {
         console.error('Recording promise error:', error);
-        
+
         // CRITICAL FIX: Use setTimeout to prevent crash during error handling
         setTimeout(() => {
           if (!isMountedRef.current) return;
@@ -1006,203 +1159,202 @@ export default function CreatePostScreen() {
         return;
       }
 
-      const formData = new FormData();
       const autoTitle = caption.trim().substring(0, 50) || 'My Post';
-      formData.append('title', autoTitle);
-      formData.append('caption', caption);
 
-      const categoryId = getSelectedCategoryId();
+      // ============================================================
+      // VIDEO: Signed URL direct-to-R2 upload flow
+      // Step 1: createUpload → Step 2: PUT to R2 → Step 3: completeUpload
+      // ============================================================
+      if (isVideo) {
+        console.log('[Upload] Using signed URL flow for video');
 
-      formData.append('post_category', categoryName);
-      formData.append('category_id', categoryId);
-      formData.append('status', status);
+        // Step 1: Get signed upload URL from backend
+        setUploadProgress(2);
+        await uploadNotificationService.showUploadProgress(2, fileName);
 
-      formData.append('file', fileData as any);
+        const createRes = await postsApi.createUpload({
+          title: autoTitle,
+          caption: caption,
+          post_category: categoryName,
+          status: status,
+        });
 
-      console.log('[Upload] FormData prepared:', {
-        title: autoTitle,
-        caption: caption.substring(0, 50) + '...',
-        categoryName,
-        categoryId,
-        status,
-        fileName,
-        fileType
-      });
-
-      const xhr = new XMLHttpRequest();
-      const apiUrl = `${API_BASE_URL}/api/posts`;
-
-      xhr.open('POST', apiUrl);
-      xhr.setRequestHeader('Accept', 'application/json');
-
-      const authToken = await AsyncStorage.getItem('talynk_token');
-
-      if (!authToken) {
-        setUploading(false);
-        setUploadProgress(0);
-        Alert.alert('Authentication Error', 'Please login again to create posts.');
-        router.push('/auth/login');
-        return;
-      }
-
-      const cleanToken = authToken.trim();
-      xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
-
-      let lastLoggedPercent = -10;
-      xhr.upload.onprogress = async (event) => {
-        if (event.lengthComputable) {
-          const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
-          setUploadProgress(percent);
-          await uploadNotificationService.showUploadProgress(percent, fileName);
-
-          if (percent - lastLoggedPercent >= 10 || percent === 100) {
-            console.log(`Upload progress: ${percent}%`);
-            lastLoggedPercent = percent;
-          }
-        }
-      };
-
-      xhr.onload = async () => {
-        setUploading(false);
-        setUploadProgress(0);
-
-        if (xhr.status === 401) {
-          await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
-          Alert.alert(
-            'Authentication Error',
-            'Authentication failed. Please login again to create posts.',
-            [
-              {
-                text: 'Login',
-                onPress: () => router.push('/auth/login')
-              }
-            ]
+        if (createRes.status !== 'success' || !createRes.data?.uploadUrl) {
+          // Signed URL not available (R2/Redis down) — fall back to legacy multipart
+          console.warn('[Upload] Signed URL unavailable, falling back to legacy multipart:', createRes.message);
+          await _legacyMultipartUpload(
+            mediaUri, fileName, fileType, autoTitle, categoryName, status,
+            fileData, getSelectedCategoryId(), uploadNotificationService,
+            setUploading, setUploadProgress, setServerMediaUrl,
+            setCaption, setSelectedGroup, setSelectedCategoryId as any,
+            setRecordedVideoUri, setEditedVideoUri, setThumbnailUri, setIsVideoPlaying,
+            setCapturedImageUri,
           );
           return;
         }
 
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const response = JSON.parse(xhr.responseText);
-            if (response.status === 'success') {
-              await uploadNotificationService.showUploadComplete(fileName);
+        const { postId, uploadUrl } = createRes.data;
+        console.log('[Upload] Got signed URL for post:', postId);
 
-              // Extract media URL from response for preview
-              // Backend returns: response.data.post.video_url
-              const postData = response.data?.post || response.data;
-              let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
+        // Step 2: Upload video directly to R2 via signed URL
+        setUploadProgress(5);
+        await uploadNotificationService.showUploadProgress(5, fileName);
 
-              // CRITICAL FIX: For images, we need to ensure proper URL handling
-              // Verify the URL is complete and valid before setting
-              if (mediaUrl) {
-                // Add cache busting for fresh image loads
-                const cacheBustUrl = mediaUrl.includes('?')
-                  ? `${mediaUrl}&t=${Date.now()}`
-                  : `${mediaUrl}?t=${Date.now()}`;
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', uploadUrl);
+            xhr.setRequestHeader('Content-Type', 'video/mp4');
 
-                console.log('[Upload] Regular post - URL Details:', {
-                  originalUrl: mediaUrl,
-                  cacheBustUrl: cacheBustUrl,
-                  fileType: postData?.type || 'unknown',
-                  isImage: postData?.type === 'image'
-                });
+            let lastLoggedPercent = -10;
+            xhr.upload.onprogress = async (event) => {
+              if (event.lengthComputable) {
+                // Map upload progress to 5-85% range
+                const rawPercent = Math.round((event.loaded / event.total) * 100);
+                const scaledPercent = 5 + Math.round(rawPercent * 0.80);
+                setUploadProgress(Math.min(scaledPercent, 85));
+                await uploadNotificationService.showUploadProgress(Math.min(scaledPercent, 85), fileName);
 
-                // Use original URL without cache bust to keep it clean
-                // But log both for debugging
-                setServerMediaUrl(mediaUrl);
-                console.log('[Upload] Regular post - Setting server media URL:', mediaUrl);
-              } else {
-                console.warn('[Upload] Regular post - No media URL found in response:', {
-                  responseData: response.data,
-                  postData: postData,
-                  allKeys: postData ? Object.keys(postData) : []
-                });
+                if (rawPercent - lastLoggedPercent >= 10 || rawPercent === 100) {
+                  console.log(`[Upload] R2 upload: ${rawPercent}% (display: ${scaledPercent}%)`);
+                  lastLoggedPercent = rawPercent;
+                }
               }
+            };
 
-              const successMessage = status === 'draft'
-                ? 'Draft saved successfully! You can publish it later from your profile.'
-                : 'Post published successfully! It is now live and visible to all users.';
-
-              Alert.alert(
-                'Success',
-                successMessage,
-                [
-                  {
-                    text: 'View Profile',
-                    onPress: () => {
-                      setServerMediaUrl(null);
-                      setCapturedImageUri(null);
-                      router.replace('/(tabs)/profile');
-                    }
-                  }
-                ]
-              );
-
-              setCaption('');
-              setSelectedGroup('');
-              setSelectedCategoryId('');
-              setRecordedVideoUri(null);
-              // Keep capturedImageUri for preview display
-              setEditedVideoUri(null);
-              setThumbnailUri(null);
-              setIsVideoPlaying(false);
-            } else {
-              if (response.message?.includes('Maximum draft limit reached') || response.message?.includes('draft limit')) {
-                Alert.alert(
-                  'Draft Limit Reached',
-                  `You can only have a maximum of 3 draft posts. Please publish or delete existing drafts before creating a new one.`,
-                  [
-                    {
-                      text: 'View Drafts',
-                      onPress: () => router.replace('/(tabs)/profile')
-                    },
-                    { text: 'OK' }
-                  ]
-                );
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
               } else {
-                await uploadNotificationService.showUploadError(response.message || 'Failed to create post', fileName);
-                Alert.alert('Error', response.message || 'Failed to create post');
+                reject(new Error(`R2 upload failed with status ${xhr.status}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error('R2 upload network error'));
+            xhr.ontimeout = () => reject(new Error('R2 upload timeout'));
+
+            // CRITICAL FIX: In React Native, we can't create Blobs from ArrayBuffer.
+            // Instead, use fetch() on the local file URI to get a blob — RN's fetch supports file:// URIs.
+            fetch(mediaUri)
+              .then(response => response.blob())
+              .then(blob => {
+                console.log(`[Upload] Sending blob to R2, size: ${blob.size} bytes`);
+                xhr.send(blob);
+              })
+              .catch(reject);
+          });
+        } catch (uploadError: any) {
+          console.error('[Upload] R2 upload failed:', uploadError.message);
+          setUploading(false);
+          setUploadProgress(0);
+          await uploadNotificationService.showUploadError('Video upload failed: ' + uploadError.message, fileName);
+          Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
+          return;
+        }
+
+        // Step 3: Notify backend upload is complete → queues HLS processing
+        setUploadProgress(90);
+        await uploadNotificationService.showUploadProgress(90, fileName);
+        console.log('[Upload] Notifying backend upload complete for post:', postId);
+
+        const completeRes = await postsApi.completeUpload(postId);
+
+        if (completeRes.status !== 'success') {
+          console.error('[Upload] Complete upload failed:', completeRes.message);
+          setUploading(false);
+          setUploadProgress(0);
+          await uploadNotificationService.showUploadError('Failed to finalize upload: ' + completeRes.message, fileName);
+          Alert.alert('Error', 'Video uploaded but processing failed to start. Please try again.');
+          return;
+        }
+
+        // Step 4: Poll HLS processing until complete
+        // Progress bar shows 90-99% during HLS transcoding
+        console.log('[Upload] Starting HLS processing poll for post:', postId);
+        let hlsReady = false;
+        let pollProgress = 90;
+        const MAX_POLL_ATTEMPTS = 40; // 40 × 3s = 2 minutes max
+
+        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
+          await new Promise(res => setTimeout(res, 3000)); // Wait 3s between polls
+
+          try {
+            const statusRes = await postsApi.getProcessingStatus(postId);
+            const processing = statusRes.data?.processing;
+
+            console.log(`[Upload] HLS poll #${attempt + 1}: status=${processing?.status}, hlsReady=${processing?.hlsReady}`);
+
+            if (processing?.hlsReady || processing?.status === 'completed') {
+              hlsReady = true;
+              break;
+            }
+
+            if (processing?.status === 'failed') {
+              console.error('[Upload] HLS processing failed:', processing?.error);
+              // Still show success for the upload, but warn about processing
+              break;
+            }
+
+            // Increment progress slowly from 90 to 99
+            pollProgress = Math.min(99, 90 + Math.floor((attempt / MAX_POLL_ATTEMPTS) * 9));
+            setUploadProgress(pollProgress);
+            await uploadNotificationService.showUploadProgress(pollProgress, fileName);
+          } catch (pollError) {
+            console.warn('[Upload] Poll error (will retry):', pollError);
+          }
+        }
+
+        setUploadProgress(100);
+        await uploadNotificationService.showUploadComplete(fileName);
+
+        const successMessage = hlsReady
+          ? (status === 'draft'
+            ? 'Draft saved! Your video is ready for streaming.'
+            : 'Post published! Your video is live and ready to watch.')
+          : (status === 'draft'
+            ? 'Draft saved! Video is still being processed — it will be ready shortly.'
+            : 'Post published! Video processing is finishing up — it will appear in the feed shortly.');
+
+        console.log(`[Upload] Complete! hlsReady=${hlsReady}`);
+
+        Alert.alert(
+          hlsReady ? '✅ Success' : '⏳ Almost Done',
+          successMessage,
+          [
+            {
+              text: 'View Profile',
+              onPress: () => {
+                setServerMediaUrl(null);
+                setCapturedImageUri(null);
+                router.replace('/(tabs)/profile');
               }
             }
-          } catch (e) {
-            await uploadNotificationService.showUploadError('Failed to parse server response', fileName);
-            Alert.alert('Error', 'Failed to parse server response.');
-          }
-        } else {
-          let serverMessage = `Failed to create post. Server responded with status ${xhr.status}`;
-          try {
-            const parsed = JSON.parse(xhr.responseText);
-            if (parsed?.message) serverMessage = parsed.message;
-          } catch (_) {
-          }
-          await uploadNotificationService.showUploadError(`Server responded with status ${xhr.status}`, fileName);
-          Alert.alert('Error', serverMessage);
-        }
-      };
+          ]
+        );
 
-      xhr.onerror = async () => {
         setUploading(false);
         setUploadProgress(0);
-        console.error('[Upload] XHR onerror triggered');
-        console.error('[Upload] XHR status:', xhr.status);
-        console.error('[Upload] XHR statusText:', xhr.statusText);
-        console.error('[Upload] XHR readyState:', xhr.readyState);
-        console.error('[Upload] Media URI:', mediaUri);
-        console.error('[Upload] File name:', fileName);
-        console.error('[Upload] File type:', fileType);
-        await uploadNotificationService.showUploadError('Network or server error', fileName);
-        Alert.alert('Error', 'Failed to create post. Network or server error. Please check your internet connection and try again.');
-      };
+        setCaption('');
+        setSelectedGroup('');
+        setSelectedCategoryId('');
+        setRecordedVideoUri(null);
+        setEditedVideoUri(null);
+        setThumbnailUri(null);
+        setIsVideoPlaying(false);
+        return;
+      }
 
-      xhr.ontimeout = async () => {
-        setUploading(false);
-        setUploadProgress(0);
-        console.error('[Upload] XHR timeout');
-        await uploadNotificationService.showUploadError('Upload timeout', fileName);
-        Alert.alert('Error', 'Upload timed out. Please try again.');
-      };
-
-      xhr.send(formData);
+      // ============================================================
+      // IMAGE: Legacy multipart upload (images don't need HLS)
+      // ============================================================
+      console.log('[Upload] Using legacy multipart for image');
+      await _legacyMultipartUpload(
+        mediaUri, fileName, fileType, autoTitle, categoryName, status,
+        fileData, getSelectedCategoryId(), uploadNotificationService,
+        setUploading, setUploadProgress, setServerMediaUrl,
+        setCaption, setSelectedGroup, setSelectedCategoryId as any,
+        setRecordedVideoUri, setEditedVideoUri, setThumbnailUri, setIsVideoPlaying,
+        setCapturedImageUri,
+      );
     } catch (error: any) {
       setUploading(false);
       setUploadProgress(0);
@@ -1215,22 +1367,26 @@ export default function CreatePostScreen() {
   const currentMediaUri = currentVideoUri || capturedImageUri;
 
   const handlePlayPause = async () => {
-    if (videoRef.current) {
-      if (isVideoPlaying) {
-        await videoRef.current.pauseAsync();
-      } else {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,
-        });
-
-        await videoRef.current.setIsMutedAsync(false);
-        await videoRef.current.setVolumeAsync(1.0);
-        await videoRef.current.playAsync();
+    if (previewPlayer) {
+      try {
+        if (isVideoPlaying) {
+          previewPlayer.pause();
+          setIsVideoPlaying(false);
+        } else {
+          // Ensure audio plays in silent mode on iOS
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+          });
+          previewPlayer.muted = false;
+          previewPlayer.play();
+          setIsVideoPlaying(true);
+        }
+      } catch (e) {
+        console.warn('[Preview] Play/pause error:', e);
       }
-      setIsVideoPlaying(!isVideoPlaying);
     }
   };
 
@@ -1457,20 +1613,11 @@ export default function CreatePostScreen() {
               <View style={styles.videoPreviewContainer}>
                 {currentVideoUri ? (
                   <>
-                    <Video
-                      ref={videoRef}
-                      source={{ uri: currentVideoUri || '' }}
+                    <VideoView
+                      player={previewPlayer}
                       style={styles.videoPlayer}
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
-                      shouldPlay={false}
-                      isMuted={false}
-                      volume={1.0}
-                      onPlaybackStatusUpdate={(status) => {
-                        if (status.isLoaded) {
-                          setIsVideoPlaying(status.isPlaying);
-                        }
-                      }}
+                      contentFit="cover"
+                      nativeControls={false}
                     />
 
                     <TouchableOpacity

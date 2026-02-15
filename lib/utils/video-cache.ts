@@ -157,6 +157,12 @@ const evictLRU = async (neededSpace: number): Promise<void> => {
 export const getCachedVideoUri = async (remoteUrl: string): Promise<string | null> => {
   if (!remoteUrl) return null;
 
+  // HLS URLs (.m3u8) should NOT be downloaded/cached to disk.
+  // Native video player (ExoPlayer/AVPlayer) handles HLS segment caching automatically.
+  if (remoteUrl.toLowerCase().includes('.m3u8')) {
+    return remoteUrl; // Stream directly — native player handles it
+  }
+
   // Initialize if needed
   if (!isInitialized) {
     await initVideoCache();
@@ -271,8 +277,9 @@ export const preloadVideos = async (urls: string[]): Promise<void> => {
     await initVideoCache();
   }
 
-  // Filter out already cached URLs
+  // Filter out already cached URLs and HLS URLs (native player handles HLS caching)
   const urlsToPreload = urls.filter(url => {
+    if (url.toLowerCase().includes('.m3u8')) return false; // HLS = native player handles it
     if (!metadata?.entries[url]) return true;
     // Check if file still exists
     return !metadata.entries[url];

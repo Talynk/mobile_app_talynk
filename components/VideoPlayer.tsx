@@ -1,61 +1,80 @@
-import React, { useRef } from 'react';
-import { View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import React from 'react';
+import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { Feather } from '@expo/vector-icons';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 
 interface VideoPlayerProps {
   source: string | { uri: string };
   style?: any;
-  resizeMode?: ResizeMode;
+  contentFit?: 'contain' | 'cover' | 'fill';
   shouldPlay?: boolean;
   isLooping?: boolean;
-  useNativeControls?: boolean;
+  nativeControls?: boolean;
   isMuted?: boolean;
-  volume?: number;
-  onPlaybackStatusUpdate?: (status: AVPlaybackStatus) => void;
   onPress?: () => void;
   showMuteToggle?: boolean;
   testID?: string;
 }
 
 /**
- * Reusable Video Player component with click-to-mute functionality
- * Clicking in the middle of the video toggles mute/unmute (Instagram-style)
+ * Reusable Video Player component with click-to-mute functionality.
+ * Uses expo-video (NOT expo-av). Instagram-style tap to mute/unmute.
  */
-export const VideoPlayer = React.forwardRef<Video, VideoPlayerProps>(({
+export const VideoPlayer = ({
   source,
   style,
-  resizeMode = ResizeMode.CONTAIN,
+  contentFit = 'contain',
   shouldPlay = false,
   isLooping = false,
-  useNativeControls = false,
-  isMuted: initialMuted = true,
-  volume = 0,
-  onPlaybackStatusUpdate,
+  nativeControls = false,
+  isMuted: initialMuted,
   onPress,
   showMuteToggle = true,
   testID,
-}, ref) => {
-  const videoRef = useRef<Video>(null);
+}: VideoPlayerProps) => {
   const { isMuted, toggleMute } = useVideoMute();
-  const [isLoading, setIsLoading] = React.useState(false);
+  const muteOpacity = React.useRef(new Animated.Value(0)).current;
 
-  // Use external mute state if provided
+  // Resolve source URI
+  const uri = typeof source === 'string' ? source : source?.uri || '';
+
   const effectiveIsMuted = initialMuted !== undefined ? initialMuted : isMuted;
+
+  const player = useVideoPlayer(uri || null, (p) => {
+    p.loop = isLooping;
+    p.muted = effectiveIsMuted;
+    if (shouldPlay) {
+      p.play();
+    }
+  });
+
+  // Sync mute state
+  React.useEffect(() => {
+    if (player) {
+      player.muted = effectiveIsMuted;
+    }
+  }, [effectiveIsMuted, player]);
 
   const handleVideoPress = () => {
     if (showMuteToggle) {
       toggleMute();
+      // Animate mute indicator
+      Animated.sequence([
+        Animated.timing(muteOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.delay(800),
+        Animated.timing(muteOpacity, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]).start();
     }
     onPress?.();
-  };
-
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      setIsLoading(false);
-    }
-    onPlaybackStatusUpdate?.(status);
   };
 
   return (
@@ -64,39 +83,31 @@ export const VideoPlayer = React.forwardRef<Video, VideoPlayerProps>(({
         activeOpacity={0.9}
         onPress={handleVideoPress}
         style={styles.videoContainer}
+        testID={testID}
       >
-        <Video
-          ref={ref || videoRef}
-          source={typeof source === 'string' ? { uri: source } : source}
+        <VideoView
+          player={player}
           style={styles.video}
-          resizeMode={resizeMode}
-          shouldPlay={shouldPlay}
-          isLooping={isLooping}
-          isMuted={effectiveIsMuted}
-          volume={effectiveIsMuted ? 0 : (volume !== undefined ? volume : 1)}
-          useNativeControls={useNativeControls}
-          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-          onLoadStart={() => setIsLoading(true)}
-          testID={testID}
+          contentFit={contentFit}
+          nativeControls={nativeControls}
         />
 
-        {/* Mute indicator overlay - visible in center */}
+        {/* Mute indicator overlay */}
         {showMuteToggle && (
           <View style={styles.muteIndicatorContainer}>
-            {isLoading && (
-              <ActivityIndicator size="small" color="rgba(255,255,255,0.6)" />
-            )}
-            {!isLoading && effectiveIsMuted && (
-              <View style={styles.muteIcon}>
-                <Feather name="volume-x" size={32} color="rgba(255,255,255,0.7)" />
-              </View>
-            )}
+            <Animated.View style={[styles.muteIcon, { opacity: muteOpacity }]}>
+              <Feather
+                name={effectiveIsMuted ? 'volume-x' : 'volume-2'}
+                size={32}
+                color="rgba(255,255,255,0.8)"
+              />
+            </Animated.View>
           </View>
         )}
       </TouchableOpacity>
     </View>
   );
-});
+};
 
 VideoPlayer.displayName = 'VideoPlayer';
 

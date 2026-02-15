@@ -15,11 +15,12 @@ import { postsApi, userApi, followsApi } from '@/lib/api';
 import { Post, User } from '@/types';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -28,6 +29,12 @@ const SEARCH_TABS = [
   { key: 'people', label: 'People', icon: 'users' },
   { key: 'videos', label: 'Videos', icon: 'video' },
 ];
+
+const formatNumber = (num: number): string => {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toString();
+};
 
 export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,9 +61,11 @@ export default function SearchScreen() {
         ]);
 
         const users = usersRes.status === 'success' ? (usersRes.data.users || []) : [];
-        const posts = postsRes.status === 'success'
-          ? (postsRes.data.posts || (Array.isArray(postsRes.data) ? postsRes.data : []))
+        const postsData = postsRes.status === 'success' ? postsRes.data : null;
+        const postsList = postsData
+          ? ((postsData as any).posts || (Array.isArray(postsData) ? postsData : []))
           : [];
+        const posts = filterHlsReady(postsList) as Post[];
 
         setUsersResults(users);
         setPostsResults(posts);
@@ -75,7 +84,7 @@ export default function SearchScreen() {
       } else if (activeTab === 'videos') {
         const res = await postsApi.search(searchQuery);
         if (res.status === 'success') {
-          const posts = res.data.posts || (Array.isArray(res.data) ? res.data : []);
+          const posts = filterHlsReady((res.data as any).posts || (Array.isArray(res.data) ? res.data : [])) as Post[];
           setPostsResults(posts);
           setSearchResults(posts);
         } else {
@@ -109,46 +118,7 @@ export default function SearchScreen() {
     }
   }, [activeTab]);
 
-  const renderPostResult = ({ item }: { item: Post }) => {
-    const mediaUrl = getPostMediaUrl(item) || '';
-    const isVideo = !!(item.video_url || item.videoUrl);
 
-    return (
-      <TouchableOpacity
-        style={styles.postResult}
-        onPress={() => router.push({
-          pathname: '/post/[id]',
-          params: {
-            id: item.id,
-            postData: JSON.stringify(item) // CRITICAL: Pass data for instant loading 
-          }
-        })}
-      >
-        {isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={styles.resultMedia}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isMuted={true}
-            useNativeControls={false}
-            posterStyle={{ resizeMode: 'cover' }}
-          />
-        ) : (
-          <Image source={{ uri: mediaUrl }} style={styles.resultMedia} />
-        )}
-
-        <View style={styles.resultOverlay}>
-          <View style={styles.resultStats}>
-            <View style={styles.resultStat}>
-              <Feather name="heart" size={14} color="#fff" />
-              <Text style={styles.resultStatText}>{formatNumber(item.likes || 0)}</Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
 
   const handleFollow = async (userId: string) => {
     if (!user) {
@@ -218,11 +188,7 @@ export default function SearchScreen() {
     );
   };
 
-  const formatNumber = (num: number): string => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
-  };
+
 
   return (
     <View style={styles.container}>
@@ -315,7 +281,7 @@ export default function SearchScreen() {
             if (item.username || item.profile_picture) {
               return renderUserResult({ item: item as User });
             } else {
-              return renderPostResult({ item: item as Post });
+              return <SearchPostItem item={item as Post} />;
             }
           }}
           keyExtractor={(item, index) => item.id || `item-${index}`}
@@ -334,7 +300,7 @@ export default function SearchScreen() {
         <FlatList
           key={activeTab}
           data={searchResults}
-          renderItem={activeTab === 'videos' ? renderPostResult : renderUserResult}
+          renderItem={activeTab === 'videos' ? ({ item }) => <SearchPostItem item={item as Post} /> : renderUserResult}
           keyExtractor={(item) => item.id}
           numColumns={activeTab === 'videos' ? 3 : 1}
           contentContainerStyle={styles.resultsContainer}
@@ -352,6 +318,49 @@ export default function SearchScreen() {
     </View>
   );
 }
+
+const SearchPostItem = ({ item }: { item: Post }) => {
+  const mediaUrl = getPostMediaUrl(item) || '';
+  const isVideo = !!(item.video_url || item.videoUrl);
+
+  const player = useVideoPlayer(isVideo ? mediaUrl : null, player => {
+    player.loop = true;
+    player.muted = true;
+  });
+
+  return (
+    <TouchableOpacity
+      style={styles.postResult}
+      onPress={() => router.push({
+        pathname: '/post/[id]',
+        params: {
+          id: item.id,
+          postData: JSON.stringify(item)
+        }
+      })}
+    >
+      {isVideo ? (
+        <VideoView
+          player={player}
+          style={styles.resultMedia}
+          contentFit="cover"
+          nativeControls={false}
+        />
+      ) : (
+        <Image source={{ uri: mediaUrl }} style={styles.resultMedia} />
+      )}
+
+      <View style={styles.resultOverlay}>
+        <View style={styles.resultStats}>
+          <View style={styles.resultStat}>
+            <Feather name="heart" size={14} color="#fff" />
+            <Text style={styles.resultStatText}>{formatNumber(item.likes || 0)}</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {

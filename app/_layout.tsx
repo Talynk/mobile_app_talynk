@@ -16,6 +16,7 @@ import { initializeStore } from '@/lib/store/initializeStore';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { imageCache } from '@/lib/utils/image-cache';
 import talynkLogo from '@/assets/images/mobile-app-logo.png';
+import { MuteProvider } from '@/lib/mute-context';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -71,8 +72,8 @@ export default function RootLayout() {
 
     return (
       <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center' }}>
-        <Image 
-          source={talynkLogo} 
+        <Image
+          source={talynkLogo}
           style={{ width: 120, height: 120, marginBottom: 32 }}
           resizeMode="contain"
         />
@@ -124,42 +125,44 @@ function RootLayoutNav() {
   return (
     <Provider store={store}>
       <CacheProvider>
-        <AuthProvider>
-          <ThemeProvider value={theme}>
-            <Stack 
-              screenOptions={{ 
-                headerShown: false,
-                // CRITICAL FIX: Use 'none' animation for instant navigation - no delays
-                animation: 'none', // Changed from 'fade' to 'none' for super fast navigation
-                animationDuration: 0, // Instant transitions
-              }}
-            >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="auth" options={{ headerShown: false }} />
-              <Stack.Screen 
-                name="post/[id]" 
-                options={{ 
+        <MuteProvider>
+          <AuthProvider>
+            <ThemeProvider value={theme}>
+              <Stack
+                screenOptions={{
                   headerShown: false,
-                }} 
-              />
-              <Stack.Screen 
-                name="user/[id]" 
-                options={{ 
-                  headerShown: false,
-                }} 
-              />
-              <Stack.Screen 
-                name="profile-feed/[userId]" 
-                options={{ 
-                  headerShown: false,
-                }} 
-              />
-              <Stack.Screen name="search" options={{ headerShown: false }} />
-              <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
-            </Stack>
-            <StatusBar style="light" />
-          </ThemeProvider>
-        </AuthProvider>
+                  // CRITICAL FIX: Use 'none' animation for instant navigation - no delays
+                  animation: 'none', // Changed from 'fade' to 'none' for super fast navigation
+                  animationDuration: 0, // Instant transitions
+                }}
+              >
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="auth" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="post/[id]"
+                  options={{
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen
+                  name="user/[id]"
+                  options={{
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen
+                  name="profile-feed/[userId]"
+                  options={{
+                    headerShown: false,
+                  }}
+                />
+                <Stack.Screen name="search" options={{ headerShown: false }} />
+                <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
+              </Stack>
+              <StatusBar style="light" />
+            </ThemeProvider>
+          </AuthProvider>
+        </MuteProvider>
       </CacheProvider>
     </Provider>
   );

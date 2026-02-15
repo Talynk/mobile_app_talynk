@@ -14,16 +14,17 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Animated,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
-import { getPostMediaUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getProfilePictureUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 
@@ -53,8 +54,11 @@ export default function PostDetailScreen() {
   const { user } = useAuth();
   const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
   const { isMuted, toggleMute } = useVideoMute();
-  const videoRef = useRef<Video>(null);
   const insets = useSafeAreaInsets();
+  const [videoReady, setVideoReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const muteOpacity = useRef(new Animated.Value(0)).current;
+  const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
 
   // Try to parse postData if it was passed
   let initialPost = null;
@@ -258,13 +262,62 @@ export default function PostDetailScreen() {
     (!!mediaUrl &&
       (mediaUrl.toLowerCase().includes('.mp4') ||
         mediaUrl.toLowerCase().includes('.mov') ||
-        mediaUrl.toLowerCase().includes('.webm')));
+        mediaUrl.toLowerCase().includes('.webm') ||
+        mediaUrl.toLowerCase().includes('.m3u8')));
+
+  // expo-video player (replaces expo-av Video)
+  const videoPlayer = useVideoPlayer(
+    isVideo && mediaUrl ? mediaUrl : null,
+    (player) => {
+      if (player) {
+        player.loop = false;
+        player.muted = isMuted;
+      }
+    }
+  );
+
+  // Track playback state for thumbnail layer
+  useEffect(() => {
+    if (!videoPlayer) return;
+    try {
+      const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
+        setIsPlaying(event.isPlaying);
+        if (event.isPlaying) {
+          setVideoReady(true);
+        }
+      });
+      return () => { try { sub.remove(); } catch { } };
+    } catch { return () => { }; }
+  }, [videoPlayer]);
+
+  // Sync mute state
+  useEffect(() => {
+    if (!videoPlayer) return;
+    try { videoPlayer.muted = isMuted; } catch { }
+  }, [isMuted, videoPlayer]);
+
+  // Auto-play when screen loads
+  useEffect(() => {
+    if (!videoPlayer) return;
+    try {
+      videoPlayer.play();
+    } catch { }
+  }, [videoPlayer]);
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
 
   const handleVideoPress = () => {
     if (isVideo) {
       toggleMute();
+      const newMuted = !isMuted;
+      muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
+      muteOpacity.setValue(1);
+      Animated.timing(muteOpacity, {
+        toValue: 0,
+        duration: 800,
+        delay: 300,
+        useNativeDriver: true,
+      }).start();
     }
   };
 
@@ -335,32 +388,45 @@ export default function PostDetailScreen() {
                 onPress={handleVideoPress}
                 style={styles.videoTouchable}
               >
-                <Video
-                  ref={videoRef}
-                  source={{ uri: mediaUrl! }}
-                  style={styles.media}
-                  resizeMode={ResizeMode.CONTAIN}
-                  useNativeControls
-                  shouldPlay={true}
-                  isLooping={false}
-                  isMuted={isMuted}
-                  volume={isMuted ? 0 : 1}
+                {/* LAYER 1: Thumbnail — visible until video is playing (zero black screens) */}
+                <Image
+                  source={{ uri: getThumbnailUrl(post) || mediaUrl! }}
+                  style={[
+                    styles.media,
+                    {
+                      position: 'absolute',
+                      zIndex: 1,
+                      opacity: (isPlaying && videoReady) ? 0 : 1,
+                    }
+                  ]}
+                  resizeMode="cover"
                 />
 
-                {/* Mute indicator - click to toggle */}
-                {isMuted && (
-                  <View style={styles.muteIndicatorContainer}>
-                    <View style={styles.muteIndicatorBadge}>
-                      <Feather name="volume-x" size={24} color="rgba(255,255,255,0.8)" />
-                    </View>
-                  </View>
+                {/* LAYER 2: VideoView (expo-video) */}
+                {videoPlayer && (
+                  <VideoView
+                    player={videoPlayer}
+                    style={[
+                      styles.media,
+                      { position: 'absolute', zIndex: 2 }
+                    ]}
+                    contentFit="cover"
+                    nativeControls={false}
+                  />
                 )}
+
+                {/* Instagram-style mute indicator — fades away */}
+                <Animated.View style={[styles.muteIndicatorContainer, { opacity: muteOpacity }]} pointerEvents="none">
+                  <View style={styles.muteIndicatorBadge}>
+                    <Feather name={muteIconRef.current} size={24} color="rgba(255,255,255,0.8)" />
+                  </View>
+                </Animated.View>
               </TouchableOpacity>
             ) : (
               <Image
                 source={{ uri: mediaUrl! }}
                 style={styles.media}
-                resizeMode="contain"
+                resizeMode="cover"
                 onError={() => {
                   console.error('[Post Detail] Failed to load image:', mediaUrl);
                 }}

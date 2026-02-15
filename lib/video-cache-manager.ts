@@ -57,12 +57,12 @@ class VideoCacheManager {
       if (this.cacheIndex) {
         const existing = this.cacheIndex.entries.find(e => e.url === fullUrl);
         if (existing && (Date.now() - existing.timestamp) < CACHE_TTL) {
-          return fullUrl;
+          return fullUrl || '';
         }
       }
 
       // Create loading promise
-      const loadPromise = this.addToCache(fullUrl);
+      const loadPromise = this.addToCache(fullUrl || '');
       this.loadingPromises.set(relativeUrl, loadPromise);
 
       const result = await loadPromise;
@@ -71,7 +71,7 @@ class VideoCacheManager {
     } catch (error) {
       console.error('Error caching video URL:', error);
       this.loadingPromises.delete(relativeUrl);
-      return getFileUrl(relativeUrl);
+      return getFileUrl(relativeUrl) || '';
     }
   }
 

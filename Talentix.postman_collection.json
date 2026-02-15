@@ -1,0 +1,3983 @@
+{
+  "info": {
+    "_postman_id": "67dd07a9-d568-4cfc-acef-23a5628f789d",
+    "name": "Talentix",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "51416941",
+    "_collection_link": "https://go.postman.co/collection/32342062-67dd07a9-d568-4cfc-acef-23a5628f789d?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Password Reset",
+          "item": [
+            {
+              "name": "Send OTP",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/password-reset/request-otp",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset",
+                    "request-otp"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Reset",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"resetToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI0NDBhNTFhMC0xMWZmLTRjNDctYWJiYS01YzgxNjZkMjNiNTEiLCJlbWFpbCI6Im5pcGN0czNAZ21haWwuY29tIiwib3RwSWQiOiI3YjYyNjczNy03OTYxLTRiOGUtODdjMS1lZWMzNjI1MzEwY2QiLCJwdXJwb3NlIjoicGFzc3dvcmRfcmVzZXQiLCJpYXQiOjE3NjgzODEzNTUsImV4cCI6MTc2ODM4MjI1NX0.KAL-SsHz1bU9eAkTTbQS2GvA32cX4ye9fvEzrLmt33I\",\r\n    \"newPassword\": \"user123@securepassword\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/password-reset/reset",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset",
+                    "reset"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Verify",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\",\r\n    \"otpCode\": \"260285\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/password-reset/verify-otp",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "password-reset",
+                    "verify-otp"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "item": [
+            {
+              "name": "Admin",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"email\": \"admin@talentix24.net\",\r\n  \"username\": \"admin24\",\r\n  \"password\": \"admin@talentix12345@//%%+=\",\r\n  \"role\": \"admin\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "User",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\",\r\n    \"username\": \"johndoe\",\r\n  \"display_name\": \"John Doe\",\r\n  \"password\": \"securepassword123\",\r\n  \"country_id\": 1,\r\n  \"date_of_birth\": \"1990-01-01\",\r\n  \"role\": \"user\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Approver",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"password\": \"securepassword123\",\r\n    \"email\": \"nipcts3@gmail.com\",\r\n    \"role\": \"approver\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/auth/login",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "auth",
+                    "login"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Registration",
+          "item": [
+            {
+              "name": "User",
+              "item": [
+                {
+                  "name": "Verify OTP",
+                  "request": {
+                    "auth": {
+                      "type": "noauth"
+                    },
+                    "method": "POST",
+                    "header": [],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\",\r\n    \"otpCode\": \"813234\"\r\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/api/auth/register/verify-otp",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "auth",
+                        "register",
+                        "verify-otp"
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "Request OTP",
+                  "request": {
+                    "auth": {
+                      "type": "noauth"
+                    },
+                    "method": "POST",
+                    "header": [],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\"\r\n}\r\n\r\n\r\n\r\n\r\n\r\n\r\n",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/api/auth/register/request-otp",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "auth",
+                        "register",
+                        "request-otp"
+                      ]
+                    }
+                  },
+                  "response": []
+                },
+                {
+                  "name": "Complete",
+                  "request": {
+                    "auth": {
+                      "type": "noauth"
+                    },
+                    "method": "POST",
+                    "header": [],
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\",\r\n    \"verificationToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6Im5pcGN0czNAZ21haWwuY29tIiwib3RwSWQiOiI1NGJiM2NmZi1mYjc1LTRmZDYtYWU0Yi1jOWI2NTQ2ZTgwZTEiLCJwdXJwb3NlIjoicmVnaXN0cmF0aW9uX3ZlcmlmaWNhdGlvbiIsImlhdCI6MTc2ODMzMzQ5NCwiZXhwIjoxNzY4MzM0Mzk0fQ.WnJquykryG_AaA171Ni62AP2M3gmEx_kVRL8qcFcBDY\",\r\n    \"username\": \"johndoe\",\r\n  \"display_name\": \"John Doe\",\r\n  \"password\": \"securepassword123\",\r\n  \"country_id\": 1,\r\n  \"date_of_birth\": \"1990-01-01\"\r\n}",
+                      "options": {
+                        "raw": {
+                          "language": "json"
+                        }
+                      }
+                    },
+                    "url": {
+                      "raw": "{{baseUrl}}/api/auth/register/complete",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "auth",
+                        "register",
+                        "complete"
+                      ]
+                    }
+                  },
+                  "response": []
+                }
+              ]
+            },
+            {
+              "name": "Admin Register",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"email\": \"admin@talentix24.net\",\r\n  \"username\": \"admin24\",\r\n  \"password\": \"admin@talentix12345@//%%+=\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/register",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "register"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "User Register",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\": \"user2@talynk.com\",\r\n    \"username\": \"user2\",\r\n    \"password\": \"user123\",\r\n    \"phone1\": \"0796402848\",\r\n    \"role\": \"user\",\r\n    \"country_id\": 140\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1NzIyNjU2MCwiZXhwIjoxNzU5ODE4NTYwfQ.j6NVqTdhtW8-BtxVRnNlsFpCcaG9czCP03NR_0PgTJ8",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/refresh-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh-token"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Profile",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"approver5\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"approver5@talynk.com\",\r\n    \"role\": \"approver\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"country\": \"Rwanda\",\r\n    \"role\": \"approver\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "All the Authentication procedures"
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Approver_admin",
+          "item": [
+            {
+              "name": "Register Approver",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NjgzODQ2NzMsImV4cCI6MTc2ODk4OTQ3M30.HXdREYpoJPNNx2puT9ajggKMFl43ccK-ibOFnFqqHE4",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"email\": \"nipcts3@gmail.com\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/approvers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "approvers"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Remove Approver By ID",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/approvers/approver1?Authorization =",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "approvers",
+                    "approver1"
+                  ],
+                  "query": [
+                    {
+                      "key": "Authorization ",
+                      "value": ""
+                    },
+                    {
+                      "key": "username",
+                      "value": "approver1",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Approver By Id",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "id",
+                    "value": "735aadb8-ef64-4905-86d0-2712f7613780",
+                    "type": "text",
+                    "disabled": true
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/approvers/52085568-6945-4aca-a1a3-00cdf727e85b",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "approvers",
+                    "52085568-6945-4aca-a1a3-00cdf727e85b"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Get All Approvers",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjBkYTdhOTFlLWI3YWYtNGQ1Ny1iM2RlLWI5OWZjMTc2NzAzYyIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NjM2MzY5ODksImV4cCI6MTc2NDI0MTc4OX0.Zvbf5WCu2iUBYWueBKZ9doZMjRcW-16KAZOH_EtpFEI",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+                    "type": "text"
+                  },
+                  {
+                    "key": "",
+                    "value": "",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/approvers",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "approvers"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "All Posts Approved By Approver",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjBkYTdhOTFlLWI3YWYtNGQ1Ny1iM2RlLWI5OWZjMTc2NzAzYyIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NjM2MzY5ODksImV4cCI6MTc2NDI0MTc4OX0.Zvbf5WCu2iUBYWueBKZ9doZMjRcW-16KAZOH_EtpFEI",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": ""
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/approvers/:approverId/posts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "approvers",
+                    ":approverId",
+                    "posts"
+                  ],
+                  "variable": [
+                    {
+                      "key": "approverId",
+                      "value": "77b6c78d-311c-4561-94a0-4a67b43c27fa"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ],
+          "description": "Admi to Approver (Approvers management)"
+        },
+        {
+          "name": "Challenges",
+          "item": [
+            {
+              "name": "All",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImRmMGNhZWVmLTYzYmYtNDBmOC1iZGFjLTA4MTMwMDc5MzVkOSIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njg1OTI5OTcsImV4cCI6MTc2OTE5Nzc5N30.d0y5Gzrb6pmW47-PRgnyeeoJhP7NGdFB_vtX2WWNqsI",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Pending",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc3OTc0ODYsImV4cCI6MTc2ODQwMjI4Nn0.3wr5R4zt2sYyVUwjrBDp2lIROqGJTLjPd7ZX9yAIC28",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges/pending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges",
+                    "pending"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Challenge ID",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc3OTc0ODYsImV4cCI6MTc2ODQwMjI4Nn0.3wr5R4zt2sYyVUwjrBDp2lIROqGJTLjPd7ZX9yAIC28",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges/:challengeId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges",
+                    ":challengeId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "challengeId",
+                      "value": "501ab793-e3b7-4b72-bb90-aa837d492ccb"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Approve Challenge",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc3OTc0ODYsImV4cCI6MTc2ODQwMjI4Nn0.3wr5R4zt2sYyVUwjrBDp2lIROqGJTLjPd7ZX9yAIC28",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "PUT",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges/:challengeId/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges",
+                    ":challengeId",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "challengeId",
+                      "value": "501ab793-e3b7-4b72-bb90-aa837d492ccb"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Reject Challenge",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc3OTc0ODYsImV4cCI6MTc2ODQwMjI4Nn0.3wr5R4zt2sYyVUwjrBDp2lIROqGJTLjPd7ZX9yAIC28",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "PUT",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"reason\": \"Challenge does not meet our community guidelines. Please review the terms and resubmit.\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges/:challengeId/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges",
+                    ":challengeId",
+                    "reject"
+                  ],
+                  "variable": [
+                    {
+                      "key": "challengeId",
+                      "value": "501ab793-e3b7-4b72-bb90-aa837d492ccb"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "End Challenge",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc3OTc0ODYsImV4cCI6MTc2ODQwMjI4Nn0.3wr5R4zt2sYyVUwjrBDp2lIROqGJTLjPd7ZX9yAIC28",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "PUT",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"reason\": \"Challenge does not meet our community guidelines. Please review the terms and resubmit.\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/admin/challenges/:challengeId/stop",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "admin",
+                    "challenges",
+                    ":challengeId",
+                    "stop"
+                  ],
+                  "variable": [
+                    {
+                      "key": "challengeId",
+                      "value": "501ab793-e3b7-4b72-bb90-aa837d492ccb"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Get All Users",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njg1MDM2MjMsImV4cCI6MTc2OTEwODQyM30.L0ot4qad6PbpCriKLvCDDTspzHNTOmtxJIJi7WLDjfI",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Manage Account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/accounts/manage",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "accounts",
+                "manage"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Approved Posts",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pending Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjdjNzBkMThmLTk2MDYtNDA2Ny05ODliLWJjY2ZmZGY0YzMxNSIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzE4NzQ2MCwiZXhwIjoxNzU3NzkyMjYwfQ.LvqzFuqFjbibHxtbh7WrlMKpbKmUYyHoFQJF426ZZHc",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/posts/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "posts",
+                "pending"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Rejected Posts",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Users Dashboard Stast",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc2NzA3NDAsImV4cCI6MTc2ODI3NTU0MH0.zssfNzegLcPE9vt_A3NDQ-Udr1x8qNgDvdanhp4TY3c",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"approver5\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"approver5@talynk.com\"\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/dashboard/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "dashboard",
+                "stats"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "New Request",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImZhMzZmNmJkLTRmYTUtNDMzZC04ZTk5LTRiZTBlYjIwM2YwOCIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDk2NzUyMzcsImV4cCI6MTc1MDI4MDAzN30.ZloNP7eVuvC1KKBJBoCcujRVIpPP4HxFBn8vpeXFqKA",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"approver5\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"approver5@talynk.com\",\r\n    \"role\": \"approver\"\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/posts/search?type=all&q=da2efdc5-4cae-44f9-91a5-9a23db620437",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "posts",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "all"
+                },
+                {
+                  "key": "q",
+                  "value": "da2efdc5-4cae-44f9-91a5-9a23db620437"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"email\": \"admin3@talynk.com\",\r\n    \"username\": \"admin3\",\r\n    \"password\": \"admin123\",\r\n    \"phone1\": \"0796402848\",\r\n    \"role\": \"admin\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Feature",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc5Nzk3NjEsImV4cCI6MTc2ODU4NDU2MX0.i3D1LldvChuEeIP7WDbpK2rRgPUc3fwBiHh6FHaCCOo",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/featured/posts/72e73f0f-a1a2-4d2c-9ccb-616bacfc4285",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "featured",
+                "posts",
+                "72e73f0f-a1a2-4d2c-9ccb-616bacfc4285"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Management Stats",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjJkYWJhYTExLTZhNmQtNDNiNy04YWQ0LTAxNjcyODU0Zjk3YiIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njc2NzA3NDAsImV4cCI6MTc2ODI3NTU0MH0.zssfNzegLcPE9vt_A3NDQ-Udr1x8qNgDvdanhp4TY3c",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"approver5\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"approver5@talynk.com\"\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "stats"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "ADMIN Role Restricted APIs"
+    },
+    {
+      "name": "Approver",
+      "item": [
+        {
+          "name": "New Folder",
+          "item": [
+            {
+              "name": "Onboarding",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"token\": \"b5824f6861112048edee0bcdc85aefdb4381debb050190848ba045e918b929b1\",\r\n  \"password\": \"securepassword123\",\r\n  \"first_name\": \"John\",\r\n  \"last_name\": \"Doe\",\r\n  \"phone_number\": \"+1234567890\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/approver/onboarding/complete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "approver",
+                    "onboarding",
+                    "complete"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Get Pending Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImE0NmQ2N2FhLTJhNGYtNDk5NS1hNzUwLWVlYjFiOTJhZTc5NSIsImVtYWlsIjoiYXBwcm92ZXI1QHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFwcHJvdmVyNSIsInJvbGUiOiJhcHByb3ZlciIsImlhdCI6MTc0NDEwNDE1NSwiZXhwIjoxNzQ0NzA4OTU1fQ.EgzgnDuX2Q6zV7Xo4E20cd_OjI8Ir7pkkbaMBkjGOrI",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/approver/posts/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approver",
+                "posts",
+                "pending"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Approve Post",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImE0NmQ2N2FhLTJhNGYtNDk5NS1hNzUwLWVlYjFiOTJhZTc5NSIsImVtYWlsIjoiYXBwcm92ZXI1QHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFwcHJvdmVyNSIsInJvbGUiOiJhcHByb3ZlciIsImlhdCI6MTc0NDEwNDE1NSwiZXhwIjoxNzQ0NzA4OTU1fQ.EgzgnDuX2Q6zV7Xo4E20cd_OjI8Ir7pkkbaMBkjGOrI",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/approver/posts/d8fae190-8b03-440f-be79-73a4a451e105/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approver",
+                "posts",
+                "d8fae190-8b03-440f-be79-73a4a451e105",
+                "approve"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Report",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImE0NmQ2N2FhLTJhNGYtNDk5NS1hNzUwLWVlYjFiOTJhZTc5NSIsImVtYWlsIjoiYXBwcm92ZXI1QHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFwcHJvdmVyNSIsInJvbGUiOiJhcHByb3ZlciIsImlhdCI6MTc0NDEyMjY2NCwiZXhwIjoxNzQ0NzI3NDY0fQ.xAV5nEKncIVfWN4tcybKByzrpZ3fSMGwMOvFjn05PRU",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/approver/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "approver",
+                "reports"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Approved Posts",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Post",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Approver Dashboard",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        }
+      ],
+      "description": "Video Approver Restricted APIs"
+    },
+    {
+      "name": "Posts",
+      "item": [
+        {
+          "name": "Upload",
+          "item": [
+            {
+              "name": "New Request",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjNhM2E3MTkwLWQ5YmEtNGE1ZC1hNTY5LTc1YjgyZDc5OTQwMCIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImpvaG5kb2UiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc3MDk2MzgyOCwiZXhwIjoxNzcxNTY4NjI4fQ.1b5VioQ-CSAM8lsufyfrpxsut025wi9M67vWk-_EnEM",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"title\": \"Test Video\",\r\n  \"caption\": \"Optional description\",\r\n  \"post_category\": \"Painting\",\r\n  \"status\": \"active\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/posts/create-upload",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "posts",
+                    "create-upload"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Upload",
+              "request": {
+                "method": "PUT",
+                "header": [],
+                "body": {
+                  "mode": "file",
+                  "file": {
+                    "src": "/C:/Users/ihirwe/Downloads/Video/#onlyoriginals #theoriginals This instagram post shares a 60-second compilation of David Beckham's career highlights, focusing on his precise long-range passes and assists from clubs like Manchester United and Real Mad.mp4"
+                  }
+                },
+                "url": {
+                  "raw": "https://59d4da31782ae0bffa374a8824a15d6e.r2.cloudflarestorage.com/talentix/media/1770976168838-f510ae0f-1d5d-4e7a-b945-b372a430ac40.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=dc32c742344f2923550e7ef57d7fccc7%2F20260213%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260213T094928Z&X-Amz-Expires=600&X-Amz-Signature=226767a5aa7b3ba1e4ad922ce140200275f1aff532d652e805cfa0346d228324&X-Amz-SignedHeaders=host&x-amz-checksum-crc32=AAAAAA%3D%3D&x-amz-sdk-checksum-algorithm=CRC32&x-id=PutObject",
+                  "protocol": "https",
+                  "host": [
+                    "59d4da31782ae0bffa374a8824a15d6e",
+                    "r2",
+                    "cloudflarestorage",
+                    "com"
+                  ],
+                  "path": [
+                    "talentix",
+                    "media",
+                    "1770976168838-f510ae0f-1d5d-4e7a-b945-b372a430ac40.mp4"
+                  ],
+                  "query": [
+                    {
+                      "key": "X-Amz-Algorithm",
+                      "value": "AWS4-HMAC-SHA256"
+                    },
+                    {
+                      "key": "X-Amz-Content-Sha256",
+                      "value": "UNSIGNED-PAYLOAD"
+                    },
+                    {
+                      "key": "X-Amz-Credential",
+                      "value": "dc32c742344f2923550e7ef57d7fccc7%2F20260213%2Fauto%2Fs3%2Faws4_request"
+                    },
+                    {
+                      "key": "X-Amz-Date",
+                      "value": "20260213T094928Z"
+                    },
+                    {
+                      "key": "X-Amz-Expires",
+                      "value": "600"
+                    },
+                    {
+                      "key": "X-Amz-Signature",
+                      "value": "226767a5aa7b3ba1e4ad922ce140200275f1aff532d652e805cfa0346d228324"
+                    },
+                    {
+                      "key": "X-Amz-SignedHeaders",
+                      "value": "host"
+                    },
+                    {
+                      "key": "x-amz-checksum-crc32",
+                      "value": "AAAAAA%3D%3D"
+                    },
+                    {
+                      "key": "x-amz-sdk-checksum-algorithm",
+                      "value": "CRC32"
+                    },
+                    {
+                      "key": "x-id",
+                      "value": "PutObject"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Complete",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjNhM2E3MTkwLWQ5YmEtNGE1ZC1hNTY5LTc1YjgyZDc5OTQwMCIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImpvaG5kb2UiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc3MDk2MzgyOCwiZXhwIjoxNzcxNTY4NjI4fQ.1b5VioQ-CSAM8lsufyfrpxsut025wi9M67vWk-_EnEM",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"postId\": \"0686b1ae-3281-47eb-a625-4739d177b72c\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/posts/upload-complete",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "posts",
+                    "upload-complete"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Comments",
+          "item": [
+            {
+              "name": "Add Comment",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjEwNTlmYjg4LThmZWUtNDJlMi05Zjk4LTUxNzdiMzgwY2ZjOSIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1ODgyMDA3MiwiZXhwIjoxNzU5NDI0ODcyfQ.aTnXiTIEgi8XoUTL0dSFCXHGP_6BULLjwpWhXXmLe7k",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE",
+                    "disabled": true
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"comment_text\": \"Interesting idea\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/posts/:postId/comments",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "posts",
+                    ":postId",
+                    "comments"
+                  ],
+                  "variable": [
+                    {
+                      "key": "postId",
+                      "value": "08422e97-f4c1-40d1-928f-8bcbd1963b76"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Post Comments",
+              "protocolProfileBehavior": {
+                "disableBodyPruning": true
+              },
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsImVtYWlsIjoiYWRtaW4zQHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFkbWluMyIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1ODc4NjQxMiwiZXhwIjoxNzU5MzkxMjEyfQ.C3zPI1UqLewp0CPIuJxWmbZTR7Dfnl5m7wbdvkDHhrc",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"reason\": \"sports\",\r\n    \"description\": \"I feel offensed by this comment\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/posts/:postId/comments",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "posts",
+                    ":postId",
+                    "comments"
+                  ],
+                  "variable": [
+                    {
+                      "key": "postId",
+                      "value": "7c171452-2cc8-4157-8799-51536b2e01a9"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Comment",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjEwNTlmYjg4LThmZWUtNDJlMi05Zjk4LTUxNzdiMzgwY2ZjOSIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1ODgyMDA3MiwiZXhwIjoxNzU5NDI0ODcyfQ.aTnXiTIEgi8XoUTL0dSFCXHGP_6BULLjwpWhXXmLe7k",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "",
+                    "disabled": true
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n    \"reason\": \"sports\",\r\n    \"description\": \"I feel offensed by this comment\"\r\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/api/posts/comments/:commentId",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "posts",
+                    "comments",
+                    ":commentId"
+                  ],
+                  "variable": [
+                    {
+                      "key": "commentId",
+                      "value": "b4f45355-9bc5-4881-9c3b-9aff69e3cfe8"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Create Post",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjNhM2E3MTkwLWQ5YmEtNGE1ZC1hNTY5LTc1YjgyZDc5OTQwMCIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImpvaG5kb2UiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc3MDk2MzgyOCwiZXhwIjoxNzcxNTY4NjI4fQ.1b5VioQ-CSAM8lsufyfrpxsut025wi9M67vWk-_EnEM",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJhZG1pbjMiLCJyb2xlIjoidXNlciIsImlhdCI6M...."
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Eyoo",
+                  "type": "text"
+                },
+                {
+                  "key": "caption",
+                  "value": "no cap",
+                  "type": "text"
+                },
+                {
+                  "key": "post_category",
+                  "value": "Painting",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "uuid": "1e59a2c9-4067-4278-a5d1-de635979fba2",
+                  "src": "/C:/Users/ihirwe/Downloads/Video/#onlyoriginals #theoriginals This instagram post shares a 60-second compilation of David Beckham's career highlights, focusing on his precise long-range passes and assists from clubs like Manchester United and Real Mad.mp4"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "View Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI4Yjg1MTRjLWRkY2ItNDhiZC05ZTBkLThhYzVkYTdmOWRmNSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY4ODk4NTQ4LCJleHAiOjE3Njk1MDMzNDh9._jchiWMfnpcpPLpUbM-RvgOaOd8LxE8QGEVIwMxfAbY",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "",
+                "value": "",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "all"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Current Users Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "",
+                "value": "",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/user",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "user"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Like",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjRhODY1ODQyLTMxMjktNGRlNy04ZjUyLTNlMTM4ZmJhOTY4ZiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2MzU3NjkyOCwiZXhwIjoxNzY0MTgxNzI4fQ.IeB8al1pGfePRE8YtMiWSSH7bK4DHUkG14wA0kZipVU",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/likes/posts/:postId/toggle",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "likes",
+                "posts",
+                ":postId",
+                "toggle"
+              ],
+              "variable": [
+                {
+                  "key": "postId",
+                  "value": "b99d99b1-f51d-4e77-84b2-b1745162d446"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Liked Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1ODc3Nzc5MCwiZXhwIjoxNzU5MzgyNTkwfQ.GU4s_dwx3ItRakR13kJniuFLRY5Pqwr3LEaDWYydSRY",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "",
+                "value": "",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/likes/user/liked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "likes",
+                "user",
+                "liked"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Post",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1ODc3Nzc5MCwiZXhwIjoxNzU5MzgyNTkwfQ.GU4s_dwx3ItRakR13kJniuFLRY5Pqwr3LEaDWYydSRY",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+                "type": "text"
+              },
+              {
+                "key": "postId",
+                "value": "35d2bea9-4826-4683-a018-df7bc2ab8847",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/6ff1d91b-4efb-44f8-88dc-5484fccb7312",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "6ff1d91b-4efb-44f8-88dc-5484fccb7312"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "View Profile",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retrieve Recent Searches",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api//user/searches?A",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "",
+                "user",
+                "searches"
+              ],
+              "query": [
+                {
+                  "key": "A",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Notification",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImY4OTI3MGYwLTc2MmItNDA3MC1hZDU5LWFlMGJmZjMwN2E1YyIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImpvaG5kb2UiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2ODMzMzYyNSwiZXhwIjoxNzY4OTM4NDI1fQ.dJc7gtH2y95j2v1m7fUooKABAvQV_85L49c18sCxLgY",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/user/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Search Item",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"searchTerm\": \"basketball\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "searches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Statistics-user",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/user/statistics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "statistics"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Retrieve User Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/user/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzUxMzk0NiwiZXhwIjoxNzU4MTE4NzQ2fQ.U1kX83YolblQyJq6wmFIWoItnk9BFcfl6Ndc2j7rS40",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Notification",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Add Comment",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Posts",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "all"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "New Request",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsImVtYWlsIjoiYWRtaW4zQHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFkbWluMyIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1ODc4NjQxMiwiZXhwIjoxNzU5MzkxMjEyfQ.C3zPI1UqLewp0CPIuJxWmbZTR7Dfnl5m7wbdvkDHhrc",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"q\": \"sports\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/search",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "search"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Subscribe",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "LikeStatus",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjRhODY1ODQyLTMxMjktNGRlNy04ZjUyLTNlMTM4ZmJhOTY4ZiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2MzU3NjkyOCwiZXhwIjoxNzY0MTgxNzI4fQ.IeB8al1pGfePRE8YtMiWSSH7bK4DHUkG14wA0kZipVU",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/likes/posts/:postId/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "likes",
+                "posts",
+                ":postId",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "postId",
+                  "value": "b99d99b1-f51d-4e77-84b2-b1745162d446"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "ReadAllNotifications",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "New Request",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Following",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjRhODY1ODQyLTMxMjktNGRlNy04ZjUyLTNlMTM4ZmJhOTY4ZiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2MzUwODI2MCwiZXhwIjoxNzY0MTEzMDYwfQ.FWzvVI_PCZZx_Hafi6-yVbMy8RvXe8pWqg_zYQhTJ8I",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/follows/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "follows",
+                "posts"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "New Request Copy",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "External Userproifle",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "External User Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Featured Posts",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/featured",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "featured"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "New Request",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3MzMwOTQ4LCJleHAiOjE3Njc5MzU3NDh9.u3WkF95UwwiZvF5G3TowHgrkdQ7jYIlyPWzUmieMk74",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/drafts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "drafts"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "General User APIs"
+    },
+    {
+      "name": "Following/Unfollowing",
+      "item": [
+        {
+          "name": "Follow",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY4NTAzNjkwLCJleHAiOjE3NjkxMDg0OTB9.1jwfj0_JSShIotr11jAFSX83NARi_4c7kKA2ab9gFoc",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"userId\": \"4800c2e2-becd-4a36-ac87-ea2557f65f48\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/follows",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "follows"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unfollow",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Return Followers",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Ijc1M2MxYWI2LTViNmQtNDMxNS04MTM0LTdjY2ZmNzlhNGEzYSIsImVtYWlsIjoidXNlcjVAZ21haWwuY29tIiwidXNlcm5hbWUiOiJ1c2VyNSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzYzNTc5MjY1LCJleHAiOjE3NjQxODQwNjV9.16pEjpHu9-n_NtQMVbNDA3D49RIXYotiKu4uBShBi94",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/follows/users/:userId/following",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "follows",
+                "users",
+                ":userId",
+                "following"
+              ],
+              "variable": [
+                {
+                  "key": "userId",
+                  "value": "daa55e54-a011-4f17-969e-051b8cd72c45"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Return FOllwoiing",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "CheckStatus",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Not following back Copy",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Discover",
+          "request": {
+            "method": "GET",
+            "header": []
+          },
+          "response": []
+        },
+        {
+          "name": "Follows Posts",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY4NTAzNjkwLCJleHAiOjE3NjkxMDg0OTB9.1jwfj0_JSShIotr11jAFSX83NARi_4c7kKA2ab9gFoc",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/follows/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "follows",
+                "posts"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Follow & Unfollow functionality"
+    },
+    {
+      "name": "Inbox Functionality",
+      "item": [
+        {
+          "name": "Fetch Comments",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Ijg4YmI4YTljLWNmYjUtNGZmYi04MTdkLWMzN2ZmODk2NjZmMyIsImVtYWlsIjoidXNlcjcwQGdtYWlsLmNvbSIsInVzZXJuYW1lIjoidXNlcjcwQGdtYWlsLmNvbSIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzQ0MTU4OTAyLCJleHAiOjE3NDQ3NjM3MDJ9.HKCm4ZsDJ0SFT_22aM91yZeewlwCjEqEgRPG9U6c5z0",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/:postId/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                ":postId",
+                "comments"
+              ],
+              "variable": [
+                {
+                  "key": "postId",
+                  "value": "13d51472-2a40-4067-9e3f-1d850a7fdcc8"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "In comments communication fucntionality"
+    },
+    {
+      "name": "User",
+      "item": [
+        {
+          "name": "Get Current User Profile",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"username\": \"approver5\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"approver5@talynk.com\",\r\n    \"role\": \"approver\"\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "user_facial_image",
+                  "type": "file",
+                  "uuid": "75d57e1e-6c22-4380-8111-cbd9632097e5",
+                  "src": "/C:/Users/ihirwe/Pictures/Pins/HAPPY MATRICULATION TO ME 😌❤️  @napsunn….jpeg"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update User interests",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": " { \r\n    \"interests\": [ \"Music\", \"Arts\", \"Photography\", \"Dancing\", \"Football\" ]\r\n }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/interests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "interests"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Country",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1ODc3Nzc5MCwiZXhwIjoxNzU5MzgyNTkwfQ.GU4s_dwx3ItRakR13kJniuFLRY5Pqwr3LEaDWYydSRY",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": " { \r\n    \"country_id\": 140\r\n }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/country",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "country"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Statistics",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": " { \r\n    \"interests\": [ \"Music\", \"Arts\", \"Photography\", \"Dancing\", \"Football\" ]\r\n }"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/statistics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "statistics"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Searches",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": " { \r\n    \"interests\": [ \"Music\", \"Arts\", \"Photography\", \"Dancing\", \"Football\" ]\r\n }"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "searches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Search Term",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/searches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "searches"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Notifications",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "All notifications",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI4Yjg1MTRjLWRkY2ItNDhiZC05ZTBkLThhYzVkYTdmOWRmNSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY4NTg3MzE1LCJleHAiOjE3NjkxOTIxMTV9.B6RZNXo5k_Y1BCEe2QFjvVzz5v0-7rzdVy87OtlCR18",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "notifications"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Read All Notifications",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/notifications/read-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "notifications",
+                "read-all"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User By ID",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "4800c2e2-becd-4a36-ac87-ea2557f65f48"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Posts",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjU0ZWM2ODNmLWFhODQtNDVmOS1iZTdlLTlhMzg5NGU2ZjEzYiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc1NzIyODMzMCwiZXhwIjoxNzU3ODMzMTMwfQ.3_5XDQjWKBLR-sNdU-2LX2SY1C1AQ48lwSBjzpQlxIw",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"term\": \"guitar lessons\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/:id/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "users",
+                ":id",
+                "posts"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "4800c2e2-becd-4a36-ac87-ea2557f65f48"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "User Country",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsImVtYWlsIjoiYWRtaW4zQHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFkbWluMyIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1ODc4MDMyNywiZXhwIjoxNzU5Mzg1MTI3fQ.uBm3NVLldiQy9coGDKHc8Y0OlU-SxFXRRA3Er3CZlvA",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"country_id\": 140\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/country",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "user",
+                "country"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Countries",
+      "item": [
+        {
+          "name": "All Countries",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/countries/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "countries",
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Seed Countries",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImU1Y2U5MDdmLWM2ODktNDZjNi05NGUzLTY2MzFkYzRmMDU2ZSIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NzAyMTc4MzIsImV4cCI6MTc3MDgyMjYzMn0.WJhfMkdjhIdb0msb-j4911V4MmmSqvi0KUoMAqxY5eQ",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"country_id\": 140\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seed/countries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seed",
+                "countries"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Counttry related routes"
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Get All Categories",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsImVtYWlsIjoiYWRtaW4zQHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFkbWluMyIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1ODc4MDMyNywiZXhwIjoxNzU5Mzg1MTI3fQ.uBm3NVLldiQy9coGDKHc8Y0OlU-SxFXRRA3Er3CZlvA",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"country_id\": 140\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "categories"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Seed All Categories",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImU1Y2U5MDdmLWM2ODktNDZjNi05NGUzLTY2MzFkYzRmMDU2ZSIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NzAyMTc4MzIsImV4cCI6MTc3MDgyMjYzMn0.WJhfMkdjhIdb0msb-j4911V4MmmSqvi0KUoMAqxY5eQ",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"country_id\": 140\r\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/seed/categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "seed",
+                "categories"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reporting",
+      "item": [
+        {
+          "name": "Report Comment",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI5NGQ2OWY1LTM5ZjYtNDkxOC04MGY0LTM0NDBjMWRiN2QwMCIsImVtYWlsIjoiYWRtaW4zQHRhbHluay5jb20iLCJ1c2VybmFtZSI6ImFkbWluMyIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc1ODc4NjQxMiwiZXhwIjoxNzU5MzkxMjEyfQ.C3zPI1UqLewp0CPIuJxWmbZTR7Dfnl5m7wbdvkDHhrc",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA5OTQwMzksImV4cCI6MTc0MTU5ODgzOX0.GKVF3j538euXNLs06kuPq3MGTCcLG_lx28Sc5PBdzpE"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"reason\": \"sports\",\r\n    \"description\": \"I feel offensed by this comment\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/comments/:commentId/report/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "posts",
+                "comments",
+                ":commentId",
+                "report",
+                ""
+              ],
+              "variable": [
+                {
+                  "key": "commentId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Report POst",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjRhODY1ODQyLTMxMjktNGRlNy04ZjUyLTNlMTM4ZmJhOTY4ZiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2MzUwODI2MCwiZXhwIjoxNzY0MTEzMDYwfQ.FWzvVI_PCZZx_Hafi6-yVbMy8RvXe8pWqg_zYQhTJ8I",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n    \"reason\": \"HARASSMENT\",\r\n    \"description\": \"Made me feel uncomfartable\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reports/posts/7a9c8ac6-6d24-4d5f-913a-26148c7ae9c0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reports",
+                "posts",
+                "7a9c8ac6-6d24-4d5f-913a-26148c7ae9c0"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Challenges",
+      "item": [
+        {
+          "name": "Create With Rewards",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "With No Rewards",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Weekly Fitness Challenge\",\r\n  \"description\": \"Share your fitness journey and motivate others!\",\r\n  \"has_rewards\": false,\r\n  \"organizer_name\": \"Jane Smith\",\r\n  \"organizer_contact\": \"+1234567890\",\r\n  \"start_date\": \"2026-06-15T00:00:00.000Z\",\r\n  \"end_date\": \"2026-06-30T23:59:59.000Z\",\r\n  \"min_content_per_account\": 1,\r\n  \"scoring_criteria\": \"Based on consistency and community engagement\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImRmMGNhZWVmLTYzYmYtNDBmOC1iZGFjLTA4MTMwMDc5MzVkOSIsImVtYWlsIjoiYWRtaW5AdGFsZW50aXgyNC5uZXQiLCJ1c2VybmFtZSI6ImFkbWluMjQiLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3Njg3NzY0ODIsImV4cCI6MTc2OTM4MTI4Mn0.bATjPaO467IKMz9WHeO1OtyzSSh5UN0FK9L9gUtBSaI",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges?status=approved",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "approved"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get challengeID",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Challenge Partcipants",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImI4Yjg1MTRjLWRkY2ItNDhiZC05ZTBkLThhYzVkYTdmOWRmNSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY4OTM1OTMwLCJleHAiOjE3Njk1NDA3MzB9.1vudoT_Tk2BTX1ouB3QVruakwXJRqA41ndGmefzJ554",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId/participants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId",
+                "participants"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": "dc56c86a-c52a-4304-8fba-4015d99d2ccd"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Challenge Posts",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId",
+                "posts"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Direct Post",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Beautiful Sunset at the Beach",
+                  "type": "text",
+                  "uuid": "076d91c5-aeca-4b57-bee6-b1c19060ac1e"
+                },
+                {
+                  "key": "caption",
+                  "value": "Captured this amazing sunset during my summer vacation. The colors were absolutely breathtaking!",
+                  "type": "text",
+                  "uuid": "71e9395d-a881-4d87-a59c-dd6ff40f661f"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "uuid": "96af6a24-9bf6-486c-8e51-0949a2c95b61",
+                  "src": "/C:/Users/ihirwe/Downloads/Video/♡︎.mp4"
+                },
+                {
+                  "key": "post_category",
+                  "value": "Photography",
+                  "type": "text",
+                  "uuid": "5ad7c544-bffc-4005-8735-54424da535e0"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId",
+                "posts"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Organized Challenges",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/my-challenges",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                "my-challenges"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Joined",
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true
+          },
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/joined",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                "joined"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Join Challenge",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId",
+                "join"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Post To Challenge",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjQ0MGE1MWEwLTExZmYtNGM0Ny1hYmJhLTVjODE2NmQyM2I1MSIsImVtYWlsIjoibmlwY3RzM0BnbWFpbC5jb20iLCJ1c2VybmFtZSI6ImloaXJ3ZSIsInJvbGUiOiJ1c2VyIiwic3RhdHVzIjoiYWN0aXZlIiwiaWF0IjoxNzY3NzkzMDg5LCJleHAiOjE3NjgzOTc4ODl9.zGT75PxEXUQolWpdsDG4A36KSNZyNFOMhe_fsayDS3o",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"name\": \"Summer Photography Contest 2024\",\r\n  \"description\": \"Showcase your best summer moments! Capture the essence of summer through your lens. Winners will be selected based on creativity, composition, and storytelling.\",\r\n  \"has_rewards\": true,\r\n  \"rewards\": \"First Place: $500 cash prize, Second Place: $300, Third Place: $200. All winners get featured on our homepage.\",\r\n  \"organizer_name\": \"John Doe\",\r\n  \"organizer_contact\": \"john.doe@example.com\",\r\n  \"start_date\": \"2026-07-01T00:00:00.000Z\",\r\n  \"end_date\": \"2026-08-31T23:59:59.000Z\",\r\n  \"min_content_per_account\": 3,\r\n  \"scoring_criteria\": \"Judges will evaluate based on: 1) Creativity (30%), 2) Technical Quality (30%), 3) Storytelling (25%), 4) Audience Engagement (15%)\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/challenges/:challengeId/posts/:postId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "challenges",
+                ":challengeId",
+                "posts",
+                ":postId"
+              ],
+              "variable": [
+                {
+                  "key": "challengeId",
+                  "value": ""
+                },
+                {
+                  "key": "postId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "New Request",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjRhODY1ODQyLTMxMjktNGRlNy04ZjUyLTNlMTM4ZmJhOTY4ZiIsImVtYWlsIjoidXNlcjFAdGFseW5rLmNvbSIsInVzZXJuYW1lIjoidXNlcjEiLCJyb2xlIjoidXNlciIsInN0YXR1cyI6ImFjdGl2ZSIsImlhdCI6MTc2MzUwODI2MCwiZXhwIjoxNzY0MTEzMDYwfQ.FWzvVI_PCZZx_Hafi6-yVbMy8RvXe8pWqg_zYQhTJ8I",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/search?q=dance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "dance"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

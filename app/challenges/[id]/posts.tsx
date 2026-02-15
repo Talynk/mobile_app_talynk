@@ -12,6 +12,7 @@ import {
   Modal,
   ScrollView,
   FlatList,
+  Animated,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -23,8 +24,11 @@ import { Post } from '@/types';
 import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { timeAgo } from '@/lib/utils/time-ago';
+import { filterHlsReady } from '@/lib/utils/post-filter';
+import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -81,7 +85,7 @@ export default function ChallengePostsScreen() {
 
       if (response.status === 'success') {
         // API client already normalizes posts (extracts item.post)
-        const postsList = response.data?.posts || [];
+        const postsList = filterHlsReady(response.data?.posts || []) as Post[];
 
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsList.length === limit;
@@ -157,11 +161,9 @@ export default function ChallengePostsScreen() {
   };
 
   // PostCard component for grid display
-  const PostCard = ({ item }: { item: Post }) => {
-    const videoRef = useRef<Video>(null);
+  const PostCard = ({ item, index }: { item: Post; index: number }) => {
     const [isActive, setIsActive] = useState(false);
     const [showVideo, setShowVideo] = useState(false);
-    const [isLoaded, setIsLoaded] = useState(false);
 
     // Get media URL using the utility function
     const mediaUrl = getPostMediaUrl(item) || '';
@@ -171,46 +173,49 @@ export default function ChallengePostsScreen() {
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
           mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm')));
+          mediaUrl.toLowerCase().includes('.webm') ||
+          mediaUrl.toLowerCase().includes('.m3u8')));
 
     // For videos, use the mediaUrl directly; for images, also use mediaUrl
     const videoUrl = isVideo ? mediaUrl : null;
-    const imageUrl = !isVideo ? mediaUrl : null;
 
-    const fallbackImageUrl =
-      getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    const serverThumbnail = getThumbnailUrl(item);
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+    const isHls = mediaUrl.endsWith('.m3u8');
+
+    // Use raw video_url (MP4) for thumbnail generation
+    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
       fallbackImageUrl || '',
       1000
     );
+    // PRIORITY: Server thumbnail > generated thumbnail > fallback
     const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl || mediaUrl)
-      : (imageUrl || mediaUrl || fallbackImageUrl);
+      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
+      : (mediaUrl || fallbackImageUrl);
+
+    const player = useVideoPlayer(videoUrl, (player) => {
+      player.loop = true;
+      player.muted = true;
+    });
 
     useEffect(() => {
       if (isActive && isVideo && videoUrl) {
         const timer = setTimeout(() => {
           setShowVideo(true);
+          player.play();
         }, 200);
-        return () => clearTimeout(timer);
+        return () => {
+          clearTimeout(timer);
+          player.pause();
+        };
       } else {
         setShowVideo(false);
-        setIsLoaded(false);
-        if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => { });
-        }
+        player.pause();
       }
-    }, [isActive, isVideo, videoUrl]);
-
-    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-      if (status.isLoaded) {
-        setIsLoaded(true);
-        if (status.positionMillis && status.positionMillis > 3000) {
-          videoRef.current?.setPositionAsync(0);
-        }
-      }
-    };
+    }, [isActive, isVideo, videoUrl, player]);
 
     return (
       <TouchableOpacity
@@ -218,6 +223,7 @@ export default function ChallengePostsScreen() {
         onPressIn={() => setIsActive(true)}
         onPressOut={() => setIsActive(false)}
         activeOpacity={0.9}
+        onPress={() => handlePostPress(index)}
       >
         {staticThumbnailUrl ? (
           <Image
@@ -227,27 +233,19 @@ export default function ChallengePostsScreen() {
           />
         ) : (
           <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-            {isVideo && !staticThumbnailUrl ? (
-              <ActivityIndicator size="small" color="#60a5fa" />
-            ) : (
-              <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
-            )}
+            <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
           </View>
         )}
 
         {showVideo && isVideo && videoUrl && isActive && (
-          <Video
-            ref={videoRef}
-            source={{ uri: videoUrl }}
+          <VideoView
+            player={player}
             style={[styles.postMedia, styles.teaserVideo]}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={isActive}
-            isLooping={false}
-            isMuted={true}
-            volume={0}
-            onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+            contentFit="cover"
+            nativeControls={false}
           />
         )}
+
 
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
@@ -270,26 +268,11 @@ export default function ChallengePostsScreen() {
 
   // Fullscreen post viewer component
   const FullscreenPostViewer = ({ item, index, cachedMediaUrl }: { item: Post; index: number; cachedMediaUrl?: string | null }) => {
-    const videoRef = useRef<Video>(null);
-    const [isLoaded, setIsLoaded] = useState(false);
-    const [isMuted, setIsMuted] = useState(false); // Default: sound ON
-    const [videoProgress, setVideoProgress] = useState(0);
-    const [videoDuration, setVideoDuration] = useState(0);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const { height: screenHeight } = Dimensions.get('window');
+    const { isMuted, toggleMute } = useVideoMute();
+    const muteOpacity = useRef(new Animated.Value(0)).current;
 
     // Get media URL using the utility function
     const mediaUrl = getPostMediaUrl(item) || '';
-
-    // Debug logging
-    if (__DEV__) {
-      console.log('🎬 [FullscreenPostViewer] Post:', {
-        id: item.id,
-        type: item.type,
-        video_url: item.video_url,
-        mediaUrl: mediaUrl,
-      });
-    }
 
     const isVideo =
       item.type === 'video' ||
@@ -297,209 +280,142 @@ export default function ChallengePostsScreen() {
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
           mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm')));
+          mediaUrl.toLowerCase().includes('.webm') ||
+          mediaUrl.toLowerCase().includes('.m3u8')));
 
     // For videos, use the mediaUrl directly; for images, also use mediaUrl
     const videoUrl = isVideo ? mediaUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
 
-    const fallbackImageUrl =
-      getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    const serverThumbnail = getThumbnailUrl(item);
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+    const isHls = mediaUrl.endsWith('.m3u8');
+
+    // Use raw video_url (MP4) for thumbnail generation
+    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
       fallbackImageUrl || '',
       1000
     );
+    // PRIORITY: Server thumbnail > generated thumbnail > fallback
     const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl || mediaUrl)
+      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
       : (imageUrl || mediaUrl || fallbackImageUrl);
 
-    useEffect(() => {
-      if (isVideo && videoUrl && videoRef.current) {
-        // Auto-play when component mounts
-        videoRef.current.playAsync().catch(() => { });
-      }
-      return () => {
-        if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => { });
-        }
-      };
-    }, [isVideo, videoUrl]);
+    // Initialize expo-video player
+    const videoPlayerSource = cachedMediaUrl || videoUrl || '';
+    const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
+      player.loop = true;
+      player.muted = isMuted;
+      player.play();
+    });
 
-    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-      if (status.isLoaded) {
-        setIsLoaded(true);
-        setIsPlaying(status.isPlaying);
-        if (status.durationMillis && status.positionMillis !== undefined) {
-          const progress = status.durationMillis > 0
-            ? status.positionMillis / status.durationMillis
-            : 0;
-          setVideoProgress(progress);
-          setVideoDuration(status.durationMillis);
-        }
+    // Sync mute state
+    useEffect(() => {
+      if (videoPlayer) {
+        videoPlayer.muted = isMuted;
       }
-    };
+    }, [isMuted, videoPlayer]);
 
     const handleVideoPress = () => {
       if (isVideo) {
-        setIsMuted(prev => !prev);
+        toggleMute();
+        // Animate the mute indicator
+        Animated.sequence([
+          Animated.timing(muteOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.delay(800),
+          Animated.timing(muteOpacity, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ]).start();
       }
     };
 
     return (
       <View style={styles.fullscreenPostContainer}>
         <View style={styles.mediaContainer}>
-          {/* Show thumbnail/poster for videos, or image for images */}
-          {!isVideo && imageUrl ? (
+          {/* Render thumbnail/image - always visible initially */}
+          {imageUrl ? (
             <Image
               source={{ uri: imageUrl }}
               style={styles.fullscreenMedia}
               resizeMode="contain"
             />
-          ) : isVideo && staticThumbnailUrl && !isLoaded ? (
+          ) : staticThumbnailUrl ? (
             <Image
               source={{ uri: staticThumbnailUrl }}
-              style={styles.fullscreenMedia}
+              style={[
+                styles.fullscreenMedia,
+                { position: 'absolute', zIndex: 1 } // Layer under video
+              ]}
               resizeMode="cover"
             />
-          ) : !isVideo ? (
+          ) : (
             <View style={[styles.fullscreenMedia, styles.noMediaPlaceholder]}>
               <MaterialIcons name="image" size={48} color="#444" />
             </View>
-          ) : null}
+          )}
 
-          {/* Video player - always render if it's a video */}
+          {/* Video Player */}
           {isVideo && videoUrl && (
             <TouchableOpacity
-              activeOpacity={0.95}
+              activeOpacity={1}
               onPress={handleVideoPress}
-              style={styles.videoTouchable}
+              style={[styles.videoTouchable, { position: 'absolute', zIndex: 2, width: '100%', height: '100%' }]}
             >
-              <Video
-                ref={videoRef}
-                source={{
-                  uri: cachedMediaUrl || videoUrl, // CRITICAL: Use cached file if available
-                  headers: {
-                    'Cache-Control': 'public, max-age=31536000, immutable'
-                  }
-                }}
+              <VideoView
+                player={videoPlayer}
                 style={styles.fullscreenMedia}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={true}
-                isLooping={true}
-                isMuted={isMuted}
-                volume={isMuted ? 0 : 1}
-                usePoster={false}
-                shouldCorrectPitch={true}
-                useNativeControls={false}
-                progressUpdateIntervalMillis={100}
-                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                onError={(error) => {
-                  console.error('❌ [Video] Playback error:', error);
-                }}
-                onLoadStart={() => {
-                  if (__DEV__) console.log('📹 [Video] Loading:', videoUrl);
-                }}
-                onLoad={() => {
-                  if (__DEV__) console.log('✅ [Video] Loaded:', videoUrl);
-                  videoRef.current?.playAsync().catch(() => { });
-                }}
+                contentFit="cover"
+                nativeControls={false}
               />
 
-              {/* Mute indicator - click to toggle */}
-              {isMuted && (
-                <View style={styles.muteIndicatorOverlay}>
-                  <View style={styles.muteIndicatorBadge}>
-                    <Feather name="volume-x" size={28} color="rgba(255,255,255,0.8)" />
-                  </View>
-                </View>
-              )}
+              {/* Mute/Unmute Indicator Overlay */}
+              <View style={styles.muteIndicatorOverlay} pointerEvents="none">
+                <Animated.View style={[styles.muteIndicatorBadge, { opacity: muteOpacity }]}>
+                  <Feather
+                    name={isMuted ? "volume-x" : "volume-2"}
+                    size={32}
+                    color="rgba(255,255,255,0.9)"
+                  />
+                </Animated.View>
+              </View>
             </TouchableOpacity>
           )}
 
-          {/* Progress bar at bottom - only for videos */}
-          {isVideo && isLoaded && videoDuration > 0 && (
-            <View
-              style={[
-                styles.progressBarContainerFullscreen,
-                {
-                  position: 'absolute',
-                  bottom: 60 + insets.bottom - 48,
-                  left: 0,
-                  right: 0,
-                },
-              ]}
-            >
-              <View style={styles.progressBarTrack}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${videoProgress * 100}%`,
-                      backgroundColor: '#60a5fa',
-                    }
-                  ]}
-                />
-              </View>
-            </View>
-          )}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.8)']}
+            style={styles.fullscreenOverlay}
+          >
+            {/* Post info overlays... */}
+          </LinearGradient>
         </View>
 
-        <ScrollView style={styles.postInfoScroll} showsVerticalScrollIndicator={true}>
-          <View style={styles.postInfo}>
-            {item.user && (
-              <View style={styles.userSection}>
-                <Avatar
-                  user={{
-                    ...item.user,
-                    // Ensure profile_picture is undefined if null, to satisfy Avatar type
-                    profile_picture: item.user.profile_picture ?? undefined,
-                  }}
-                  size={44}
-                  style={styles.avatar}
-                />
-                <View style={styles.userDetails}>
-                  <Text style={styles.username}>{item.user.username || 'Unknown'}</Text>
-                  {/* Use name as display name fallback, because display_name does not exist */}
-                  {(item.user.name || item.user.username) && (
-                    <Text style={styles.displayName}>{item.user.name ?? item.user.username}</Text>
-                  )}
-                </View>
-              </View>
-            )}
-
-            {item.title && (
-              <Text style={styles.postTitle}>{item.title}</Text>
-            )}
-
-            {item.description && (
-              <Text style={styles.postDescription}>{item.description}</Text>
-            )}
-
-            {item.caption && (
-              <Text style={styles.postCaption}>{item.caption}</Text>
-            )}
-
-            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
-              <Text style={styles.postTimestamp}>
-                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
-              </Text>
-            )}
-
-            <View style={styles.postStatsRow}>
-              <View style={styles.statItem}>
-                <Feather name="heart" size={16} color={C.primary} />
-                <Text style={styles.statText}>{item.likes || 0}</Text>
-              </View>
-              <View style={styles.statItem}>
-                <Feather name="message-circle" size={16} color={C.primary} />
-                <Text style={styles.statText}>
-                  {Array.isArray(item.comments) ? item.comments.length : (item.comments ?? 0)}
-                </Text>
-              </View>
+        <View style={styles.fullscreenContent}>
+          <View style={styles.postHeader}>
+            <Avatar
+              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture || undefined } : { username: 'User' }}
+              size={40}
+              style={styles.postAvatar}
+            />
+            <View style={styles.headerText}>
+              <Text style={styles.username}>{item.user?.username || 'User'}</Text>
             </View>
           </View>
-        </ScrollView>
+
+          <Text style={styles.caption} numberOfLines={3}>
+            {item.description || item.caption}
+          </Text>
+          <Text style={styles.timeAgo}>{timeAgo(item.createdAt)}</Text>
+        </View>
       </View>
     );
   };
@@ -545,7 +461,7 @@ export default function ChallengePostsScreen() {
             onPress={() => handlePostPress(index)}
             activeOpacity={0.8}
           >
-            <PostCard item={item} />
+            <PostCard item={item} index={index} />
           </TouchableOpacity>
         )}
         keyExtractor={(item) => item.id}
@@ -880,9 +796,52 @@ const styles = StyleSheet.create({
   },
   statText: {
     color: '#e5e7eb',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '500',
   },
+
+  // Added Styles for FullscreenPostViewer
+  fullscreenOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+  },
+  fullscreenContent: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    padding: 16,
+  },
+  postHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  postAvatar: {
+    marginRight: 10,
+  },
+  headerText: {
+    justifyContent: 'center',
+  },
+  location: {
+    color: '#ccc',
+    fontSize: 12,
+  },
+  caption: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  timeAgo: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 4,
+  },
+
   progressBarContainerFullscreen: {
     height: 4,
     paddingHorizontal: 0,

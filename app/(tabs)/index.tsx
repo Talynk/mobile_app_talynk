@@ -44,6 +44,7 @@ import CommentsModal from '@/components/CommentsModal';
 import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
+import { useMute } from '@/lib/mute-context';
 
 // expo-video handles video playback - no need for manual video ref management
 
@@ -64,7 +65,8 @@ const formatNumber = (num: number): string => {
 };
 
 
-import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getFileUrl } from '@/lib/utils/file-url';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 
@@ -159,7 +161,7 @@ const PostItem: React.FC<PostItemProps> = ({
   const [isPlayerValid, setIsPlayerValid] = useState(false); // CRITICAL FIX: State-based validity for triggering re-renders
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const { isMuted, toggleMute } = useMute();
   const [videoError, setVideoError] = useState(false);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoReady, setVideoReady] = useState(false); // INSTAGRAM STYLE: Track when video is ready to display
@@ -172,6 +174,34 @@ const PostItem: React.FC<PostItemProps> = ({
   const [videoLoading, setVideoLoading] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
   const progressBarRef = useRef<View>(null);
+  const muteOpacity = useRef(new Animated.Value(0)).current;
+  const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
+
+  // Instagram-style mute toggle with fade indicator
+  // CRITICAL: Set videoPlayer.muted DIRECTLY — don't wait for React re-render cycle
+  const handleMuteToggle = () => {
+    const newMuted = !isMuted;
+    toggleMute(); // Update global context for other components
+
+    // IMMEDIATELY set on the current player — this is what makes unmute work
+    if (videoPlayer && playerValidRef.current) {
+      try {
+        videoPlayer.muted = newMuted;
+      } catch (e) {
+        // Player might be released
+      }
+    }
+
+    muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
+    // Show indicator then fade out
+    muteOpacity.setValue(1);
+    Animated.timing(muteOpacity, {
+      toValue: 0,
+      duration: 800,
+      delay: 300,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const mediaUrl = getMediaUrl(item);
   const isVideo =
@@ -179,7 +209,8 @@ const PostItem: React.FC<PostItemProps> = ({
     (mediaUrl !== null &&
       (mediaUrl.includes('.mp4') ||
         mediaUrl.includes('.mov') ||
-        mediaUrl.includes('.webm')));
+        mediaUrl.includes('.webm') ||
+        mediaUrl.includes('.m3u8')));
 
   // INSTAGRAM STYLE: Create player for current + next + previous (3 player pool)
   // This allows seamless transition when scrolling without creating too many players
@@ -264,10 +295,11 @@ const PostItem: React.FC<PostItemProps> = ({
         videoPlayer.pause();
       }
 
-      // Reset to start when becoming active
+      // Reset to start when becoming active again
       if (isActive && !wasActiveRef.current) {
         videoPlayer.currentTime = 0;
-        setVideoReady(false); // Reset videoReady when switching videos
+        // DON'T reset videoReady here — the video was already loaded,
+        // resetting causes a black flash. videoReady resets via videoPlayerSource effect.
       }
 
       wasActiveRef.current = isActive;
@@ -396,7 +428,7 @@ const PostItem: React.FC<PostItemProps> = ({
 
 
   const handleVideoTap = () => {
-    setIsMuted(!isMuted);
+    handleMuteToggle();
   };
 
   const handleLike = async () => {
@@ -507,12 +539,13 @@ const PostItem: React.FC<PostItemProps> = ({
           <TouchableOpacity
             style={styles.mediaWrapper}
             activeOpacity={1}
-            onPress={() => setIsMuted(!isMuted)}
+            onPress={handleMuteToggle}
           >
             {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING (Mux style) */}
-            {mediaUrl && (
+            {/* Use raw video_url (MP4) as fallback — .m3u8 cannot render as Image */}
+            {(getThumbnailUrl(item) || getFileUrl(item.video_url) || mediaUrl) && (
               <Image
-                source={{ uri: getThumbnailUrl(item) || mediaUrl }}
+                source={{ uri: getThumbnailUrl(item) || getFileUrl(item.video_url) || mediaUrl || '' }}
                 style={[
                   styles.media,
                   {
@@ -523,7 +556,7 @@ const PostItem: React.FC<PostItemProps> = ({
                     opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
                   }
                 ]}
-                resizeMode="contain"
+                resizeMode="cover"
               />
             )}
 
@@ -538,7 +571,7 @@ const PostItem: React.FC<PostItemProps> = ({
                     zIndex: 2,
                   }
                 ]}
-                contentFit="contain"
+                contentFit="cover"
                 nativeControls={useNativeControls}
               />
             )}
@@ -571,7 +604,7 @@ const PostItem: React.FC<PostItemProps> = ({
               <Image
                 source={{ uri: mediaUrl }}
                 style={styles.media}
-                resizeMode="contain"
+                resizeMode="cover"
               />
             ) : (
               <View style={[styles.media, styles.placeholderContainer]}>
@@ -582,15 +615,13 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Mute/Unmute Indicator Overlay - Instagram-style center indicator */}
-        {isVideo && !useNativeControls && isActive && (
-          <View style={styles.muteIndicatorOverlay} pointerEvents="none">
-            {isMuted ? (
-              <View style={styles.muteIndicatorBadge}>
-                <Feather name="volume-x" size={32} color="rgba(255,255,255,0.9)" />
-              </View>
-            ) : null}
-          </View>
+        {/* Instagram-style mute indicator — shows on toggle and fades away */}
+        {isVideo && isActive && (
+          <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
+            <View style={styles.muteIndicatorBadge}>
+              <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
+            </View>
+          </Animated.View>
         )}
 
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
@@ -759,6 +790,7 @@ export default function FeedScreen() {
   const [commentsPostOwnerId, setCommentsPostOwnerId] = useState<string | undefined>(undefined);
   const [createChallengeVisible, setCreateChallengeVisible] = useState(false);
   const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
+  const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const [isMuted, setIsMuted] = useState(false);
   const [networkError, setNetworkError] = useState(false);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
@@ -844,7 +876,7 @@ export default function FeedScreen() {
 
       if (response.status === 'success') {
         const posts = response.data.posts || response.data;
-        const postsArray = Array.isArray(posts) ? posts : [];
+        const postsArray = filterHlsReady(Array.isArray(posts) ? posts : []);
 
         if (__DEV__) {
           console.log('📥 [fetchPosts] API Response:', {
@@ -1248,11 +1280,14 @@ export default function FeedScreen() {
           <ChallengesList
             onCreateChallenge={() => setCreateChallengeVisible(true)}
             refreshTrigger={challengesRefreshTrigger}
+            defaultTab={challengeDefaultTab}
           />
           <CreateChallengeModal
             visible={createChallengeVisible}
             onClose={() => setCreateChallengeVisible(false)}
             onCreated={() => {
+              // Switch to "Created by Me" tab so user immediately sees their pending challenge
+              setChallengeDefaultTab('created');
               // Trigger refresh of challenges list
               setChallengesRefreshTrigger(prev => prev + 1);
             }}

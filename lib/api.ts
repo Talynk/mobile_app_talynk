@@ -295,7 +295,7 @@ export const postsApi = {
       const url = `/api/follows/posts?page=${page}&limit=${limit}${timestamp ? `&t=${timestamp}` : ''}`;
       const response = await apiClient.get(url);
       const apiResponse = response.data;
-      
+
       // Log response for debugging
       if (__DEV__) {
         console.log('📥 [getFollowing] API Response:', {
@@ -305,7 +305,7 @@ export const postsApi = {
           pagination: apiResponse?.data?.pagination,
         });
       }
-      
+
       // Backend returns: { status: 'success', data: { posts: [...], pagination: {...}, filters: {...} } }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const posts = apiResponse.data.posts || [];
@@ -326,12 +326,12 @@ export const postsApi = {
           }
         };
       }
-      
+
       // Fallback structure mapping
       if (apiResponse?.data?.posts) {
         return apiResponse;
       }
-      
+
       // Empty result - user follows no one or no posts
       return {
         status: 'success',
@@ -340,10 +340,10 @@ export const postsApi = {
       };
     } catch (error: any) {
       const { isNetworkError, getErrorMessage } = require('./utils/network-error-handler');
-      
+
       const isNetwork = isNetworkError(error);
       const errorMessage = getErrorMessage(error, 'Failed to fetch following posts');
-      
+
       // Handle network errors gracefully - return empty result instead of error
       if (isNetwork) {
         // Silently handle network errors
@@ -354,7 +354,7 @@ export const postsApi = {
           data: { posts: [], pagination: {}, filters: {} },
         };
       }
-      
+
       // Log non-network errors for debugging
       console.error('❌ Error fetching following posts:', {
         message: error.message,
@@ -363,7 +363,7 @@ export const postsApi = {
         data: error.response?.data,
         url: error.config?.url,
       });
-      
+
       // Handle 404 or empty following list gracefully
       if (error.response?.status === 404 || error.response?.status === 400) {
         return {
@@ -372,7 +372,7 @@ export const postsApi = {
           data: { posts: [], pagination: {}, filters: {} },
         };
       }
-      
+
       // Handle 401 Unauthorized - user not logged in
       if (error.response?.status === 401) {
         return {
@@ -381,7 +381,7 @@ export const postsApi = {
           data: { posts: [], pagination: {}, filters: {} },
         };
       }
-      
+
       return {
         status: 'error',
         message: errorMessage,
@@ -630,7 +630,7 @@ export const postsApi = {
           console.error('[API] Alternative comments endpoint also failed:', altError.message);
         }
       }
-      
+
       console.error('[API] Get comments error:', {
         message: error.message,
         code: error.code,
@@ -638,7 +638,7 @@ export const postsApi = {
         statusText: error.response?.statusText,
         data: error.response?.data,
       });
-      
+
       // Return empty comments silently instead of showing error to user
       // Comments feature may not be fully implemented on backend yet
       console.log('[API] Comments feature unavailable, returning empty list');
@@ -756,6 +756,117 @@ export const postsApi = {
   deletePost: async (postId: string) => {
     const response = await apiClient.delete(`/api/posts/${postId}`);
     return response.data;
+  },
+
+  // --- Direct Upload (Signed URL) Flow ---
+
+  /**
+   * Step 1: Create a post record and get a signed R2 upload URL.
+   * POST /api/posts/create-upload
+   */
+  createUpload: async (data: {
+    title: string;
+    caption?: string;
+    post_category: string;
+    status?: 'active' | 'draft';
+  }): Promise<ApiResponse<{
+    postId: string;
+    uploadUrl: string;
+    videoUrl: string;
+    expiresIn: number;
+  }>> => {
+    try {
+      const response = await apiClient.post('/api/posts/create-upload', data);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to create upload session',
+        data: { postId: '', uploadUrl: '', videoUrl: '', expiresIn: 0 },
+      };
+    }
+  },
+
+  /**
+   * Step 3: Notify backend that the file has been uploaded to R2.
+   * POST /api/posts/upload-complete
+   */
+  completeUpload: async (postId: string): Promise<ApiResponse<{
+    postId: string;
+    video_url: string;
+    processing_status: string;
+  }>> => {
+    try {
+      const response = await apiClient.post('/api/posts/upload-complete', { postId });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to complete upload',
+        data: { postId: '', video_url: '', processing_status: '' },
+      };
+    }
+  },
+
+  /**
+   * Poll video processing status (HLS transcoding progress).
+   * GET /api/posts/:postId/processing-status
+   */
+  getProcessingStatus: async (postId: string): Promise<ApiResponse<{
+    postId: string;
+    type: string;
+    processing: {
+      status: string;
+      statusLabel: string;
+      error?: string;
+      hlsReady: boolean;
+      queue?: {
+        positionInQueue: number;
+        jobsWaiting: number;
+        jobsActive: number;
+        estimatedSecondsRemaining: number;
+        statusLabel: string;
+      };
+    };
+    urls: {
+      raw: string;
+      hls: string;
+      thumbnail: string;
+      preferred: string;
+    };
+    metadata: {
+      duration: number;
+      width: number;
+      height: number;
+    };
+  }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/${postId}/processing-status`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to get processing status',
+        data: {} as any,
+      };
+    }
+  },
+
+  /**
+   * Retry failed video processing.
+   * POST /api/posts/:postId/retry-processing
+   */
+  retryProcessing: async (postId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post(`/api/posts/${postId}/retry-processing`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to retry processing',
+        data: {},
+      };
+    }
   },
 };
 
@@ -879,22 +990,22 @@ export const userApi = {
       } catch {
         // If main endpoint doesn't exist, combine mutual and discover
       }
-      
+
       // Combine mutual and discover suggestions
       const [mutualRes, discoverRes] = await Promise.all([
         apiClient.get('/api/users/suggestions/mutual').catch(() => ({ data: { status: 'success', data: { suggestions: [] } } })),
         apiClient.get('/api/users/suggestions/discover').catch(() => ({ data: { status: 'success', data: { suggestions: [] } } }))
       ]);
-      
+
       const mutual = mutualRes.data?.data?.suggestions || [];
       const discover = discoverRes.data?.data?.suggestions || [];
-      
+
       // Combine and deduplicate by id
       const combined = [...mutual, ...discover];
-      const unique = combined.filter((user, index, self) => 
+      const unique = combined.filter((user, index, self) =>
         index === self.findIndex((u) => u.id === user.id)
       );
-      
+
       return {
         status: 'success',
         data: { suggestions: unique },
@@ -925,7 +1036,7 @@ export const userApi = {
     try {
       const response = await apiClient.get('/api/user/statistics');
       const apiResponse = response.data;
-      
+
       // Backend returns: { status: 'success', data: { statistics: {...} } } or { status: 'success', data: {...} }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const stats = apiResponse.data.statistics || apiResponse.data;
@@ -943,7 +1054,7 @@ export const userApi = {
           },
         };
       }
-      
+
       return {
         status: 'error',
         message: 'Failed to fetch statistics',
@@ -1119,7 +1230,7 @@ export const challengesApi = {
         let activeChallenges: any[] = [];
         let approvedChallenges: any[] = [];
         let pagination: any = {};
-        
+
         try {
           const response = await apiClient.get(`/api/challenges?status=active`);
           const apiResponse = response.data;
@@ -1130,7 +1241,7 @@ export const challengesApi = {
         } catch (error: any) {
           console.warn('⚠️ Error fetching active challenges:', error.message);
         }
-        
+
         try {
           const approvedResponse = await apiClient.get(`/api/challenges?status=approved`);
           const approvedApiResponse = approvedResponse.data;
@@ -1144,13 +1255,13 @@ export const challengesApi = {
         } catch (error: any) {
           console.warn('⚠️ Error fetching approved challenges:', error.message);
         }
-        
+
         // Combine and remove duplicates
         const allChallenges = [...activeChallenges, ...approvedChallenges];
         const uniqueChallenges = allChallenges.filter((challenge, index, self) =>
           index === self.findIndex((c) => c.id === challenge.id)
         );
-        
+
         // Return success if we got any challenges, even if one request failed
         if (uniqueChallenges.length > 0 || (activeChallenges.length === 0 && approvedChallenges.length === 0)) {
           return {
@@ -1162,7 +1273,7 @@ export const challengesApi = {
             }
           };
         }
-        
+
         // If both failed, return error
         return {
           status: 'error',
@@ -1170,11 +1281,11 @@ export const challengesApi = {
           data: { challenges: [], pagination: {} },
         };
       }
-      
+
       // For other statuses, fetch normally
       const response = await apiClient.get(`/api/challenges?status=${statusParam}`);
       const apiResponse = response.data;
-      
+
       // Backend returns: { status: 'success', data: [...], pagination: {...} }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const challenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
@@ -1187,7 +1298,7 @@ export const challengesApi = {
           }
         };
       }
-      
+
       return {
         status: 'error',
         message: apiResponse?.message || 'Failed to fetch challenges',
@@ -1206,7 +1317,7 @@ export const challengesApi = {
     try {
       const response = await apiClient.get('/api/challenges/my-challenges');
       const apiResponse = response.data;
-      
+
       // Backend returns: { status: 'success', data: [...], pagination: {...} }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const challenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
@@ -1219,7 +1330,7 @@ export const challengesApi = {
           }
         };
       }
-      
+
       return {
         status: 'error',
         message: apiResponse?.message || 'Failed to fetch my challenges',
@@ -1273,7 +1384,7 @@ export const challengesApi = {
         data: error.response?.data,
         challengeId
       });
-      
+
       // Extract error message from various possible locations
       let errorMessage = 'Failed to join challenge';
       if (error.response?.data) {
@@ -1282,7 +1393,7 @@ export const challengesApi = {
       } else if (error.message) {
         errorMessage = error.message;
       }
-      
+
       return {
         status: 'error',
         message: errorMessage,
@@ -1321,13 +1432,13 @@ export const challengesApi = {
     try {
       const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
       const apiResponse = response.data;
-      
+
       // Backend returns: { status: 'success', data: [...], pagination: {...} }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const posts = Array.isArray(apiResponse.data) ? apiResponse.data : [];
         // Extract post from challengePost wrapper if needed
         const normalizedPosts = posts.map((item: any) => item.post || item);
-        
+
         return {
           status: 'success',
           message: apiResponse.message || 'Challenge posts fetched successfully',
@@ -1337,7 +1448,7 @@ export const challengesApi = {
           }
         };
       }
-      
+
       return {
         status: 'error',
         message: apiResponse?.message || 'Failed to fetch challenge posts',
@@ -1436,7 +1547,7 @@ export const followsApi = {
     try {
       const response = await apiClient.get(`/api/follows/users/${userId}/followers?page=${page}&limit=${limit}`);
       const apiResponse = response.data;
-      
+
       // Backend structure: { status: 'success', data: { followers: [...], hasMore, totalCount } }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         return {
@@ -1455,7 +1566,7 @@ export const followsApi = {
           }
         };
       }
-      
+
       // Fallback
       return {
         status: 'success',
@@ -1475,7 +1586,7 @@ export const followsApi = {
     try {
       const response = await apiClient.get(`/api/follows/users/${userId}/following?page=${page}&limit=${limit}`);
       const apiResponse = response.data;
-      
+
       // Backend structure: { status: 'success', data: { following: [...], hasMore, totalCount } }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         return {
@@ -1494,7 +1605,7 @@ export const followsApi = {
           }
         };
       }
-      
+
       // Fallback
       return {
         status: 'success',
@@ -1633,10 +1744,10 @@ export const likesApi = {
       };
     } catch (error: any) {
       const { isNetworkError, getErrorMessage } = require('./utils/network-error-handler');
-      
+
       const isNetwork = isNetworkError(error);
       const errorMessage = getErrorMessage(error, 'Failed to check like statuses');
-      
+
       if (isNetwork) {
         // Silently handle network errors
         // Return empty data for network errors - UI will work with cached/default values
@@ -1690,7 +1801,7 @@ export const searchApi = {
     try {
       const params = new URLSearchParams();
       params.append('q', query);
-      
+
       if (options?.type) params.append('type', options.type);
       if (options?.country_id) params.append('country_id', String(options.country_id));
       if (options?.category_id) params.append('category_id', String(options.category_id));
@@ -1701,7 +1812,7 @@ export const searchApi = {
       if (options?.page) params.append('page', String(options.page));
       if (options?.limit) params.append('limit', String(options.limit));
       if (options?.sort) params.append('sort', options.sort);
-      
+
       const response = await apiClient.get(`/api/search?${params.toString()}`);
       return response.data;
     } catch (error: any) {

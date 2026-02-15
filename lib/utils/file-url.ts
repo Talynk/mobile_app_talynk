@@ -56,7 +56,7 @@ export function getPostMediaUrl(post: any): string | null {
     post?.imageUrl ||
     post?.mediaUrl ||
     '';
-  
+
   if (!url || url.trim() === '') {
     return null;
   }
@@ -66,13 +66,15 @@ export function getPostMediaUrl(post: any): string | null {
 
 /**
  * Gets the thumbnail URL from a post object
+ * PRIORITY: Server-generated thumbnail_url (faster, better quality)
  * 
  * @param post - Post object with potential thumbnail fields
  * @returns Full thumbnail URL or null
  */
 export function getThumbnailUrl(post: any): string | null {
+  // Server-generated thumbnail takes priority (from HLS processing)
   const url = post?.thumbnail_url || post?.thumbnail || '';
-  
+
   if (!url || url.trim() === '') {
     return null;
   }
@@ -89,7 +91,7 @@ export function getThumbnailUrl(post: any): string | null {
  */
 export function getProfilePictureUrl(user: any, fallback?: string): string | null {
   const url = user?.profile_picture || user?.avatar || user?.authorProfilePicture || '';
-  
+
   if (!url || url.trim() === '') {
     return fallback || null;
   }
@@ -97,6 +99,58 @@ export function getProfilePictureUrl(user: any, fallback?: string): string | nul
   return getFileUrl(url);
 }
 
+/**
+ * Check if a post's video is HLS-ready (adaptive streaming available)
+ * When HLS is ready, use fullUrl (which will be the .m3u8 playlist)
+ * When not ready, use video_url (raw MP4)
+ * 
+ * @param post - Post object with HLS fields from API
+ * @returns true if HLS streaming is available
+ */
+export function isHlsReady(post: any): boolean {
+  return post?.hlsReady === true ||
+    (post?.hls_url && post?.processing_status === 'completed');
+}
 
+/**
+ * Check if a post is still being processed for HLS
+ * 
+ * @param post - Post object with processing_status field
+ * @returns true if video is still being transcoded
+ */
+export function isVideoProcessing(post: any): boolean {
+  return post?.processing_status === 'pending' ||
+    post?.processing_status === 'processing';
+}
 
+/**
+ * Get the stream type for a post (for choosing video player configuration)
+ * 
+ * @param post - Post object with streamType field
+ * @returns 'hls' | 'raw' | null
+ */
+export function getStreamType(post: any): 'hls' | 'raw' | null {
+  if (post?.streamType) {
+    return post.streamType;
+  }
+  // Infer from other fields if streamType not present
+  if (isHlsReady(post)) {
+    return 'hls';
+  }
+  if (post?.video_url || post?.videoUrl) {
+    return 'raw';
+  }
+  return null;
+}
+
+/**
+ * Check if a URL is an HLS playlist (.m3u8)
+ * 
+ * @param url - Media URL to check
+ * @returns true if URL ends with .m3u8
+ */
+export function isHlsUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return url.toLowerCase().includes('.m3u8');
+}
 

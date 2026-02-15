@@ -468,11 +468,11 @@ export default function ForgotPasswordScreen() {
                   const totalGaps = (OTP_LENGTH - 1) * 8; // Gaps between boxes
                   const availableWidth = Dimensions.get('window').width - 40 - totalMargin - totalGaps; // 40 for form padding
                   const boxWidth = Math.floor(availableWidth / OTP_LENGTH);
-                  
+
                   return (
                     <TextInput
                       key={index}
-                      ref={(el) => (otpInputRefs.current[index] = el)}
+                      ref={(el) => { otpInputRefs.current[index] = el; }}
                       style={[
                         {
                           width: boxWidth,

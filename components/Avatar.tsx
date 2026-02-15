@@ -45,7 +45,7 @@ export const Avatar: React.FC<AvatarProps> = ({
             height: size,
             borderRadius: size / 2,
           },
-          style,
+          style as ImageStyle,
         ]}
         resizeMode="cover"
       />

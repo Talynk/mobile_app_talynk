@@ -24,9 +24,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
-import { useVideoMute } from '@/lib/hooks/use-video-mute';
+// expo-av removed — grid uses Image thumbnails only
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -179,7 +179,7 @@ export default function ExploreScreen() {
       const response = await postsApi.getAll(1, 50);
       if (response.status === 'success') {
         const allPosts = response.data.posts || [];
-        const filtered = applyClientFilters(allPosts);
+        const filtered = applyClientFilters(filterHlsReady(allPosts));
         setGridPosts(filtered);
       }
     } catch (error) {
@@ -254,31 +254,36 @@ export default function ExploreScreen() {
 
   // ============ GRID COMPONENTS ============
   const GridPostCard = ({ item, index }: { item: Post; index: number }) => {
-    const videoUrl = getFileUrl(item.video_url || item.videoUrl || '');
     const mediaUrl = getPostMediaUrl(item) || '';
-    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
+    // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
+    const serverThumbnail = getThumbnailUrl(item); // Uses post.thumbnail_url from API
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+    const isHls = mediaUrl.endsWith('.m3u8');
     const isVideo =
-      item.type === 'video' ||
+      item.type === 'video' || isHls ||
       (mediaUrl !== null &&
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
           mediaUrl.toLowerCase().includes('.mov') ||
           mediaUrl.toLowerCase().includes('.webm')));
 
-    // Use video thumbnail hook for videos
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+    // CRITICAL FIX: For HLS posts, use raw video_url (MP4) for thumbnail generation
+    // The video_url field always has the original MP4 — perfect for thumbnail extraction
+    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    const thumbnailSourceUrl = (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null;
+
+    const { thumbnailUri: generatedThumbnail, isLoading: thumbnailLoading } = useVideoThumbnail(
+      thumbnailSourceUrl,
       fallbackImageUrl || '',
       1000
     );
 
-    // Determine the final thumbnail URL to display
-    const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl)
-      : (mediaUrl || fallbackImageUrl);
-
-    // Check if we're still loading the thumbnail
-    const isLoadingThumbnail = isVideo && !staticThumbnailUrl && videoUrl;
+    // PRIORITY: Server thumbnail > generated thumbnail > fallback image > nothing
+    const displayUrl = serverThumbnail
+      || generatedThumbnail
+      || fallbackImageUrl
+      || (!isVideo ? mediaUrl : null); // For images, use media URL directly
 
     return (
       <TouchableOpacity
@@ -290,21 +295,14 @@ export default function ExploreScreen() {
           })
         }
       >
-        {isLoadingThumbnail ? (
-          // Show loading state while thumbnail is being generated
+        {thumbnailLoading ? (
+          // Show spinner while generating thumbnail (max 5 seconds)
           <View style={[styles.gridMedia, styles.gridNoMedia]}>
             <ActivityIndicator size="small" color="#60a5fa" />
-            <MaterialIcons
-              name="video-library"
-              size={28}
-              color="#444"
-              style={{ marginTop: 8 }}
-            />
           </View>
-        ) : staticThumbnailUrl ? (
-          // Show the thumbnail image
+        ) : displayUrl ? (
           <Image
-            source={{ uri: staticThumbnailUrl }}
+            source={{ uri: displayUrl }}
             style={styles.gridMedia}
             resizeMode="cover"
           />
@@ -364,18 +362,24 @@ export default function ExploreScreen() {
 
   const SearchPostRow = ({ item }: { item: Post }) => {
     const mediaUrl = getPostMediaUrl(item);
-    const isVideo = item.type === 'video' || (mediaUrl && mediaUrl.includes('.mp4'));
-    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
+    const isHls = mediaUrl?.endsWith('.m3u8');
+    const isVideo = item.type === 'video' || isHls || (mediaUrl && mediaUrl.includes('.mp4'));
 
-    // Use video thumbnail hook for videos
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && mediaUrl ? mediaUrl : null,
+    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    const serverThumbnail = getThumbnailUrl(item);
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+    // ONLY generate client-side thumbnail if server doesn't provide one
+    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
       fallbackImageUrl || '',
       1000
     );
 
+    // PRIORITY: Server thumbnail > generated thumbnail > media URL > fallback
     const thumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl)
+      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
 
     return (
@@ -953,9 +957,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   gridCard: {
-    width: (screenWidth - 5) / 3,
-    height: (screenWidth - 5) / 3 * 1.3,
-    margin: 1,
+    width: Math.floor(screenWidth / 3) - 1,
+    height: Math.floor(screenWidth / 3) * 1.3,
+    margin: 0.5,
     backgroundColor: '#1a1a1a',
     position: 'relative',
   },
@@ -1145,9 +1149,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   gridContainer: {
-    padding: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
+    padding: 0,
   },
   searchPostRow: {
     flexDirection: 'row',

@@ -35,13 +35,14 @@ interface ChallengesListProps {
     onCreateChallenge: () => void;
     refreshTrigger?: number;
     activeTab?: 'created' | 'joined' | 'not-joined';
+    defaultTab?: 'active' | 'upcoming' | 'ended' | 'created';
 }
 
-export default function ChallengesList({ onCreateChallenge, refreshTrigger }: ChallengesListProps) {
+export default function ChallengesList({ onCreateChallenge, refreshTrigger, defaultTab }: ChallengesListProps) {
     const [challenges, setChallenges] = useState<Challenge[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [internalTab, setInternalTab] = useState<'active' | 'ended' | 'created'>('active');
+    const [internalTab, setInternalTab] = useState<'active' | 'upcoming' | 'ended' | 'created'>('active');
     const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
     const { user } = useAuth();
 
@@ -109,11 +110,12 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                     });
                 }
 
-                // Filter: End date must be in future (covers Ongoing and Upcoming)
-                // OR status is pending (so user can see their newly created competitions)
-                challengesToDisplay = activeChallenges.filter((ch: any) =>
-                    new Date(ch.end_date) >= now || ch.status === 'pending'
-                );
+                // Filter: Active = started AND not ended
+                challengesToDisplay = activeChallenges.filter((ch: any) => {
+                    const startDate = new Date(ch.start_date);
+                    const endDate = new Date(ch.end_date);
+                    return startDate <= now && endDate >= now;
+                });
 
             } else if (internalTab === 'ended') {
                 // Fetch 'active' (which returns active + approved) because ended challenges still have 'approved' status
@@ -147,6 +149,20 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                 }
 
                 challengesToDisplay = endedChallenges;
+
+            } else if (internalTab === 'upcoming') {
+                // Fetch approved challenges that haven't started yet
+                const response = await challengesApi.getAll('active');
+                let upcomingChallenges: Challenge[] = [];
+
+                if (response.status === 'success') {
+                    const data = response.data?.challenges || response.data || [];
+                    const all = Array.isArray(data) ? data : [];
+                    // Upcoming = approved/active status BUT start_date is in the future
+                    upcomingChallenges = all.filter((ch: any) => new Date(ch.start_date) > now);
+                }
+
+                challengesToDisplay = upcomingChallenges;
 
             } else if (internalTab === 'created') {
                 // Fetch user's CREATED challenges
@@ -215,12 +231,27 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
         fetchChallenges();
     }, [internalTab, user, refreshTrigger]);
 
+    // Switch tab when parent requests it (e.g., after creating a challenge)
+    useEffect(() => {
+        if (defaultTab) {
+            setInternalTab(defaultTab);
+        }
+    }, [defaultTab]);
+
     const onRefresh = () => {
         setRefreshing(true);
         fetchChallenges();
     };
 
     const getChallengeStatus = (challenge: any) => {
+        // Check explicit status field first (important for "Created by Me" tab)
+        if (challenge.status === 'pending' || challenge.status === 'draft') {
+            return { label: 'Pending Review', color: '#f59e0b' };
+        }
+        if (challenge.status === 'rejected') {
+            return { label: 'Rejected', color: '#ef4444' };
+        }
+
         // Use is_currently_active field from API if available
         if (challenge.is_currently_active !== undefined) {
             if (challenge.is_currently_active) {
@@ -230,7 +261,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                 const startDate = new Date(challenge.start_date);
                 const endDate = new Date(challenge.end_date);
 
-                if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
+                if (now < startDate) return { label: 'Upcoming', color: '#60a5fa' };
                 if (now > endDate) return { label: 'Ended', color: '#666' };
                 return { label: 'Inactive', color: '#666' };
             }
@@ -241,7 +272,8 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
 
-        if (now < startDate) return { label: 'Upcoming', color: '#f59e0b' };
+        if (challenge.status === 'approved' && now < startDate) return { label: 'Approved', color: '#60a5fa' };
+        if (now < startDate) return { label: 'Upcoming', color: '#60a5fa' };
         if (now > endDate) return { label: 'Ended', color: '#666' };
         return { label: 'Active', color: '#10b981' };
     };
@@ -398,6 +430,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
 
     const TABS = [
         { key: 'active' as const, label: 'Active', icon: 'zap' as const },
+        { key: 'upcoming' as const, label: 'Upcoming', icon: 'clock' as const },
         { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
         { key: 'created' as const, label: 'Created by Me', icon: 'user' as const },
     ];
@@ -465,13 +498,15 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger }: Ch
                                 {!user ? 'No competitions available' :
                                     internalTab === 'created' ? 'No competitions created yet' :
                                         internalTab === 'ended' ? 'No ended competitions' :
-                                            'No active competitions'}
+                                            internalTab === 'upcoming' ? 'No upcoming competitions' :
+                                                'No active competitions'}
                             </Text>
                             <Text style={styles.emptySubtext}>
                                 {!user ? 'Check back later for new competitions!' :
                                     internalTab === 'created' ? 'Create one to get started!' :
                                         internalTab === 'ended' ? 'Completed competitions will appear here' :
-                                            'Check back later or create your own!'}
+                                            internalTab === 'upcoming' ? 'Approved competitions that haven\'t started will appear here' :
+                                                'Check back later or create your own!'}
                             </Text>
                         </View>
                     }

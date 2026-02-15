@@ -62,7 +62,11 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
             const response = await challengesApi.create(payload);
 
             if (response.status === 'success') {
-                Alert.alert('Success', 'Competition created successfully!');
+                Alert.alert(
+                    'Competition Submitted! 🎉',
+                    'Your competition has been created and submitted for review. An administrator will check and approve or reject it. If it gets approved it will appear in the "Created by Me" tab.\n\nPlease wait for approval before it becomes visible to others.',
+                    [{ text: 'OK' }]
+                );
                 onCreated();
                 onClose();
             } else {
@@ -222,7 +226,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
                             {loading ? (
                                 <ActivityIndicator color="#fff" />
                             ) : (
-                                <Text style={styles.submitButtonText}>Create Challenge</Text>
+                                <Text style={styles.submitButtonText}>Submit Competition</Text>
                             )}
                         </TouchableOpacity>
 

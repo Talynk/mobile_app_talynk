@@ -11,7 +11,9 @@ import {
   Alert,
   Dimensions,
   Modal,
+
   StatusBar,
+  Animated,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { challengesApi, postsApi } from '@/lib/api';
@@ -20,11 +22,13 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { timeAgo } from '@/lib/utils/time-ago';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3;
@@ -101,7 +105,7 @@ export default function ChallengeDetailScreen() {
 
       if (response?.status === 'success') {
         const postsList = response.data?.posts || [];
-        const normalizedPosts = postsList.map((item: any) => item.post || item);
+        const normalizedPosts = filterHlsReady(postsList.map((item: any) => item.post || item));
         setPosts(normalizedPosts);
       }
     } catch (err: any) {
@@ -346,23 +350,29 @@ export default function ChallengeDetailScreen() {
 
   const GridPostCard = ({ item, index }: { item: any; index: number }) => {
     const mediaUrl = getPostMediaUrl(item) || '';
+    const isHls = mediaUrl.endsWith('.m3u8');
     const isVideo =
-      item.type === 'video' ||
+      item.type === 'video' || isHls ||
       (mediaUrl !== null &&
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
           mediaUrl.toLowerCase().includes('.mov') ||
           mediaUrl.toLowerCase().includes('.webm')));
 
-    const fallbackImageUrl = getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const videoUrl = isVideo && mediaUrl ? (mediaUrl.startsWith('http') ? mediaUrl : getFileUrl(mediaUrl)) : null;
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    const serverThumbnail = getThumbnailUrl(item);
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+    // Use raw video_url (MP4) for thumbnail generation
+    const rawVideoUrl2 = getFileUrl(item.video_url) || '';
+    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+      (isVideo && !serverThumbnail && rawVideoUrl2) ? rawVideoUrl2 : null,
       fallbackImageUrl || '',
       1000
     );
+    // PRIORITY: Server thumbnail > generated thumbnail > fallback
     const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl || mediaUrl || getFileUrl(mediaUrl))
+      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
 
     return (
@@ -403,12 +413,14 @@ export default function ChallengeDetailScreen() {
   };
 
   const FullscreenPostViewer = ({ item, index, insets, C }: { item: any; index: number; insets: any; C: any }) => {
-    const videoRef = useRef<Video>(null);
-    const [isLoaded, setIsLoaded] = useState(false);
-    const [isMuted, setIsMuted] = useState(false); // Default: sound ON
+    const { isMuted, toggleMute } = useVideoMute();
+    // Use opacity animation for mute indicator
+    const muteOpacity = useRef(new Animated.Value(0)).current;
+
+    // State for progress bar
     const [videoProgress, setVideoProgress] = useState(0);
     const [videoDuration, setVideoDuration] = useState(0);
-    const [isPlaying, setIsPlaying] = useState(false);
+    const [isLoaded, setIsLoaded] = useState(false);
     const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
     const mediaUrl = getPostMediaUrl(item) || '';
@@ -418,49 +430,71 @@ export default function ChallengeDetailScreen() {
         mediaUrl !== '' &&
         (mediaUrl.toLowerCase().includes('.mp4') ||
           mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm')));
+          mediaUrl.toLowerCase().includes('.webm') ||
+          mediaUrl.toLowerCase().includes('.m3u8')));
 
     const videoUrl = isVideo ? mediaUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
-    const fallbackImageUrl =
-      getThumbnailUrl(item) || getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const generatedThumbnail = useVideoThumbnail(
-      isVideo && videoUrl ? videoUrl : null,
+
+    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    const serverThumbnail = getThumbnailUrl(item);
+    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+    const isHls = (mediaUrl || '').endsWith('.m3u8');
+
+    // Use raw video_url (MP4) for thumbnail generation
+    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
       fallbackImageUrl || '',
       1000
     );
+    // PRIORITY: Server thumbnail > generated thumbnail > fallback
     const staticThumbnailUrl = isVideo
-      ? (generatedThumbnail || fallbackImageUrl || mediaUrl)
+      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
       : (imageUrl || mediaUrl || fallbackImageUrl);
 
-    useEffect(() => {
-      if (isVideo && videoUrl && videoRef.current) {
-        videoRef.current.playAsync().catch(() => { });
-      }
-      return () => {
-        if (videoRef.current) {
-          videoRef.current.pauseAsync().catch(() => { });
-        }
-      };
-    }, [isVideo, videoUrl]);
+    const player = useVideoPlayer(videoUrl, (player) => {
+      player.loop = true;
+      player.muted = isMuted;
+      player.play();
+    });
 
-    const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-      if (status.isLoaded) {
-        setIsLoaded(true);
-        setIsPlaying(status.isPlaying);
-        if (status.durationMillis && status.positionMillis !== undefined) {
-          const progress = status.durationMillis > 0
-            ? status.positionMillis / status.durationMillis
-            : 0;
-          setVideoProgress(progress);
-          setVideoDuration(status.durationMillis);
-        }
+    // Mute sync
+    useEffect(() => {
+      if (player) {
+        player.muted = isMuted;
       }
-    };
+    }, [isMuted, player]);
+
+    // Progress tracking
+    useEffect(() => {
+      const interval = setInterval(() => {
+        if (player.playing && player.duration > 0) {
+          setVideoProgress(player.currentTime / player.duration);
+          setVideoDuration(player.duration * 1000); // duration is seconds in expo-video
+          setIsLoaded(true);
+        }
+      }, 200);
+      return () => clearInterval(interval);
+    }, [player]);
 
     const handleVideoPress = () => {
       if (isVideo) {
-        setIsMuted(prev => !prev);
+        toggleMute();
+        // Animate mute indicator
+        Animated.sequence([
+          Animated.timing(muteOpacity, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.delay(800),
+          Animated.timing(muteOpacity, {
+            toValue: 0,
+            duration: 500,
+            useNativeDriver: true,
+          }),
+        ]).start();
       }
     };
 
@@ -493,44 +527,19 @@ export default function ChallengeDetailScreen() {
               onPress={handleVideoPress}
               style={styles.fullscreenVideoWrapper}
             >
-              <Video
-                ref={videoRef}
-                source={{
-                  uri: videoUrl,
-                  headers: {
-                    'Cache-Control': 'public, max-age=31536000, immutable'
-                  }
-                }}
+              <VideoView
+                player={player}
                 style={styles.fullscreenMediaVideo}
-                resizeMode={ResizeMode.CONTAIN}
-                shouldPlay={true}
-                isLooping={true}
-                isMuted={isMuted}
-                usePoster={false}
-                shouldCorrectPitch={true}
-                volume={isMuted ? 0 : 1}
-                useNativeControls={false}
-                progressUpdateIntervalMillis={100}
-                onLoadStart={() => {
-                  setIsLoaded(false);
-                }}
-                onLoad={() => {
-                  setIsLoaded(true);
-                  videoRef.current?.playAsync().catch(() => { });
-                }}
-                onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-                onError={(error) => {
-                  console.error('❌ [Video] Playback error:', error);
-                }}
+                contentFit="contain"
+                nativeControls={false}
               />
 
-              {isMuted && (
-                <View style={styles.muteIndicatorOverlay}>
-                  <View style={styles.muteIndicatorBadge}>
-                    <Feather name="volume-x" size={32} color="rgba(255,255,255,0.8)" />
-                  </View>
-                </View>
-              )}
+              {/* Mute Animation Overlay */}
+              <View style={[styles.muteIndicatorOverlay, { pointerEvents: 'none' }]}>
+                <Animated.View style={[styles.muteIndicatorBadge, { opacity: muteOpacity }]}>
+                  <Feather name={isMuted ? "volume-x" : "volume-2"} size={32} color="rgba(255,255,255,0.8)" />
+                </Animated.View>
+              </View>
             </TouchableOpacity>
           )}
 

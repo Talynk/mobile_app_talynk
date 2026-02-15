@@ -20,7 +20,7 @@ import { userApi, postsApi, likesApi } from '@/lib/api';
 // import { viewsApi } from '@/lib/api'; // COMMENTED OUT - Will implement later
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
 import DotsSpinner from '@/components/DotsSpinner';
@@ -34,6 +34,7 @@ import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { getCachedVideoUri } from '@/lib/utils/video-cache';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -50,68 +51,69 @@ interface VideoThumbnailProps {
 }
 
 const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onViewsPress }: VideoThumbnailProps) => {
-  const videoRef = useRef<Video>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
-  const [imageError, setImageError] = useState(false); // FIX: Track image load errors
-  const [imageLoaded, setImageLoaded] = useState(false); // FIX: Track image load state
+  const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
-  // CRITICAL: Check what type this ACTUALLY is based on URL extension
+  // CRITICAL: Check what type this ACTUALLY is based on URL extension or HLS URL
   const actualMediaUrl = (post as any).fullUrl || post.video_url || post.videoUrl || '';
-  const isActuallyVideo = actualMediaUrl.endsWith('.mp4') || actualMediaUrl.endsWith('.mov') || actualMediaUrl.endsWith('.webm');
+  const isHls = actualMediaUrl.endsWith('.m3u8');
+  const isActuallyVideo = isHls || actualMediaUrl.endsWith('.mp4') || actualMediaUrl.endsWith('.mov') || actualMediaUrl.endsWith('.webm');
 
-  // For profile grid: Use fullUrl FIRST (it's the only field with data!)
-  // API returns: image=undefined, imageUrl=undefined, but fullUrl has the URL
-  const thumbnailUrl = (post as any).fullUrl || getThumbnailUrl(post) || getPostMediaUrl(post) || '';
+  // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
+  const serverThumbnail = getThumbnailUrl(post);
+  const fallbackUrl = (post as any).fullUrl || getPostMediaUrl(post) || '';
 
-  // Generate thumbnail for videos, use URL directly for images
-  const generatedThumbnail = useVideoThumbnail(
-    isActuallyVideo ? actualMediaUrl : null,
-    thumbnailUrl,
+  // ONLY generate client-side thumbnail if server doesn't provide one
+  // CRITICAL: Use raw video_url (MP4) for thumbnail generation, NOT the HLS .m3u8
+  const rawVideoUrl = getFileUrl(post.video_url) || '';
+  const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+    (isActuallyVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+    fallbackUrl,
     1000
   );
 
-  // FINAL: Use generated thumbnail for videos, direct URL for images
+  // FINAL: Server thumbnail > generated thumbnail > fallback URL
   const staticThumbnailUrl = isActuallyVideo
-    ? (generatedThumbnail || thumbnailUrl)
-    : thumbnailUrl;
+    ? (serverThumbnail || generatedThumbnail || fallbackUrl)
+    : fallbackUrl;
 
-  const [cachedVideoUrl, setCachedVideoUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isActuallyVideo && actualMediaUrl) {
-      getCachedVideoUri(actualMediaUrl).then(uri => {
-        if (uri) setCachedVideoUrl(uri);
-      });
-    }
-  }, [isActuallyVideo, actualMediaUrl]);
+  // expo-video player for teaser
+  const player = useVideoPlayer(actualMediaUrl, (p) => {
+    p.loop = true;
+    p.muted = true;
+  });
 
   useEffect(() => {
     if (isActive && isActuallyVideo && actualMediaUrl) {
-      // Small delay before showing video to ensure smooth transition
       const timer = setTimeout(() => {
         setShowVideo(true);
+        try { player.play(); } catch (_) { /* player released */ }
       }, 200);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        try { player.pause(); player.currentTime = 0; } catch (_) { /* player released */ }
+      };
     } else {
       setShowVideo(false);
-      setIsLoaded(false);
-      // Stop video when not active
-      if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => { });
-      }
+      try { player.pause(); } catch (_) { /* player released */ }
     }
-  }, [isActive, isActuallyVideo, actualMediaUrl]);
+  }, [isActive, isActuallyVideo, actualMediaUrl, player]);
 
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (status.isLoaded) {
-      setIsLoaded(true);
-      // Loop the teaser after 3 seconds
-      if (status.positionMillis && status.positionMillis > 3000) {
-        videoRef.current?.setPositionAsync(0);
-      }
+  // Teaser loop logic (reset after 3s)
+  useEffect(() => {
+    if (isActive && showVideo) {
+      const interval = setInterval(() => {
+        try {
+          if (player.currentTime > 3) {
+            player.currentTime = 0;
+            player.play();
+          }
+        } catch (_) { /* player released */ }
+      }, 500);
+      return () => clearInterval(interval);
     }
-  };
+  }, [isActive, showVideo, player]);
 
   return (
     <TouchableOpacity
@@ -127,30 +129,21 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           style={styles.postMedia}
           resizeMode="cover"
           onLoad={() => setImageLoaded(true)}
-          onError={() => {
-            // FIX: Set error state to show fallback icon
-            setImageError(true);
-          }}
+          onError={() => setImageError(true)}
         />
       ) : (
         <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-          {/* Show icon when no image or image failed */}
           <MaterialIcons name={isActuallyVideo ? "video-library" : "image"} size={28} color="#666" />
         </View>
       )}
 
       {/* Video teaser overlay - only when active */}
       {showVideo && isActuallyVideo && actualMediaUrl && isActive && (
-        <Video
-          ref={videoRef}
-          source={{ uri: cachedVideoUrl || actualMediaUrl }}
+        <VideoView
+          player={player}
           style={[styles.postMedia, styles.teaserVideo]}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={isActive}
-          isLooping={false}
-          isMuted={true}
-          volume={0}
-          onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+          contentFit="cover"
+          nativeControls={false}
         />
       )}
 
@@ -202,6 +195,20 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           )}
         </View>
       )}
+
+      {/* HLS Processing Badge — shows when video is still being transcoded */}
+      {isActuallyVideo && (
+        (post as any).processing_status === 'pending' ||
+        (post as any).processing_status === 'processing' ||
+        (post as any).processing_status === 'uploading'
+      ) && (
+          <View style={styles.processingBadge}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.processingBadgeText}>
+              {(post as any).processing_status === 'uploading' ? 'Uploading...' : 'Processing...'}
+            </Text>
+          </View>
+        )}
 
       {/* Options button (3 dots) */}
       {onOptionsPress && (
@@ -328,12 +335,7 @@ export default function ProfileScreen() {
   const [postOptionsModalVisible, setPostOptionsModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [totalLikes, setTotalLikes] = useState(0);
-  const [videoRef, setVideoRef] = useState<Video | null>(null);
-  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
-  const [videoError, setVideoError] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [useNativeControls, setUseNativeControls] = useState(false);
-  const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
+
 
   // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
@@ -549,6 +551,8 @@ export default function ProfileScreen() {
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
+            // Apply HLS filter for active posts
+            filteredPosts = filterHlsReady(filteredPosts);
             break;
           case 'draft':
             filteredPosts = filteredPosts.filter((p: any) => p.status === 'draft');
@@ -568,6 +572,8 @@ export default function ProfileScreen() {
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
+            // Apply HLS filter for active posts
+            filteredPosts = filterHlsReady(filteredPosts);
         }
 
         if (__DEV__) {
@@ -614,6 +620,63 @@ export default function ProfileScreen() {
       setLoadingPosts(false);
     }
   };
+
+  // Poll processing status for any posts that are being transcoded to HLS
+  useEffect(() => {
+    const processingPosts = posts.filter(
+      (p: any) => p.type === 'video' && (
+        p.processing_status === 'pending' ||
+        p.processing_status === 'processing' ||
+        p.processing_status === 'uploading'
+      )
+    );
+
+    if (processingPosts.length === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      let needsRefresh = false;
+
+      for (const post of processingPosts) {
+        try {
+          const statusRes = await postsApi.getProcessingStatus(post.id);
+          if (statusRes.status === 'success') {
+            const { processing, urls } = statusRes.data;
+
+            if (processing.status === 'completed') {
+              needsRefresh = true;
+              // Update post in-place with new HLS data
+              setPosts(prev => prev.map(p =>
+                p.id === post.id
+                  ? {
+                    ...p,
+                    processing_status: 'completed' as any,
+                    hls_url: urls?.hls,
+                    thumbnail_url: urls?.thumbnail,
+                    video_url: urls?.preferred || p.video_url,
+                  }
+                  : p
+              ));
+            } else if (processing.status === 'failed') {
+              setPosts(prev => prev.map(p =>
+                p.id === post.id
+                  ? { ...p, processing_status: 'failed' as any }
+                  : p
+              ));
+            }
+          }
+        } catch {
+          // Silently ignore polling errors
+        }
+      }
+
+      if (needsRefresh) {
+        // Full refresh to get updated URLs from API
+        await loadPosts(false);
+      }
+    }, 10000); // Poll every 10 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [posts]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -757,61 +820,7 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleVideoPlayPause = async () => {
-    if (videoRef) {
-      try {
-        if (isVideoPlaying) {
-          await videoRef.pauseAsync();
-          setIsVideoPlaying(false);
-        } else {
-          await videoRef.playAsync();
-          setIsVideoPlaying(true);
-        }
-      } catch (error) {
-        console.error('Video play/pause error:', error);
-      }
-    }
-  };
 
-  const handleVideoLoad = () => {
-    setVideoError(false);
-    console.log('Video loaded successfully');
-  };
-
-  const handleVideoError = (error: any) => {
-    const errorMessage = error?.message || error?.toString() || '';
-
-    // Check for decoder errors - but we're already using native controls, so just log
-    if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
-      // Native controls should handle this better, but if it still fails, show error
-      console.warn('Video decoder error (using native controls):', errorMessage);
-      setVideoError(true);
-      setVideoLoading(false);
-      setIsVideoPlaying(false);
-    } else {
-      // Other errors (network, format, etc.)
-      console.error('Video error:', errorMessage);
-      setVideoError(true);
-      setIsVideoPlaying(false);
-      setVideoLoading(false);
-    }
-  };
-
-
-  const handlePlaybackStatusUpdate = (status: any) => {
-    if (status.isLoaded) {
-      setIsVideoPlaying(status.isPlaying);
-    }
-  };
-
-  const resetVideoState = () => {
-    setIsVideoPlaying(false);
-    setVideoError(false);
-    setVideoLoading(false);
-    setUseNativeControls(false);
-    setDecoderErrorDetected(false);
-    setVideoRef(null);
-  };
 
   const handlePublishDraft = async (postId: string) => {
     // Log the draft post being published
@@ -1768,6 +1777,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  processingBadge: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 2,
+  },
+  processingBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 4,
   },
   teaserVideo: {
     position: 'absolute',

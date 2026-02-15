@@ -19,9 +19,9 @@ import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
-import { getPostMediaUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getFileUrl } from '@/lib/utils/file-url';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRealtime } from '@/lib/realtime-context';
 import RealtimeProvider from '@/lib/realtime-context';
 import { useNavigation } from '@react-navigation/native';
@@ -31,9 +31,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
+import { filterHlsReady } from '@/lib/utils/post-filter';
+
 
 const { width: screenWidth } = Dimensions.get('window');
-const POST_CARD_WIDTH = (screenWidth - 48) / 2; // 2 columns with padding
+const POST_CARD_WIDTH = Math.floor(screenWidth / 3) - 1; // 3 columns, edge-to-edge
 
 
 // Video thumbnail with teaser playback
@@ -47,46 +49,67 @@ interface VideoThumbnailCardProps {
 }
 
 const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
-  const videoRef = useRef<Video>(null);
   const [showVideo, setShowVideo] = useState(false);
 
   const videoUrl = post.video_url || post.videoUrl || '';
-  const isVideo = !!videoUrl;
+  const mediaUrl = getPostMediaUrl(post) || '';
+  const isHls = mediaUrl.endsWith('.m3u8') || videoUrl.endsWith('.m3u8');
+  const isVideo = isHls || !!videoUrl;
 
-  // Get fallback image URL
-  const fallbackImageUrl = (post as any).thumbnail_url || post.image || (post as any).thumbnail || '';
+  // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
+  const serverThumbnail = (post as any).thumbnail_url || '';
+  const fallbackImageUrl = post.image || (post as any).thumbnail || '';
 
-  // Generate thumbnail for videos, use image directly for non-videos
-  const generatedThumbnail = useVideoThumbnail(
-    isVideo ? videoUrl : null,
+  // ONLY generate client-side thumbnail if server doesn't provide one
+  // Use raw video_url (MP4) for thumbnail generation, not HLS .m3u8
+  const rawVideoUrl = getFileUrl(post.video_url) || videoUrl;
+  const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+    (isVideo && !serverThumbnail && rawVideoUrl && !rawVideoUrl.endsWith('.m3u8')) ? rawVideoUrl : null,
     fallbackImageUrl,
-    1000 // Extract thumbnail at 1 second
+    1000
   );
 
-  // For videos: use generated thumbnail, fallback to provided image
-  // For images: use robust getPostMediaUrl which prioritizes fullUrl
+  // PRIORITY: Server thumbnail > generated thumbnail > image/fallback
   const staticThumbnailUrl = isVideo
-    ? (generatedThumbnail || fallbackImageUrl)
+    ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
     : (getPostMediaUrl(post) || post.fullUrl || post.image || post.imageUrl || '');
+
+  const player = useVideoPlayer(videoUrl, (player) => {
+    player.loop = true;
+    player.muted = true;
+  });
 
   useEffect(() => {
     if (isActive && isVideo && videoUrl) {
-      const timer = setTimeout(() => setShowVideo(true), 200);
-      return () => clearTimeout(timer);
+      const timer = setTimeout(() => {
+        setShowVideo(true);
+        try { player.play(); } catch (_) { /* player released */ }
+      }, 200);
+      return () => {
+        clearTimeout(timer);
+        try { player.pause(); } catch (_) { /* player released */ }
+        try { player.currentTime = 0; } catch (_) { /* player released */ }
+      };
     } else {
       setShowVideo(false);
-      // Stop video when not active
-      if (videoRef.current) {
-        videoRef.current.pauseAsync().catch(() => { });
-      }
+      try { player.pause(); } catch (_) { /* player released */ }
     }
-  }, [isActive, isVideo, videoUrl]);
+  }, [isActive, isVideo, videoUrl, player]);
 
-  const handlePlaybackStatus = (status: AVPlaybackStatus) => {
-    if (status.isLoaded && status.positionMillis && status.positionMillis > 3000) {
-      videoRef.current?.setPositionAsync(0);
+  // Teaser loop logic (reset after 3s)
+  useEffect(() => {
+    if (isActive && showVideo) {
+      const interval = setInterval(() => {
+        try {
+          if (player.currentTime > 3) {
+            player.currentTime = 0;
+            player.play();
+          }
+        } catch (_) { /* player released */ }
+      }, 500);
+      return () => clearInterval(interval);
     }
-  };
+  }, [isActive, showVideo, player]);
 
   return (
     <TouchableOpacity
@@ -111,26 +134,17 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
           />
         ) : (
           <View style={[styles.postImage, styles.noMediaPlaceholder]}>
-            {isVideo && !staticThumbnailUrl ? (
-              <ActivityIndicator size="small" color="#60a5fa" />
-            ) : (
-              <MaterialIcons name={isVideo ? "video-library" : "image"} size={32} color="#444" />
-            )}
+            <MaterialIcons name={isVideo ? "video-library" : "image"} size={32} color="#444" />
           </View>
         )}
 
         {/* Video teaser overlay - only when active */}
         {showVideo && isVideo && videoUrl && isActive && (
-          <Video
-            ref={videoRef}
-            source={{ uri: videoUrl }}
+          <VideoView
+            player={player}
             style={[styles.postImage, styles.teaserVideoOverlay]}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={isActive}
-            isLooping={false}
-            isMuted={true}
-            volume={0}
-            onPlaybackStatusUpdate={handlePlaybackStatus}
+            contentFit="cover"
+            nativeControls={false}
           />
         )}
 
@@ -223,6 +237,14 @@ export default function ExternalUserProfileScreen() {
   );
 }
 
+const ModalVideoPlayer = ({ source }: { source: string }) => {
+  const player = useVideoPlayer(source, (player) => {
+    player.play();
+    player.loop = true;
+  });
+  return <VideoView player={player} style={styles.overlayMedia} contentFit="contain" nativeControls={true} />;
+};
+
 function ProfileContent(props: { id: string | string[] | undefined, currentUser: User | null }) {
   const { id, currentUser } = props;
   const [profile, setProfile] = useState<User | null>(null);
@@ -244,7 +266,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   // Video teaser playback state
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
-  const teaserIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const teaserIntervalRef = useRef<any>(null);
 
   // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
@@ -315,7 +337,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             following_count: userData.following_count || (userData as any).subscribers || 0,
             posts_count: userData.posts_count || 0,
             id: userData.id || id as string,
-          });
+          } as any);
         } else {
           const errorMsg = response.message || 'Failed to fetch user profile';
           setProfileError(errorMsg);
@@ -454,7 +476,12 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             ...p,
             video_url,
             fullUrl,
+            // CRITICAL: Backend returns mediaType='video', but filterHlsReady checks type='video'
             type: p.type || p.mediaType || (video_url ? 'video' : 'image'),
+            // CRITICAL: Preserve HLS fields for filterHlsReady — backend returns both camelCase & snake_case
+            processing_status: p.processing_status || p.processingStatus,
+            processingStatus: p.processingStatus || p.processing_status,
+            hlsReady: p.hlsReady || false,
             comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
             likes: p.likes ?? p.likesCount ?? 0,
             user: userFromPost || {
@@ -465,7 +492,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           };
         });
 
-        setApprovedPosts(normalized);
+        // Apply HLS filter — only show HLS-transcoded video posts
+        setApprovedPosts(filterHlsReady(normalized));
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }
@@ -513,6 +541,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 video_url,
                 fullUrl,
                 type: p.type || p.mediaType || (video_url ? 'video' : 'image'),
+                processing_status: p.processing_status || p.processingStatus,
+                processingStatus: p.processingStatus || p.processing_status,
+                hlsReady: p.hlsReady || false,
                 comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
                 likes: p.likes ?? p.likesCount ?? 0,
                 user: userFromPost || {
@@ -550,9 +581,6 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (isConnected) {
           sendFollowAction(id as string, true);
         }
-        // Refresh follow status to check if they follow me back
-        const checkResponse = await followsApi.checkFollowing(id as string);
-        setIsFollowing(!!checkResponse.data?.isFollowing);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to follow user');
@@ -577,9 +605,6 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (isConnected) {
           sendFollowAction(id as string, false);
         }
-        // Refresh follow status
-        const checkResponse = await followsApi.checkFollowing(id as string);
-        setIsFollowing(!!checkResponse.data?.isFollowing);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to unfollow user');
@@ -892,8 +917,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 />
               )}
               keyExtractor={item => item.id}
-              numColumns={2}
-              columnWrapperStyle={{ justifyContent: 'space-between' }}
+              numColumns={3}
+              columnWrapperStyle={{ gap: 1 }}
               scrollEnabled={false}
               contentContainerStyle={{ paddingBottom: 40 }}
             />
@@ -915,16 +940,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 <View style={styles.overlayMediaContainer}>
                   {mediaUrl ? (
                     isVideo ? (
-                      <Video
-                        source={{ uri: mediaUrl }}
-                        style={styles.overlayMedia}
-                        resizeMode={ResizeMode.CONTAIN}
-                        useNativeControls={true}
-                        shouldPlay={true}
-                        isLooping={true}
-                        shouldCorrectPitch={true}
-                        volume={1.0}
-                      />
+                      <ModalVideoPlayer source={mediaUrl} />
                     ) : (
                       <Image
                         source={{ uri: mediaUrl }}

@@ -65,7 +65,7 @@ export const createLazyComponent = <P extends object>(
   fallback?: React.ReactNode
 ): ComponentType<P> => {
   const LazyComponent = React.lazy(importFn);
-  return withSuspense(LazyComponent, fallback);
+  return withSuspense(LazyComponent as ComponentType<P>, fallback);
 };
 
 const styles = StyleSheet.create({

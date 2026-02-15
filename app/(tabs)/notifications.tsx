@@ -57,11 +57,11 @@ export default function NotificationsScreen() {
         hasNotification: !!update.notification,
         rawUpdate: update,
       });
-      
+
       // Handle both "newNotification" and "notification" event types
       // Per API docs: { userId, userID, notification: { id, type, message, isRead, createdAt, metadata } }
-      const notificationData = update.notification || update;
-      
+      const notificationData: any = update.notification || update;
+
       console.log('[Notifications] 📋 Processing notification data:', {
         id: notificationData.id,
         type: notificationData.type,
@@ -69,9 +69,9 @@ export default function NotificationsScreen() {
         hasMetadata: !!notificationData.metadata,
         metadata: notificationData.metadata,
       });
-      
+
       const newNotification: Notification = {
-        id: notificationData.id || Date.now(),
+        id: Number(notificationData.id || Date.now()),
         userID: notificationData.userID || user.username || '',
         message: notificationData.message || notificationData.text || '',
         type: notificationData.type,
@@ -82,7 +82,7 @@ export default function NotificationsScreen() {
         related_post_id: notificationData.metadata?.postId,
         related_user_id: notificationData.related_user_id,
       };
-      
+
       console.log('[Notifications] ✨ Created notification object:', {
         id: newNotification.id,
         type: newNotification.type,
@@ -90,7 +90,7 @@ export default function NotificationsScreen() {
         hasMetadata: Object.keys(newNotification.metadata || {}).length > 0,
         postId: newNotification.metadata?.postId || newNotification.related_post_id,
       });
-      
+
       // Add to top of list, avoid duplicates
       setNotifications(prev => {
         const exists = prev.some(n => n.id === newNotification.id);
@@ -108,17 +108,17 @@ export default function NotificationsScreen() {
 
   const loadNotifications = async () => {
     if (!user) return;
-    
+
     try {
       console.log('[Notifications] 📥 Loading notifications for user:', user.username);
       setLoading(true);
       const response = await notificationsApi.getAll();
-      
+
       console.log('[Notifications] 📦 API Response:', {
         status: response.status,
         notificationCount: response.data?.notifications?.length || 0,
       });
-      
+
       if (response.status === 'success' && response.data?.notifications) {
         // Normalize notification structure (handle both old and new formats)
         const normalized = response.data.notifications.map((n: any) => ({
@@ -134,13 +134,13 @@ export default function NotificationsScreen() {
           related_user_id: n.related_user_id,
           related_user: n.related_user,
         }));
-        
+
         console.log('[Notifications] ✅ Normalized notifications:', {
           count: normalized.length,
           unreadCount: normalized.filter(n => !n.isRead).length,
           types: normalized.map(n => n.type),
         });
-        
+
         setNotifications(normalized);
       } else {
         console.warn('[Notifications] ⚠️ Unexpected response format:', response);
@@ -164,9 +164,9 @@ export default function NotificationsScreen() {
 
   const markAllAsRead = async () => {
     if (!user) return;
-    
+
     setShowMarkAllModal(false);
-    
+
     try {
       console.log('[Notifications] 📝 Marking all notifications as read');
       const response = await notificationsApi.markAllAsRead();
@@ -174,7 +174,7 @@ export default function NotificationsScreen() {
         status: response.status,
         count: response.data?.count,
       });
-      
+
       if (response.status === 'success') {
         setNotifications(prev => {
           const updated = prev.map(notification => ({ ...notification, isRead: true }));
@@ -191,12 +191,12 @@ export default function NotificationsScreen() {
 
   const deleteNotification = async (notificationId: string) => {
     if (!user) return;
-    
+
     try {
       console.log('[Notifications] 🗑️ Deleting notification:', notificationId);
       const response = await notificationsApi.delete(notificationId);
       console.log('[Notifications] 🗑️ Delete response:', response.status);
-      
+
       if (response.status === 'success') {
         setNotifications(prev => {
           const filtered = prev.filter(n => n.id.toString() !== notificationId);
@@ -217,9 +217,9 @@ export default function NotificationsScreen() {
 
   const deleteAllNotifications = async () => {
     if (!user) return;
-    
+
     setShowDeleteAllModal(false);
-    
+
     try {
       console.log('[Notifications] 🗑️ Deleting all notifications');
       const response = await notificationsApi.deleteAll();
@@ -227,7 +227,7 @@ export default function NotificationsScreen() {
         status: response.status,
         count: response.data?.count,
       });
-      
+
       if (response.status === 'success') {
         setNotifications([]);
         console.log('[Notifications] ✅ All notifications deleted');
@@ -248,7 +248,7 @@ export default function NotificationsScreen() {
 
   const getNotificationIcon = (type?: string, message?: string) => {
     const lowerMessage = (message || '').toLowerCase();
-    
+
     switch (type) {
       // Core notification types from API documentation
       case 'comment':
@@ -257,13 +257,13 @@ export default function NotificationsScreen() {
         return { name: 'favorite', color: '#ff2d55', bg: 'rgba(255, 45, 85, 0.15)' };
       case 'follow':
         return { name: 'person-add', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
-      
+
       // Challenge notification types
       case 'challenge_approved':
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'challenge_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
-      
+
       // Post status notification types
       case 'post_status_update':
         return { name: 'info', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
@@ -283,15 +283,15 @@ export default function NotificationsScreen() {
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'appeal_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
-      
+
       // View milestone notification
       case 'view_milestone':
         return { name: 'trending-up', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
-      
+
       // Comment report (admin only)
       case 'comment_report':
         return { name: 'report', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
-      
+
       // Legacy/other types
       case 'subscription':
         return { name: 'subscriptions', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
@@ -299,7 +299,7 @@ export default function NotificationsScreen() {
         return { name: 'star', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
       case 'broadcast':
         return { name: 'campaign', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
-      
+
       default:
         // Fallback: check message content for like notifications
         if (lowerMessage.includes('liked')) {
@@ -337,7 +337,7 @@ export default function NotificationsScreen() {
       related_post_id: item.related_post_id,
       related_user_id: item.related_user_id,
     });
-    
+
     // Mark as read when pressed
     if (!item.isRead) {
       console.log('[Notifications] 📝 Marking notification as read:', item.id);
@@ -358,14 +358,14 @@ export default function NotificationsScreen() {
     // Use metadata fields first, then fallback to related_* fields
     const postId = item.metadata?.postId || item.related_post_id;
     const challengeId = item.metadata?.challengeId;
-    
+
     console.log('[Notifications] 🧭 Navigation data:', {
       type: item.type,
       postId,
       challengeId,
       related_user_id: item.related_user_id,
     });
-    
+
     switch (item.type) {
       // Post-related notifications - navigate to post
       case 'comment':
@@ -388,7 +388,7 @@ export default function NotificationsScreen() {
           });
         }
         break;
-      
+
       // Post flagging/appeals - navigate to user's posts
       case 'post_flagged':
       case 'appeal_approved':
@@ -401,7 +401,7 @@ export default function NotificationsScreen() {
           });
         }
         break;
-      
+
       // Follow notifications - navigate to user profile
       case 'follow':
         if (item.related_user_id) {
@@ -411,7 +411,7 @@ export default function NotificationsScreen() {
           });
         }
         break;
-      
+
       // Challenge notifications - navigate to challenge
       case 'challenge_approved':
       case 'challenge_rejected':
@@ -422,7 +422,7 @@ export default function NotificationsScreen() {
           });
         }
         break;
-      
+
       // Comment report (admin) - navigate to post
       case 'comment_report':
         if (postId) {
@@ -432,7 +432,7 @@ export default function NotificationsScreen() {
           });
         }
         break;
-      
+
       default:
         // Default navigation based on available data
         if (postId) {
@@ -457,7 +457,7 @@ export default function NotificationsScreen() {
 
   const renderNotification = ({ item }: { item: Notification }) => {
     const icon = getNotificationIcon(item.type, item.message);
-    
+
     return (
       <View
         style={[
@@ -473,7 +473,7 @@ export default function NotificationsScreen() {
           <View style={[styles.notificationIcon, { backgroundColor: icon.bg }]}>
             <MaterialIcons name={icon.name as any} size={22} color={icon.color} />
           </View>
-          
+
           <View style={styles.notificationContent}>
             <Text style={[
               styles.notificationText,
@@ -485,10 +485,10 @@ export default function NotificationsScreen() {
               {formatTimeAgo(item.createdAt)}
             </Text>
           </View>
-          
+
           {!item.isRead && <View style={styles.unreadDot} />}
         </TouchableOpacity>
-        
+
         <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => deleteNotification(item.id.toString())}
@@ -506,7 +506,7 @@ export default function NotificationsScreen() {
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <Text style={styles.headerTitle}>Notifications</Text>
         </View>
-        
+
         <View style={styles.loginPrompt}>
           <View style={styles.loginIconContainer}>
             <Feather name="bell" size={48} color="#60a5fa" />
@@ -515,7 +515,7 @@ export default function NotificationsScreen() {
           <Text style={styles.loginPromptText}>
             Sign in to see your notifications
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.loginButton}
             onPress={() => router.push('/auth/login')}
             activeOpacity={0.8}
@@ -603,9 +603,9 @@ export default function NotificationsScreen() {
           renderItem={renderNotification}
           keyExtractor={(item) => item.id.toString()}
           refreshControl={
-            <RefreshControl 
-              refreshing={refreshing} 
-              onRefresh={onRefresh} 
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
               tintColor="#60a5fa"
               colors={['#60a5fa']}
             />
@@ -615,17 +615,17 @@ export default function NotificationsScreen() {
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconContainer}>
-                <Feather 
-                  name={activeTab === 'unread' ? 'check-circle' : 'bell'} 
-                  size={48} 
-                  color="#3b82f6" 
+                <Feather
+                  name={activeTab === 'unread' ? 'check-circle' : 'bell'}
+                  size={48}
+                  color="#3b82f6"
                 />
               </View>
               <Text style={styles.emptyTitle}>
                 {activeTab === 'unread' ? 'All caught up!' : 'No notifications yet'}
               </Text>
               <Text style={styles.emptySubtext}>
-                {activeTab === 'unread' 
+                {activeTab === 'unread'
                   ? 'You\'ve read all your notifications'
                   : 'Notifications will appear here when you get activity'
                 }

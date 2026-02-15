@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform, InteractionManager } from 'react-native';
+import { Platform } from 'react-native';
 
 // Safe import of createThumbnail - wrapped to prevent crashes
 let createThumbnail: ((options: any) => Promise<{ path: string }>) | null = null;
@@ -13,10 +13,10 @@ try {
   }
 }
 
-const THUMBNAIL_CACHE_KEY = '@video_thumbnails_cache_v5';
-const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const MAX_CACHE_SIZE = 200;
-const GENERATION_TIMEOUT_MS = 15000; // 15 second timeout
+const THUMBNAIL_CACHE_KEY = '@video_thumbnails_cache_v6';
+const CACHE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days — thumbnails persist long
+const MAX_CACHE_SIZE = 500;
+const GENERATION_TIMEOUT_MS = 15000; // 15 seconds — remote MP4s can be slow, must complete
 
 // Track URLs that have failed to avoid repeated attempts
 const failedUrls = new Set<string>();
@@ -50,9 +50,7 @@ const loadCache = async () => {
         thumbnailCache[url] = data as any;
       }
 
-      if (__DEV__) {
-        console.log(`✅ [Thumbnail] Loaded ${Object.keys(thumbnailCache).length} cached thumbnails`);
-      }
+      console.log(`🖼️ [Thumbnail] Cache loaded: ${Object.keys(thumbnailCache).length} cached thumbnails`);
     }
     cacheLoaded = true;
   } catch (error) {
@@ -70,7 +68,7 @@ const saveCache = async () => {
     } catch (error) {
       // Silently handle
     }
-  }, 2000);
+  }, 1000);
 };
 
 loadCache();
@@ -98,10 +96,10 @@ const isValidVideoUrl = (url: string): boolean => {
     return false;
   }
 
-  // Check for common video extensions
+  // For thumbnail generation, we need a direct video file — NOT .m3u8 (HLS can't be thumbnailed)
   const videoExtensions = ['.mp4', '.mov', '.webm', '.m4v', '.avi', '.3gp'];
-  const urlLower = url.toLowerCase();
-  return videoExtensions.some(ext => urlLower.includes(ext));
+  const urlLower = url.toLowerCase().split('?')[0]; // Remove query params
+  return videoExtensions.some(ext => urlLower.endsWith(ext) || urlLower.includes(ext));
 };
 
 /**
@@ -112,13 +110,12 @@ const generateThumbnailSafe = async (
   timeStamp: number = 1000
 ): Promise<string | null> => {
   if (!createThumbnail) {
-    if (__DEV__) {
-      console.log('⚠️ [Thumbnail] createThumbnail not available');
-    }
+    console.log('🖼️ [Thumbnail] ⚠️ createThumbnail library not available — cannot generate');
     return null;
   }
 
   if (!isValidVideoUrl(videoUrl)) {
+    console.log(`🖼️ [Thumbnail] ⛔ Invalid URL for generation (not a direct video file): ${videoUrl.substring(0, 80)}`);
     return null;
   }
 
@@ -128,23 +125,27 @@ const generateThumbnailSafe = async (
   }
 
   generatingUrls.add(videoUrl);
+  const startTime = Date.now();
+  console.log(`🖼️ [Thumbnail] 🔄 GENERATING for: ${videoUrl.substring(0, 80)}...`);
 
   try {
-    if (__DEV__) {
-      console.log('🎬 [Thumbnail] Generating:', videoUrl.substring(0, 60) + '...');
-    }
-
-    // Create a promise for generation
-    const result = await createThumbnail({
-      url: videoUrl,
-      timeStamp: timeStamp,
-      format: 'jpeg',
-      quality: 80,
-      cacheName: `thumb_${hashCode(videoUrl)}`,
-    });
+    // Race between generation and timeout
+    const result = await Promise.race([
+      createThumbnail({
+        url: videoUrl,
+        timeStamp: timeStamp,
+        format: 'jpeg',
+        quality: 80,
+        cacheName: `thumb_${hashCode(videoUrl)}`,
+      }),
+      new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), GENERATION_TIMEOUT_MS)
+      ),
+    ]);
 
     if (result?.path) {
       const uri = Platform.OS === 'android' ? `file://${result.path}` : result.path;
+      const elapsed = Date.now() - startTime;
 
       // Cache the result
       thumbnailCache[videoUrl] = {
@@ -153,18 +154,18 @@ const generateThumbnailSafe = async (
       };
       saveCache();
 
-      if (__DEV__) {
-        console.log('✅ [Thumbnail] Generated successfully:', videoUrl.substring(0, 40) + '...');
-      }
+      console.log(`🖼️ [Thumbnail] ✅ COMPLETE in ${elapsed}ms: ${videoUrl.substring(0, 50)}...`);
 
       generatingUrls.delete(videoUrl);
       return uri;
     }
   } catch (error: any) {
-    // Log error but don't crash
-    failedUrls.add(videoUrl);
-    if (__DEV__) {
-      console.warn('⚠️ [Thumbnail] Failed (will use fallback):', error?.message?.substring(0, 100));
+    const elapsed = Date.now() - startTime;
+    if (error?.message === 'TIMEOUT') {
+      console.warn(`🖼️ [Thumbnail] ⏰ TIMEOUT after ${elapsed}ms — will retry later: ${videoUrl.substring(0, 50)}...`);
+    } else {
+      console.warn(`🖼️ [Thumbnail] ❌ FAILED in ${elapsed}ms: ${error?.message?.substring(0, 100)}`);
+      failedUrls.add(videoUrl); // Only blacklist real failures, NOT timeouts
     }
   }
 
@@ -174,9 +175,9 @@ const generateThumbnailSafe = async (
 
 /**
  * Hook to generate and cache video thumbnails
- * Uses react-native-create-thumbnail with safe error handling
+ * Returns { thumbnailUri, isLoading }
  * 
- * @param videoUrl - The video URL (remote or local)
+ * @param videoUrl - The video URL (must be direct MP4/MOV, NOT .m3u8)
  * @param fallbackUrl - Fallback image URL if thumbnail generation fails
  * @param timeStamp - Time in milliseconds to extract thumbnail (default: 1000)
  */
@@ -184,7 +185,7 @@ export const useVideoThumbnail = (
   videoUrl: string | null | undefined,
   fallbackUrl?: string | null,
   timeStamp: number = 1000
-): string | null => {
+): { thumbnailUri: string | null; isLoading: boolean } => {
   const [thumbnailUri, setThumbnailUri] = useState<string | null>(() => {
     // Check cache synchronously on first render
     if (videoUrl) {
@@ -192,6 +193,14 @@ export const useVideoThumbnail = (
       if (cached) return cached;
     }
     return fallbackUrl || null;
+  });
+
+  const [isLoading, setIsLoading] = useState(() => {
+    // Loading if we have a videoUrl but no cached thumbnail
+    if (videoUrl && createThumbnail && isValidVideoUrl(videoUrl)) {
+      return !getCachedThumbnail(videoUrl);
+    }
+    return false;
   });
 
   const mounted = useRef(true);
@@ -212,6 +221,7 @@ export const useVideoThumbnail = (
   useEffect(() => {
     if (!videoUrl) {
       setThumbnailUri(fallbackUrl || null);
+      setIsLoading(false);
       return;
     }
 
@@ -219,12 +229,16 @@ export const useVideoThumbnail = (
     const cached = getCachedThumbnail(videoUrl);
     if (cached) {
       setThumbnailUri(cached);
+      setIsLoading(false);
       return;
     }
 
-    // If no thumbnail library or invalid URL, use fallback
+    // If no thumbnail library or invalid URL, use fallback immediately
     if (!createThumbnail || !isValidVideoUrl(videoUrl)) {
-      setThumbnailUri(fallbackUrl || null);
+      if (fallbackUrl) {
+        setThumbnailUri(fallbackUrl);
+      }
+      setIsLoading(false);
       return;
     }
 
@@ -233,25 +247,39 @@ export const useVideoThumbnail = (
       return;
     }
     generationAttempted.current = true;
+    setIsLoading(true);
 
-    // Use fallback while generating
-    if (fallbackUrl) {
-      setThumbnailUri(fallbackUrl);
-    }
+    // 5 second hard cutoff — stop loading even if generation hasn't finished
+    const loadingTimeout = setTimeout(() => {
+      if (mounted.current) {
+        setIsLoading(false);
+        if (fallbackUrl && !thumbnailUri) {
+          setThumbnailUri(fallbackUrl);
+        }
+      }
+    }, GENERATION_TIMEOUT_MS);
 
-    // Generate thumbnail after interactions settle (prevents UI jank)
-    InteractionManager.runAfterInteractions(async () => {
-      if (!mounted.current) return;
-
+    // Generate thumbnail immediately (no waiting for interactions)
+    (async () => {
       const generated = await generateThumbnailSafe(videoUrl, timeStamp);
 
-      if (mounted.current && generated) {
-        setThumbnailUri(generated);
+      if (mounted.current) {
+        if (generated) {
+          setThumbnailUri(generated);
+        } else if (fallbackUrl) {
+          setThumbnailUri(fallbackUrl);
+        }
+        setIsLoading(false);
+        clearTimeout(loadingTimeout);
       }
-    });
+    })();
+
+    return () => {
+      clearTimeout(loadingTimeout);
+    };
   }, [videoUrl, fallbackUrl, timeStamp]);
 
-  return thumbnailUri;
+  return { thumbnailUri, isLoading };
 };
 
 /**
@@ -281,19 +309,16 @@ export const pregenerateThumbnails = async (
 
   if (uncachedUrls.length === 0) return;
 
-  if (__DEV__) {
-    console.log(`📦 [Thumbnail] Pre-generating ${uncachedUrls.length} thumbnails...`);
-  }
+  console.log(`🖼️ [Thumbnail] Pre-generating ${uncachedUrls.length} thumbnails...`);
 
-  // Process in small batches to avoid overwhelming the system
-  const batchSize = 2;
-  for (let i = 0; i < Math.min(uncachedUrls.length, 10); i += batchSize) {
+  // Process in small batches
+  const batchSize = 3;
+  for (let i = 0; i < Math.min(uncachedUrls.length, 20); i += batchSize) {
     const batch = uncachedUrls.slice(i, i + batchSize);
     await Promise.allSettled(
       batch.map(url => generateThumbnailSafe(url, timeStamp))
     );
-    // Small delay between batches
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 };
 

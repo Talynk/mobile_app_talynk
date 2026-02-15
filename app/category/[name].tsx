@@ -12,11 +12,68 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import { postsApi } from '@/lib/api';
 import { Post } from '@/types';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av';
+import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
+import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 
 const { width: screenWidth } = Dimensions.get('window');
+
+// Extracted so we can use hooks (useVideoThumbnail)
+const CategoryPostCard = ({ item }: { item: Post }) => {
+  const mediaUrl = getPostMediaUrl(item) || '';
+  const isHls = mediaUrl.endsWith('.m3u8');
+  const isVideo =
+    item.type === 'video' || isHls ||
+    (mediaUrl && (mediaUrl.includes('.mp4') || mediaUrl.includes('.mov') || mediaUrl.includes('.webm')));
+
+  const serverThumbnail = getThumbnailUrl(item);
+  const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+  // Use raw video_url (MP4) for thumbnail generation, not HLS .m3u8
+  const rawVideoUrl = getFileUrl(item.video_url) || '';
+  const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
+    (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+    fallbackImageUrl || '',
+    1000
+  );
+
+  const displayUrl = isVideo
+    ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
+    : (mediaUrl || fallbackImageUrl);
+
+  return (
+    <TouchableOpacity
+      style={styles.postItem}
+      onPress={() => router.push({
+        pathname: '/post/[id]',
+        params: { id: item.id, postData: JSON.stringify(item) }
+      })}
+    >
+      {displayUrl ? (
+        <Image source={{ uri: displayUrl }} style={styles.postMedia} resizeMode="cover" />
+      ) : (
+        <View style={[styles.postMedia, { backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' }]}>
+          <Feather name={isVideo ? 'video' : 'image'} size={28} color="#444" />
+        </View>
+      )}
+
+      {isVideo && (
+        <View style={styles.playBadge}>
+          <Feather name="play" size={14} color="#fff" />
+        </View>
+      )}
+
+      <View style={styles.postOverlay}>
+        <View style={styles.postStats}>
+          <Feather name="heart" size={14} color="#fff" />
+          <Text style={styles.postStatText}>{item.likes || 0}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
 
 export default function CategoryScreen() {
   const { name } = useLocalSearchParams();
@@ -30,13 +87,11 @@ export default function CategoryScreen() {
 
   const loadCategoryPosts = async () => {
     try {
-      // Filter posts by category
       const response = await postsApi.getAll(1, 50);
       if (response.status === 'success') {
-        // Handle nested response structure: data.posts instead of just data
         const apiData: any = response.data;
-        const posts: Post[] = Array.isArray(apiData) ? apiData : (Array.isArray(apiData?.posts) ? apiData.posts : []);
-        const filteredPosts = posts.filter((post: Post) => {
+        const allPosts: Post[] = Array.isArray(apiData) ? apiData : (Array.isArray(apiData?.posts) ? apiData.posts : []);
+        const filteredPosts = filterHlsReady(allPosts).filter((post: Post) => {
           const postCategory = typeof post.category === 'string' ? post.category : post.category?.name;
           return postCategory === name;
         });
@@ -49,45 +104,8 @@ export default function CategoryScreen() {
     }
   };
 
-  const renderPost = ({ item }: { item: Post }) => {
-    const mediaUrl = item.video_url || item.image || '';
-    const isVideo = !!item.video_url;
-
-    return (
-      <TouchableOpacity 
-        style={styles.postItem}
-        onPress={() => router.push({
-          pathname: '/post/[id]',
-          params: { id: item.id }
-        })}
-      >
-        {isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={styles.postMedia}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={false}
-            isMuted={true}
-            useNativeControls={false}
-            posterStyle={{ resizeMode: 'cover' }}
-          />
-        ) : (
-          <Image source={{ uri: mediaUrl }} style={styles.postMedia} />
-        )}
-        
-        <View style={styles.postOverlay}>
-          <View style={styles.postStats}>
-            <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{item.likes || 0}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
@@ -96,7 +114,6 @@ export default function CategoryScreen() {
         <View style={{ width: 32 }} />
       </View>
 
-      {/* Posts Grid */}
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#60a5fa" />
@@ -104,7 +121,7 @@ export default function CategoryScreen() {
       ) : (
         <FlatList
           data={posts}
-          renderItem={renderPost}
+          renderItem={({ item }) => <CategoryPostCard item={item} />}
           keyExtractor={(item) => item.id}
           numColumns={3}
           contentContainerStyle={styles.gridContainer}
@@ -152,6 +169,14 @@ const styles = StyleSheet.create({
   postMedia: {
     width: '100%',
     height: '100%',
+  },
+  playBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    padding: 4,
   },
   postOverlay: {
     position: 'absolute',

@@ -16,7 +16,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi, userApi } from '@/lib/api';
 import { API_BASE_URL } from '@/lib/config';
@@ -38,28 +38,13 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
+import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 // Global mute context
 const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => { } });
 const useMute = () => useContext(MuteContext);
-
-// Global video manager to ensure only one video plays at a time
-const activeVideoRef = { current: null as Video | null };
-const pauseAllVideosExcept = async (currentVideo: Video | null) => {
-  if (activeVideoRef.current && activeVideoRef.current !== currentVideo) {
-    try {
-      const status = await activeVideoRef.current.getStatusAsync();
-      if (status?.isLoaded && status.isPlaying) {
-        await activeVideoRef.current.pauseAsync();
-      }
-    } catch (error) {
-      // Silently handle errors
-    }
-  }
-  activeVideoRef.current = currentVideo;
-};
 
 // Utility functions
 const formatNumber = (num: number): string => {
@@ -149,22 +134,18 @@ const PostItem = React.memo(({
     initialIsLiked: isPostLiked || isLiked,
   });
 
-  const videoRef = useRef<Video>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
   const { isMuted, setIsMuted } = useMute();
   const [videoError, setVideoError] = useState(false);
-  const [videoLoaded, setVideoLoaded] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [useNativeControls, setUseNativeControls] = useState(false);
-  const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
   const insets = useSafeAreaInsets();
 
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
+  const muteOpacity = useRef(new Animated.Value(0)).current;
+  const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
 
   const mediaUrl = getMediaUrl(item);
 
@@ -186,53 +167,62 @@ const PostItem = React.memo(({
     (mediaUrl !== null &&
       (mediaUrl.includes('.mp4') ||
         mediaUrl.includes('.mov') ||
-        mediaUrl.includes('.webm')));
+        mediaUrl.includes('.webm') ||
+        mediaUrl.includes('.m3u8')));
 
-  useEffect(() => {
-    if (!videoRef.current || useNativeControls || !isVideo) return;
-
-    const managePlayback = async () => {
-      try {
-        const currentVideo = videoRef.current;
-        if (!currentVideo) return;
-
-        const status = await currentVideo.getStatusAsync();
-        if (!status?.isLoaded) return;
-
-        if (isActive) {
-          await pauseAllVideosExcept(currentVideo);
-          if (!status.isPlaying) {
-            await currentVideo.playAsync();
-          }
-        } else {
-          if (status.isPlaying) {
-            await currentVideo.pauseAsync();
-          }
-          if (activeVideoRef.current === currentVideo) {
-            activeVideoRef.current = null;
-          }
-        }
-      } catch (error) {
-        // Silently handle errors
+  // expo-video player — handles HLS natively
+  const shouldLoadVideo = isVideo && isActive;
+  const videoPlayer = useVideoPlayer(
+    shouldLoadVideo && mediaUrl ? mediaUrl : null,
+    (player) => {
+      if (player) {
+        player.loop = true;
+        player.muted = isMuted;
       }
-    };
+    }
+  );
 
-    managePlayback();
-  }, [isActive, useNativeControls, isVideo]);
-
+  // Track playback state for thumbnail layer
   useEffect(() => {
-    return () => {
-      if (videoRef.current) {
-        if (activeVideoRef.current === videoRef.current) {
-          activeVideoRef.current = null;
-        }
-        videoRef.current.unloadAsync().catch(() => { });
-      }
-    };
-  }, []);
+    if (!videoPlayer) return;
+    try {
+      const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
+        setIsPlaying(event.isPlaying);
+        if (event.isPlaying) setVideoReady(true);
+      });
+      return () => { try { sub.remove(); } catch { } };
+    } catch { return () => { }; }
+  }, [videoPlayer]);
+
+  // Sync mute state
+  useEffect(() => {
+    if (!videoPlayer) return;
+    try { videoPlayer.muted = isMuted; } catch { }
+  }, [isMuted, videoPlayer]);
+
+  // Auto-play when active
+  useEffect(() => {
+    if (!videoPlayer) return;
+    if (isActive) {
+      try { videoPlayer.play(); } catch { }
+    } else {
+      try { videoPlayer.pause(); } catch { }
+      setVideoReady(false);
+      setIsPlaying(false);
+    }
+  }, [isActive, videoPlayer]);
 
   const handleVideoTap = () => {
-    setIsMuted(!isMuted);
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
+    muteOpacity.setValue(1);
+    Animated.timing(muteOpacity, {
+      toValue: 0,
+      duration: 800,
+      delay: 300,
+      useNativeDriver: true,
+    }).start();
   };
 
   const handleLike = async () => {
@@ -318,107 +308,56 @@ const PostItem = React.memo(({
       {/* Media */}
       <View style={[styles.mediaContainer, { height: availableHeight }]}>
         {isVideo ? (
-          videoError || !isActive ? (
-            // Show thumbnail when video has error OR when not active (memory optimization)
-            <TouchableOpacity
-              style={styles.mediaWrapper}
-              activeOpacity={1}
-              onPress={handleVideoTap}
-            >
-              {mediaUrl ? (
-                <Image
-                  source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                  style={styles.media}
-                  resizeMode="cover"
-                  onError={() => {
-                    setImageError(true);
-                  }}
-                />
-              ) : (
-                <View style={[styles.media, styles.placeholderContainer]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
-                </View>
-              )}
-              {/* Play icon overlay for inactive videos */}
-              {!videoError && !isActive && (
-                <View style={styles.playIconOverlay}>
-                  <View style={styles.playIconCircle}>
-                    <Feather name="play" size={32} color="#fff" />
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-          ) : (
-            // Only load Video component when active
-            <TouchableOpacity
-              style={styles.mediaWrapper}
-              activeOpacity={1}
-              onPress={handleVideoTap}
-            >
-              <Video
-                ref={videoRef}
-                source={{
-                  uri: mediaUrl || '',
-                  headers: {
-                    'Cache-Control': 'public, max-age=31536000, immutable'
+          <TouchableOpacity
+            style={styles.mediaWrapper}
+            activeOpacity={1}
+            onPress={handleVideoTap}
+          >
+            {/* LAYER 1: Thumbnail — ALWAYS visible until video is PLAYING (zero black screens) */}
+            {mediaUrl && (
+              <Image
+                source={{ uri: getThumbnailUrl(item) || mediaUrl }}
+                style={[
+                  styles.media,
+                  {
+                    position: 'absolute',
+                    zIndex: 1,
+                    opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
                   }
-                }}
-                style={styles.media}
-                resizeMode={ResizeMode.COVER}
-                shouldPlay={useNativeControls ? false : !decoderErrorDetected && isActive}
-                isLooping={!useNativeControls}
-                isMuted={useNativeControls ? false : isMuted}
-                usePoster={false}
-                shouldCorrectPitch={true}
-                volume={useNativeControls ? 1.0 : (isMuted ? 0.0 : 1.0)}
-                useNativeControls={useNativeControls}
-                progressUpdateIntervalMillis={100}
-                onLoadStart={() => {
-                  setVideoLoading(true);
-                }}
-                onLoad={() => {
-                  setVideoLoaded(true);
-                  setVideoLoading(false);
-                  if (!useNativeControls && videoRef.current && isActive) {
-                    pauseAllVideosExcept(videoRef.current).then(() => {
-                      videoRef.current?.playAsync().catch(() => { });
-                    });
-                  }
-                }}
-                onError={(error: any) => {
-                  if (!decoderErrorDetected) {
-                    const errorMessage = error?.message || error?.toString() || '';
-                    if (errorMessage.includes('Decoder') || errorMessage.includes('decoder') || errorMessage.includes('OMX')) {
-                      setDecoderErrorDetected(true);
-                      setUseNativeControls(true);
-                      setVideoError(false);
-                      setVideoLoaded(true);
-                    } else {
-                      setVideoError(true);
-                      setVideoLoading(false);
-                    }
-                  }
-                }}
-                onPlaybackStatusUpdate={(status: any) => {
-                  if (status.isLoaded) {
-                    if (!useNativeControls) {
-                      if (status.isPlaying !== isPlaying) {
-                        setIsPlaying(status.isPlaying);
-                      }
-                      if (status.durationMillis && status.positionMillis !== undefined) {
-                        const progress = status.durationMillis > 0
-                          ? status.positionMillis / status.durationMillis
-                          : 0;
-                        setVideoProgress(progress);
-                        setVideoDuration(status.durationMillis);
-                      }
-                    }
-                  }
-                }}
+                ]}
+                resizeMode="cover"
               />
-            </TouchableOpacity>
-          )
+            )}
+
+            {/* LAYER 2: VideoView (expo-video) — only when active */}
+            {videoPlayer && isActive && !videoError && (
+              <VideoView
+                player={videoPlayer}
+                style={[
+                  styles.media,
+                  { position: 'absolute', zIndex: 2 }
+                ]}
+                contentFit="cover"
+                nativeControls={false}
+              />
+            )}
+
+            {/* Error state */}
+            {videoError && (
+              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                <Feather name="video-off" size={48} color="#666" />
+                <Text style={styles.placeholderText}>Video unavailable</Text>
+              </View>
+            )}
+
+            {/* No media URL */}
+            {!mediaUrl && (
+              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                <Feather name="video-off" size={48} color="#666" />
+                <Text style={styles.placeholderText}>Video unavailable</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         ) : (
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
@@ -437,15 +376,13 @@ const PostItem = React.memo(({
           </View>
         )}
 
-        {/* Mute/Unmute Indicator Overlay - Instagram-style center indicator */}
-        {isVideo && !useNativeControls && isActive && (
-          <View style={styles.muteIndicatorOverlay} pointerEvents="none">
-            {isMuted ? (
-              <View style={styles.muteIndicatorBadge}>
-                <Feather name="volume-x" size={32} color="rgba(255,255,255,0.9)" />
-              </View>
-            ) : null}
-          </View>
+        {/* Instagram-style mute indicator — shows on toggle and fades away */}
+        {isVideo && isActive && (
+          <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
+            <View style={styles.muteIndicatorBadge}>
+              <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
+            </View>
+          </Animated.View>
         )}
 
 
@@ -465,7 +402,7 @@ const PostItem = React.memo(({
           {/* User avatar */}
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
             <Avatar
-              user={item.user}
+              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
               size={40}
               style={styles.avatar}
             />
@@ -532,10 +469,10 @@ const PostItem = React.memo(({
           )}
 
           {/* Publish button for draft posts - accessible from playback screen */}
-          {(item.status === 'draft' || item.status === 'Draft') && user && user.id === userId && (
+          {(item.status === 'draft' || item.status === 'Draft') && user && user.id === item.user?.id && (
             <TouchableOpacity
               style={styles.publishDraftButton}
-              onPress={() => handlePublishDraft(item.id)}
+              onPress={() => onReport(item.id)}
               activeOpacity={0.8}
             >
               <Feather name="send" size={16} color="#fff" />
@@ -544,12 +481,7 @@ const PostItem = React.memo(({
           )}
         </View>
 
-        {/* Video progress bar - at the very bottom edge */}
-        {isVideo && !useNativeControls && isActive && videoDuration > 0 && (
-          <View style={[styles.progressBarContainer, { bottom: insets.bottom }]}>
-            <View style={[styles.progressBar, { width: `${videoProgress * 100}%` }]} />
-          </View>
-        )}
+        {/* Video progress bar removed — expo-video handles this natively */}
       </View>
     </View>
   );
@@ -684,6 +616,9 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
       }
 
       // Log posts structure for debugging
+      // Apply HLS filter — only show HLS-transcoded video posts
+      postsArray = filterHlsReady(postsArray);
+
       if (__DEV__) {
         console.log('📥 [ProfileFeed fetchPosts] API Response:', {
           status: response?.status,
@@ -839,7 +774,7 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         // Use ref to avoid dependency issues
         setIsScreenFocused(false);
         lastActiveIndexRef.current = currentIndexRef.current;
-        pauseAllVideosExcept(null);
+        // expo-video handles pause/play internally via useVideoPlayer source changes
       };
     }, []) // Empty dependency array - only run on focus/blur
   );
@@ -956,13 +891,9 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         likesManager.onPostVisible(postId);
       }
 
-      if (activeVideoRef.current) {
-        pauseAllVideosExcept(null);
-      }
       setCurrentIndex(newIndex);
       lastActiveIndexRef.current = newIndex;
     } else {
-      pauseAllVideosExcept(null);
       setCurrentIndex(-1);
     }
   }).current;

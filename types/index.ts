@@ -66,7 +66,15 @@ export interface Post {
   videoUrl?: string;
   mediaType?: 'image' | 'video';
   type?: 'image' | 'video';
-  fullUrl?: string;
+  // HLS STREAMING FIELDS (from backend withVideoPlaybackUrl)
+  fullUrl?: string; // Primary playback URL - HLS when ready, else raw MP4
+  streamType?: 'hls' | 'raw'; // Tells frontend which player to use
+  hlsReady?: boolean; // true when HLS is available
+  hls_url?: string; // HLS master playlist (.m3u8)
+  thumbnail_url?: string; // Server-generated thumbnail for instant display
+  video_duration?: number; // Duration in seconds
+  processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
+  // END HLS STREAMING FIELDS
   createdAt: string;
   updatedAt: string;
   uploadDate?: string;
