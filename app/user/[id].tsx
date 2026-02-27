@@ -60,11 +60,9 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
   const serverThumbnail = (post as any).thumbnail_url || '';
   const fallbackImageUrl = post.image || (post as any).thumbnail || '';
 
-  // ONLY generate client-side thumbnail if server doesn't provide one
-  // Use raw video_url (MP4) for thumbnail generation, not HLS .m3u8
-  const rawVideoUrl = getFileUrl(post.video_url) || videoUrl;
+  // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
   const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-    (isVideo && !serverThumbnail && rawVideoUrl && !rawVideoUrl.endsWith('.m3u8')) ? rawVideoUrl : null,
+    null, // Never download raw MP4 for thumbnails
     fallbackImageUrl,
     1000
   );

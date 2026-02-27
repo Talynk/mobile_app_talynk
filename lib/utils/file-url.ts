@@ -154,3 +154,31 @@ export function isHlsUrl(url: string | null | undefined): boolean {
   return url.toLowerCase().includes('.m3u8');
 }
 
+/**
+ * Get the playback URL for a post — HLS ONLY.
+ * Returns the master .m3u8 playlist URL when HLS processing is complete.
+ * Returns null when HLS is not ready (video still processing or failed).
+ * 
+ * IMPORTANT: The feed should NEVER play raw MP4 files. Only use this function
+ * to get the video source URL. When this returns null, show thumbnail + processing state.
+ * 
+ * @param post - Post object from the API
+ * @returns HLS master playlist URL, or null if not ready
+ */
+export function getPlaybackUrl(post: any): string | null {
+  if (!post || post.type !== 'video') return null;
+
+  // Only play when HLS is ready
+  const hlsReady =
+    post.processing_status === 'completed' &&
+    (post.hls_url || post.fullUrl?.includes('.m3u8'));
+
+  if (!hlsReady) return null;
+
+  // Prefer hls_url, then fullUrl (which backend sets to hls_url when completed)
+  const url = post.hls_url || post.fullUrl;
+  if (!url) return null;
+
+  return getFileUrl(url);
+}
+

@@ -184,10 +184,9 @@ export default function ChallengePostsScreen() {
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
     const isHls = mediaUrl.endsWith('.m3u8');
 
-    // Use raw video_url (MP4) for thumbnail generation
-    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
     const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+      null, // Never download raw MP4 for thumbnails
       fallbackImageUrl || '',
       1000
     );
@@ -292,10 +291,9 @@ export default function ChallengePostsScreen() {
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
     const isHls = mediaUrl.endsWith('.m3u8');
 
-    // Use raw video_url (MP4) for thumbnail generation
-    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
     const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+      null, // Never download raw MP4 for thumbnails
       fallbackImageUrl || '',
       1000
     );

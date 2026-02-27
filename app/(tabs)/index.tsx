@@ -65,7 +65,7 @@ const formatNumber = (num: number): string => {
 };
 
 
-import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getFileUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getFileUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
@@ -204,23 +204,20 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   const mediaUrl = getMediaUrl(item);
-  const isVideo =
-    item.type === 'video' ||
-    (mediaUrl !== null &&
-      (mediaUrl.includes('.mp4') ||
-        mediaUrl.includes('.mov') ||
-        mediaUrl.includes('.webm') ||
-        mediaUrl.includes('.m3u8')));
+  const isVideo = item.type === 'video';
 
-  // INSTAGRAM STYLE: Create player for current + next + previous (3 player pool)
-  // This allows seamless transition when scrolling without creating too many players
-  const shouldLoadVideo = isVideo && (isActive || shouldPreload);
+  // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete, null otherwise
+  const playbackUrl = getPlaybackUrl(item);
+  const isProcessing = isVideoProcessing(item);
+  const hlsReady = !!playbackUrl;
 
-  // Use remote URL directly - let native player handle buffering (Instagram approach)
-  // Don't download to file system - just stream
-  const videoSourceUrl = mediaUrl;
+  // Only create a video player when HLS is ready AND this video is active or preloading
+  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
 
-  // CRITICAL: Only create player for ACTIVE video
+  // HLS master playlist URL — native player handles adaptive bitrate selection
+  const videoSourceUrl = playbackUrl;
+
+  // CRITICAL: Only create player for videos with a valid HLS source
   const videoPlayerSource = shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null;
   const videoPlayer = useVideoPlayer(
     videoPlayerSource,
@@ -541,23 +538,40 @@ const PostItem: React.FC<PostItemProps> = ({
             activeOpacity={1}
             onPress={handleMuteToggle}
           >
-            {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING (Mux style) */}
-            {/* Use raw video_url (MP4) as fallback — .m3u8 cannot render as Image */}
-            {(getThumbnailUrl(item) || getFileUrl(item.video_url) || mediaUrl) && (
+            {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING */}
+            {/* DATA SAVER: Only use thumbnail_url (server-generated). NEVER load raw MP4 as image. */}
+            {getThumbnailUrl(item) ? (
               <Image
-                source={{ uri: getThumbnailUrl(item) || getFileUrl(item.video_url) || mediaUrl || '' }}
+                source={{ uri: getThumbnailUrl(item)! }}
                 style={[
                   styles.media,
                   {
                     position: 'absolute',
                     zIndex: 1,
-                    // MUX STYLE: Only hide thumbnail when video is ACTUALLY PLAYING
-                    // This guarantees zero black screens
                     opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
                   }
                 ]}
                 resizeMode="cover"
               />
+            ) : (
+              <View style={[styles.media, { position: 'absolute', zIndex: 1, backgroundColor: '#111' }]} />
+            )}
+
+            {/* LAYER 1.5: Processing state overlay — show when HLS is not yet ready */}
+            {isVideo && !hlsReady && (
+              <View style={[styles.media, styles.placeholderContainer, { zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+                {isProcessing ? (
+                  <>
+                    <ActivityIndicator size="large" color="#fff" />
+                    <Text style={[styles.placeholderText, { marginTop: 12 }]}>Processing video…</Text>
+                  </>
+                ) : item.processing_status === 'failed' ? (
+                  <>
+                    <Feather name="alert-circle" size={48} color="#ff4444" />
+                    <Text style={[styles.placeholderText, { marginTop: 12, color: '#ff4444' }]}>Processing failed</Text>
+                  </>
+                ) : null}
+              </View>
             )}
 
             {/* LAYER 2: VideoView - render for active or preloading */}

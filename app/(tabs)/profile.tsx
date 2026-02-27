@@ -65,10 +65,9 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
   const fallbackUrl = (post as any).fullUrl || getPostMediaUrl(post) || '';
 
   // ONLY generate client-side thumbnail if server doesn't provide one
-  // CRITICAL: Use raw video_url (MP4) for thumbnail generation, NOT the HLS .m3u8
-  const rawVideoUrl = getFileUrl(post.video_url) || '';
+  // DATA SAVER: Don't download raw MP4 for thumbnails — server generates them during HLS processing
   const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-    (isActuallyVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+    null, // Never download raw MP4 for thumbnails
     fallbackUrl,
     1000
   );

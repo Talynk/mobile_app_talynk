@@ -268,10 +268,10 @@ export default function ExploreScreen() {
           mediaUrl.toLowerCase().includes('.mov') ||
           mediaUrl.toLowerCase().includes('.webm')));
 
-    // CRITICAL FIX: For HLS posts, use raw video_url (MP4) for thumbnail generation
-    // The video_url field always has the original MP4 — perfect for thumbnail extraction
-    const rawVideoUrl = getFileUrl(item.video_url) || '';
-    const thumbnailSourceUrl = (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null;
+    // DATA SAVER: Server always generates thumbnail_url during HLS processing
+    // Only fall back to client-side thumbnail generation if server thumbnail is missing
+    // This prevents downloading the full raw MP4 just for a thumbnail frame
+    const thumbnailSourceUrl = null; // Server thumbnails are always available for HLS-ready posts
 
     const { thumbnailUri: generatedThumbnail, isLoading: thumbnailLoading } = useVideoThumbnail(
       thumbnailSourceUrl,
@@ -369,10 +369,9 @@ export default function ExploreScreen() {
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
 
-    // ONLY generate client-side thumbnail if server doesn't provide one
-    const rawVideoUrl = getFileUrl(item.video_url) || '';
+    // DATA SAVER: Don't download raw MP4 for thumbnail — use server-generated thumbnail
     const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
+      null, // Never download raw MP4 for thumbnails
       fallbackImageUrl || '',
       1000
     );
