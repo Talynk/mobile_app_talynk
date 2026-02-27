@@ -173,22 +173,24 @@ const PostItem: React.FC<PostItemProps> = ({
   const [imageLoading, setImageLoading] = useState(true);
   const [videoLoading, setVideoLoading] = useState(true);
   const [isSeeking, setIsSeeking] = useState(false);
+  const [isPausedByPress, setIsPausedByPress] = useState(false);
   const progressBarRef = useRef<View>(null);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
 
   // Instagram-style mute toggle with fade indicator
-  // CRITICAL: Set videoPlayer.muted DIRECTLY — don't wait for React re-render cycle
+  // CRITICAL: Try to set videoPlayer.muted DIRECTLY — even if playerValidRef is not yet true
   const handleMuteToggle = () => {
     const newMuted = !isMuted;
     toggleMute(); // Update global context for other components
 
-    // IMMEDIATELY set on the current player — this is what makes unmute work
-    if (videoPlayer && playerValidRef.current) {
+    // IMMEDIATELY set on the current player — try even without playerValidRef
+    // This fixes mute not working on the first post
+    if (videoPlayer) {
       try {
         videoPlayer.muted = newMuted;
       } catch (e) {
-        // Player might be released
+        // Player might be released — not a concern for first post
       }
     }
 
@@ -201,6 +203,25 @@ const PostItem: React.FC<PostItemProps> = ({
       delay: 300,
       useNativeDriver: true,
     }).start();
+  };
+
+  // Instagram-style long-press to pause, release to resume
+  const handleLongPress = () => {
+    if (videoPlayer) {
+      try {
+        videoPlayer.pause();
+        setIsPausedByPress(true);
+      } catch (e) { /* player released */ }
+    }
+  };
+
+  const handlePressOut = () => {
+    if (isPausedByPress && videoPlayer && isActive) {
+      try {
+        videoPlayer.play();
+      } catch (e) { /* player released */ }
+      setIsPausedByPress(false);
+    }
   };
 
   const mediaUrl = getMediaUrl(item);
@@ -537,6 +558,9 @@ const PostItem: React.FC<PostItemProps> = ({
             style={styles.mediaWrapper}
             activeOpacity={1}
             onPress={handleMuteToggle}
+            onLongPress={handleLongPress}
+            onPressOut={handlePressOut}
+            delayLongPress={200}
           >
             {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING */}
             {/* DATA SAVER: Only use thumbnail_url (server-generated). NEVER load raw MP4 as image. */}
@@ -630,7 +654,7 @@ const PostItem: React.FC<PostItemProps> = ({
         )}
 
         {/* Instagram-style mute indicator — shows on toggle and fades away */}
-        {isVideo && isActive && (
+        {isVideo && (
           <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
             <View style={styles.muteIndicatorBadge}>
               <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />

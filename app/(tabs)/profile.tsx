@@ -17,10 +17,8 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, postsApi, likesApi } from '@/lib/api';
-// import { viewsApi } from '@/lib/api'; // COMMENTED OUT - Will implement later
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditProfileModal } from '@/components/EditProfileModal';
 import DotsSpinner from '@/components/DotsSpinner';
@@ -28,19 +26,16 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
-import { getFileUrl, getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { getFileUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
-import { useVideoMute } from '@/lib/hooks/use-video-mute';
-import { getCachedVideoUri } from '@/lib/utils/video-cache';
-import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
 
 
-// Video thumbnail component with teaser playback
+// Post thumbnail component — STATIC ONLY, no video playback on profile grid
+// DATA SAVER: No video players are created on profile. Only thumbnail images.
 interface VideoThumbnailProps {
   post: Post;
   isActive: boolean;
@@ -51,68 +46,15 @@ interface VideoThumbnailProps {
 }
 
 const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onViewsPress }: VideoThumbnailProps) => {
-  const [showVideo, setShowVideo] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
 
-  // CRITICAL: Check what type this ACTUALLY is based on URL extension or HLS URL
-  const actualMediaUrl = (post as any).fullUrl || post.video_url || post.videoUrl || '';
-  const isHls = actualMediaUrl.endsWith('.m3u8');
-  const isActuallyVideo = isHls || actualMediaUrl.endsWith('.mp4') || actualMediaUrl.endsWith('.mov') || actualMediaUrl.endsWith('.webm');
+  const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
 
-  // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
+  // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
+  // NEVER use video_url or fullUrl as image source — those are video files
   const serverThumbnail = getThumbnailUrl(post);
-  const fallbackUrl = (post as any).fullUrl || getPostMediaUrl(post) || '';
-
-  // ONLY generate client-side thumbnail if server doesn't provide one
-  // DATA SAVER: Don't download raw MP4 for thumbnails — server generates them during HLS processing
-  const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-    null, // Never download raw MP4 for thumbnails
-    fallbackUrl,
-    1000
-  );
-
-  // FINAL: Server thumbnail > generated thumbnail > fallback URL
-  const staticThumbnailUrl = isActuallyVideo
-    ? (serverThumbnail || generatedThumbnail || fallbackUrl)
-    : fallbackUrl;
-
-  // expo-video player for teaser
-  const player = useVideoPlayer(actualMediaUrl, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-
-  useEffect(() => {
-    if (isActive && isActuallyVideo && actualMediaUrl) {
-      const timer = setTimeout(() => {
-        setShowVideo(true);
-        try { player.play(); } catch (_) { /* player released */ }
-      }, 200);
-      return () => {
-        clearTimeout(timer);
-        try { player.pause(); player.currentTime = 0; } catch (_) { /* player released */ }
-      };
-    } else {
-      setShowVideo(false);
-      try { player.pause(); } catch (_) { /* player released */ }
-    }
-  }, [isActive, isActuallyVideo, actualMediaUrl, player]);
-
-  // Teaser loop logic (reset after 3s)
-  useEffect(() => {
-    if (isActive && showVideo) {
-      const interval = setInterval(() => {
-        try {
-          if (player.currentTime > 3) {
-            player.currentTime = 0;
-            player.play();
-          }
-        } catch (_) { /* player released */ }
-      }, 500);
-      return () => clearInterval(interval);
-    }
-  }, [isActive, showVideo, player]);
+  const imageUrl = getFileUrl((post as any).image || (post as any).thumbnail || '') || null;
+  const thumbnailUrl = serverThumbnail || imageUrl;
 
   return (
     <TouchableOpacity
@@ -121,29 +63,18 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       onLongPress={onOptionsPress}
       activeOpacity={0.9}
     >
-      {/* Static thumbnail image - always visible in background */}
-      {staticThumbnailUrl && !imageError ? (
+      {/* Static thumbnail image only — NO video player */}
+      {thumbnailUrl && !imageError ? (
         <Image
-          source={{ uri: staticThumbnailUrl }}
+          source={{ uri: thumbnailUrl }}
           style={styles.postMedia}
           resizeMode="cover"
-          onLoad={() => setImageLoaded(true)}
           onError={() => setImageError(true)}
         />
       ) : (
         <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-          <MaterialIcons name={isActuallyVideo ? "video-library" : "image"} size={28} color="#666" />
+          <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#666" />
         </View>
-      )}
-
-      {/* Video teaser overlay - only when active */}
-      {showVideo && isActuallyVideo && actualMediaUrl && isActive && (
-        <VideoView
-          player={player}
-          style={[styles.postMedia, styles.teaserVideo]}
-          contentFit="cover"
-          nativeControls={false}
-        />
       )}
 
       {/* Overlay with stats */}
@@ -152,21 +83,6 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           <Feather name="heart" size={12} color="#fff" />
           <Text style={styles.postStatText}>{formatNumber(post.likes || 0)}</Text>
         </View>
-
-        {/* Views count button - COMMENTED OUT - Will implement later */}
-        {/* {onViewsPress && (
-          <TouchableOpacity
-            style={styles.postStats}
-            onPress={(e) => {
-              e.stopPropagation();
-              onViewsPress();
-            }}
-            activeOpacity={0.7}
-          >
-            <Feather name="eye" size={12} color="#fff" />
-            <Text style={styles.postStatText}>{formatNumber((post as any).views || (post as any).view_count || 0)}</Text>
-          </TouchableOpacity>
-        )} */}
 
         {/* Status indicator */}
         <View style={[
@@ -181,22 +97,15 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
         </View>
       </View>
 
-      {/* Video play indicator / Active indicator */}
-      {isActuallyVideo && (
-        <View style={[
-          styles.videoPlayIndicator,
-          isActive && styles.videoPlayIndicatorActive
-        ]}>
-          {isActive ? (
-            <View style={styles.playingDot} />
-          ) : (
-            <Feather name="play" size={14} color="#fff" />
-          )}
+      {/* Video play icon */}
+      {isVideo && (
+        <View style={styles.videoPlayIndicator}>
+          <Feather name="play" size={14} color="#fff" />
         </View>
       )}
 
-      {/* HLS Processing Badge — shows when video is still being transcoded */}
-      {isActuallyVideo && (
+      {/* HLS Processing Badge */}
+      {isVideo && (
         (post as any).processing_status === 'pending' ||
         (post as any).processing_status === 'processing' ||
         (post as any).processing_status === 'uploading'
@@ -226,22 +135,12 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       {/* Publish button for draft posts */}
       {(() => {
         const isDraft = post.status === 'draft' || post.status === 'Draft';
-        if (__DEV__ && isDraft) {
-          console.log('📤 [VideoThumbnail] Draft post detected, showing publish button:', {
-            postId: post.id,
-            status: post.status,
-            hasOnPublishPress: !!onPublishPress,
-          });
-        }
         return isDraft && onPublishPress;
       })() && (
           <TouchableOpacity
             style={styles.publishDraftButton}
             onPress={(e) => {
               e.stopPropagation();
-              if (__DEV__) {
-                console.log('📤 [VideoThumbnail] Publish button pressed');
-              }
               onPublishPress?.();
             }}
             activeOpacity={0.8}
@@ -321,13 +220,6 @@ export default function ProfileScreen() {
     }
   });
 
-  // Preload videos based on scroll position (dynamic preloading)
-  // DISABLED to prevent app freeze
-  useVideoPreload(posts, firstVisibleIndex, {
-    preloadCount: 0, // DISABLED
-    direction: 'forward',
-    enabled: false, // COMPLETELY DISABLED
-  });
   const [refreshing, setRefreshing] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
@@ -342,56 +234,12 @@ export default function ProfileScreen() {
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [likingPostId, setLikingPostId] = useState<string | null>(null);
 
-  // Video teaser playback state
-  const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
-  // COMMENTED OUT - Will implement later
-  // const [viewsModalVisible, setViewsModalVisible] = useState(false);
-  // const [viewsModalPostId, setViewsModalPostId] = useState<string | null>(null);
-  // const [viewsData, setViewsData] = useState<any[]>([]);
-  // const [loadingViews, setLoadingViews] = useState(false);
   const [likesModalVisible, setLikesModalVisible] = useState(false);
   const [likesData, setLikesData] = useState<any[]>([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
-  const teaserIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const insets = useSafeAreaInsets();
-
-  // Cycle through video teasers - one at a time
-  useEffect(() => {
-    if (isScreenFocused && posts.length > 0) {
-      // Find video posts only
-      const videoPosts = posts.filter(p => !!p.video_url);
-
-      if (videoPosts.length > 0) {
-        // Clear any existing interval
-        if (teaserIntervalRef.current) {
-          clearInterval(teaserIntervalRef.current);
-        }
-
-        // Cycle through video posts every 4 seconds
-        teaserIntervalRef.current = setInterval(() => {
-          setActiveTeaserIndex(prev => {
-            const videoIndices = posts
-              .map((p, i) => getFileUrl(p.video_url) ? i : -1)
-              .filter(i => i !== -1);
-
-            if (videoIndices.length === 0) return 0;
-
-            const currentVideoPosition = videoIndices.indexOf(prev);
-            const nextPosition = (currentVideoPosition + 1) % videoIndices.length;
-            return videoIndices[nextPosition] ?? 0;
-          });
-        }, 4000);
-      }
-    }
-
-    return () => {
-      if (teaserIntervalRef.current) {
-        clearInterval(teaserIntervalRef.current);
-      }
-    };
-  }, [isScreenFocused, posts]);
 
   // Handle screen focus for video playback and refresh posts
   useFocusEffect(
@@ -974,7 +822,7 @@ export default function ProfileScreen() {
   };
 
   const renderPost = ({ item, index }: { item: Post; index: number }) => {
-    const isActiveTeaser = isScreenFocused && activeTeaserIndex === index;
+    // No teaser playback — profile grid is static thumbnails only
 
     // Log post being rendered (only first few to avoid spam)
     if (__DEV__ && index < 3) {
@@ -996,7 +844,7 @@ export default function ProfileScreen() {
     return (
       <VideoThumbnail
         post={item}
-        isActive={isActiveTeaser}
+        isActive={false}
         onPress={() => {
           if (__DEV__) {
             console.log('👆 [renderPost] Post pressed:', {
@@ -1447,7 +1295,7 @@ export default function ProfileScreen() {
                     <View style={styles.postOptionsThumbnail}>
                       <Feather name="video" size={24} color="#60a5fa" />
                     </View>
-                  ) : getPostMediaUrl(selectedPost) ? (
+                  ) : getFileUrl(selectedPost.image || '') ? (
                     <Image
                       source={{ uri: selectedPost.image }}
                       style={styles.postOptionsThumbnail}

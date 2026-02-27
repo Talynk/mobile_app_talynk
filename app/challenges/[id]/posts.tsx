@@ -160,73 +160,24 @@ export default function ChallengePostsScreen() {
     }, 100);
   };
 
-  // PostCard component for grid display
+  // PostCard component for grid display — STATIC ONLY, no video playback
   const PostCard = ({ item, index }: { item: Post; index: number }) => {
-    const [isActive, setIsActive] = useState(false);
-    const [showVideo, setShowVideo] = useState(false);
+    const isVideo = item.type === 'video' || !!(item.video_url);
 
-    // Get media URL using the utility function
-    const mediaUrl = getPostMediaUrl(item) || '';
-    const isVideo =
-      item.type === 'video' ||
-      (mediaUrl !== null &&
-        mediaUrl !== '' &&
-        (mediaUrl.toLowerCase().includes('.mp4') ||
-          mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm') ||
-          mediaUrl.toLowerCase().includes('.m3u8')));
-
-    // For videos, use the mediaUrl directly; for images, also use mediaUrl
-    const videoUrl = isVideo ? mediaUrl : null;
-
-    // HLS OPTIMIZATION: Server thumbnail_url takes priority
+    // THUMBNAIL PRIORITY: server thumbnail_url > fallback image > placeholder
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const isHls = mediaUrl.endsWith('.m3u8');
-
-    // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
-    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      null, // Never download raw MP4 for thumbnails
-      fallbackImageUrl || '',
-      1000
-    );
-    // PRIORITY: Server thumbnail > generated thumbnail > fallback
-    const staticThumbnailUrl = isVideo
-      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
-      : (mediaUrl || fallbackImageUrl);
-
-    const player = useVideoPlayer(videoUrl, (player) => {
-      player.loop = true;
-      player.muted = true;
-    });
-
-    useEffect(() => {
-      if (isActive && isVideo && videoUrl) {
-        const timer = setTimeout(() => {
-          setShowVideo(true);
-          player.play();
-        }, 200);
-        return () => {
-          clearTimeout(timer);
-          player.pause();
-        };
-      } else {
-        setShowVideo(false);
-        player.pause();
-      }
-    }, [isActive, isVideo, videoUrl, player]);
+    const thumbnailUrl = serverThumbnail || fallbackImageUrl;
 
     return (
       <TouchableOpacity
         style={styles.postCard}
-        onPressIn={() => setIsActive(true)}
-        onPressOut={() => setIsActive(false)}
         activeOpacity={0.9}
         onPress={() => handlePostPress(index)}
       >
-        {staticThumbnailUrl ? (
+        {thumbnailUrl ? (
           <Image
-            source={{ uri: staticThumbnailUrl }}
+            source={{ uri: thumbnailUrl }}
             style={styles.postMedia}
             resizeMode="cover"
           />
@@ -236,16 +187,6 @@ export default function ChallengePostsScreen() {
           </View>
         )}
 
-        {showVideo && isVideo && videoUrl && isActive && (
-          <VideoView
-            player={player}
-            style={[styles.postMedia, styles.teaserVideo]}
-            contentFit="cover"
-            nativeControls={false}
-          />
-        )}
-
-
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
             <Feather name="heart" size={14} color="#fff" />
@@ -253,11 +194,7 @@ export default function ChallengePostsScreen() {
           </View>
           {isVideo && (
             <View style={styles.playIcon}>
-              {isActive && showVideo ? (
-                <View style={styles.playingDot} />
-              ) : (
-                <Feather name="play" size={16} color="#fff" />
-              )}
+              <Feather name="play" size={16} color="#fff" />
             </View>
           )}
         </View>

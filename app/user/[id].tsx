@@ -19,7 +19,7 @@ import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
-import { getPostMediaUrl, getFileUrl } from '@/lib/utils/file-url';
+import { getFileUrl } from '@/lib/utils/file-url';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRealtime } from '@/lib/realtime-context';
@@ -28,7 +28,6 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DotsSpinner from '@/components/DotsSpinner';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
@@ -49,65 +48,12 @@ interface VideoThumbnailCardProps {
 }
 
 const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
-  const [showVideo, setShowVideo] = useState(false);
+  const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
 
-  const videoUrl = post.video_url || post.videoUrl || '';
-  const mediaUrl = getPostMediaUrl(post) || '';
-  const isHls = mediaUrl.endsWith('.m3u8') || videoUrl.endsWith('.m3u8');
-  const isVideo = isHls || !!videoUrl;
-
-  // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
+  // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
   const serverThumbnail = (post as any).thumbnail_url || '';
   const fallbackImageUrl = post.image || (post as any).thumbnail || '';
-
-  // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
-  const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-    null, // Never download raw MP4 for thumbnails
-    fallbackImageUrl,
-    1000
-  );
-
-  // PRIORITY: Server thumbnail > generated thumbnail > image/fallback
-  const staticThumbnailUrl = isVideo
-    ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
-    : (getPostMediaUrl(post) || post.fullUrl || post.image || post.imageUrl || '');
-
-  const player = useVideoPlayer(videoUrl, (player) => {
-    player.loop = true;
-    player.muted = true;
-  });
-
-  useEffect(() => {
-    if (isActive && isVideo && videoUrl) {
-      const timer = setTimeout(() => {
-        setShowVideo(true);
-        try { player.play(); } catch (_) { /* player released */ }
-      }, 200);
-      return () => {
-        clearTimeout(timer);
-        try { player.pause(); } catch (_) { /* player released */ }
-        try { player.currentTime = 0; } catch (_) { /* player released */ }
-      };
-    } else {
-      setShowVideo(false);
-      try { player.pause(); } catch (_) { /* player released */ }
-    }
-  }, [isActive, isVideo, videoUrl, player]);
-
-  // Teaser loop logic (reset after 3s)
-  useEffect(() => {
-    if (isActive && showVideo) {
-      const interval = setInterval(() => {
-        try {
-          if (player.currentTime > 3) {
-            player.currentTime = 0;
-            player.play();
-          }
-        } catch (_) { /* player released */ }
-      }, 500);
-      return () => clearInterval(interval);
-    }
-  }, [isActive, showVideo, player]);
+  const thumbnailUrl = serverThumbnail || fallbackImageUrl;
 
   return (
     <TouchableOpacity
@@ -115,20 +61,13 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
       style={[styles.postCard, { backgroundColor: cardColor }]}
       activeOpacity={0.9}
     >
-      {/* Media Preview */}
+      {/* Static thumbnail only — NO video player */}
       <View style={styles.videoThumbnail}>
-        {/* Static thumbnail image - always visible in background */}
-        {staticThumbnailUrl ? (
+        {thumbnailUrl ? (
           <Image
-            source={{ uri: staticThumbnailUrl }}
+            source={{ uri: thumbnailUrl }}
             style={styles.postImage}
             resizeMode="cover"
-            onError={() => {
-              // If generated thumbnail fails, fallback to provided image
-              if (isVideo && fallbackImageUrl && staticThumbnailUrl !== fallbackImageUrl) {
-                // This will be handled by the hook's fallback
-              }
-            }}
           />
         ) : (
           <View style={[styles.postImage, styles.noMediaPlaceholder]}>
@@ -136,26 +75,10 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
           </View>
         )}
 
-        {/* Video teaser overlay - only when active */}
-        {showVideo && isVideo && videoUrl && isActive && (
-          <VideoView
-            player={player}
-            style={[styles.postImage, styles.teaserVideoOverlay]}
-            contentFit="cover"
-            nativeControls={false}
-          />
-        )}
-
         {/* Play indicator */}
         {isVideo && (
-          <View style={[styles.playIconOverlay, isActive && styles.playIconActive]}>
-            {isActive ? (
-              <View style={styles.playingIndicator}>
-                <View style={styles.playingDot} />
-              </View>
-            ) : (
-              <MaterialIcons name="play-circle-outline" size={40} color="#fff" />
-            )}
+          <View style={styles.playIconOverlay}>
+            <MaterialIcons name="play-circle-outline" size={40} color="#fff" />
           </View>
         )}
       </View>
