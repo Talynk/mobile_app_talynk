@@ -7,6 +7,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   TouchableOpacity,
+  Pressable,
   Image,
   Dimensions,
   StatusBar,
@@ -58,7 +59,7 @@ const formatNumber = (num: number): string => {
 };
 
 
-import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 
@@ -75,6 +76,7 @@ interface PostItemProps {
   onReport: (postId: string) => void;
   isLiked: boolean;
   isActive: boolean;
+  shouldPreload: boolean;
   availableHeight: number;
 }
 
@@ -115,6 +117,7 @@ const PostItem = React.memo(({
   onReport,
   isLiked,
   isActive,
+  shouldPreload,
   availableHeight
 }: PostItemProps) => {
   const { user } = useAuth();
@@ -146,6 +149,10 @@ const PostItem = React.memo(({
   const likeOpacity = useRef(new Animated.Value(0)).current;
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
+  const [isPausedByPress, setIsPausedByPress] = useState(false);
+  const isPausedByPressRef = useRef(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
 
   const mediaUrl = getMediaUrl(item);
 
@@ -170,10 +177,14 @@ const PostItem = React.memo(({
         mediaUrl.includes('.webm') ||
         mediaUrl.includes('.m3u8')));
 
+  // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete
+  const playbackUrl = getPlaybackUrl(item);
+  const hlsReady = !!playbackUrl;
+  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
+
   // expo-video player — handles HLS natively
-  const shouldLoadVideo = isVideo && isActive;
   const videoPlayer = useVideoPlayer(
-    shouldLoadVideo && mediaUrl ? mediaUrl : null,
+    shouldLoadVideo && playbackUrl ? playbackUrl : null,
     (player) => {
       if (player) {
         player.loop = true;
@@ -224,6 +235,41 @@ const PostItem = React.memo(({
       useNativeDriver: true,
     }).start();
   };
+
+  // Instagram-style long-press to pause, release to resume
+  const handleLongPress = () => {
+    if (videoPlayer) {
+      try {
+        videoPlayer.pause();
+        isPausedByPressRef.current = true;
+      } catch (e) { /* player released */ }
+    }
+  };
+
+  const handlePressOut = () => {
+    if (isPausedByPressRef.current && videoPlayer && isActive) {
+      try {
+        videoPlayer.play();
+      } catch (e) { /* player released */ }
+      isPausedByPressRef.current = false;
+    }
+  };
+
+  // Progress tracking: poll currentTime/duration every 250ms
+  useEffect(() => {
+    if (!videoPlayer || !isActive) return;
+    const interval = setInterval(() => {
+      try {
+        const ct = videoPlayer.currentTime || 0;
+        const dur = videoPlayer.duration || 0;
+        if (dur > 0) {
+          setVideoProgress(ct / dur);
+          setVideoDuration(dur);
+        }
+      } catch (_) { /* player released */ }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [videoPlayer, isActive]);
 
   const handleLike = async () => {
     if (!user) {
@@ -308,10 +354,12 @@ const PostItem = React.memo(({
       {/* Media */}
       <View style={[styles.mediaContainer, { height: availableHeight }]}>
         {isVideo ? (
-          <TouchableOpacity
+          <Pressable
             style={styles.mediaWrapper}
-            activeOpacity={1}
             onPress={handleVideoTap}
+            onLongPress={handleLongPress}
+            onPressOut={handlePressOut}
+            delayLongPress={300}
           >
             {/* LAYER 1: Thumbnail — ALWAYS visible until video is PLAYING (zero black screens) */}
             {mediaUrl && (
@@ -329,17 +377,16 @@ const PostItem = React.memo(({
               />
             )}
 
-            {/* LAYER 2: VideoView (expo-video) — only when active */}
+            {/* LAYER 2: VideoView (expo-video) — WRAPPED IN pointerEvents=none */}
             {videoPlayer && isActive && !videoError && (
-              <VideoView
-                player={videoPlayer}
-                style={[
-                  styles.media,
-                  { position: 'absolute', zIndex: 2 }
-                ]}
-                contentFit="cover"
-                nativeControls={false}
-              />
+              <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
+                <VideoView
+                  player={videoPlayer}
+                  style={styles.media}
+                  contentFit="cover"
+                  nativeControls={false}
+                />
+              </View>
             )}
 
             {/* Error state */}
@@ -357,7 +404,7 @@ const PostItem = React.memo(({
                 <Text style={styles.placeholderText}>Video unavailable</Text>
               </View>
             )}
-          </TouchableOpacity>
+          </Pressable>
         ) : (
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
@@ -384,6 +431,8 @@ const PostItem = React.memo(({
             </View>
           </Animated.View>
         )}
+
+        {/* Progress bar moved to render LAST - after bottomInfo */}
 
 
         {/* Heart animation overlay */}
@@ -481,7 +530,14 @@ const PostItem = React.memo(({
           )}
         </View>
 
-        {/* Video progress bar removed — expo-video handles this natively */}
+        {/* PROGRESS BAR — renders LAST, pushed UP above bottom edge */}
+        {isVideo && isActive && (
+          <View style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 20 }]} pointerEvents="none">
+            <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
+          </View>
+        )}
+
+        {/* Video progress handled by custom progress bar above */}
       </View>
     </View>
   );
@@ -724,7 +780,7 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         setHasMore(false);
       }
     } catch (error: any) {
-      console.error('Error loading posts:', error);
+      console.warn('[ProfileFeed] Error loading posts:', error?.message || 'Unknown error');
       if (page === 1) {
         setPosts([]);
       }
@@ -938,19 +994,28 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         <FlatList
           ref={flatListRef}
           data={posts}
-          renderItem={({ item, index }) => (
-            <PostItem
-              item={item}
-              index={index}
-              onLike={handleLike}
-              onComment={handleComment}
-              onShare={handleShare}
-              onReport={handleReport}
-              isLiked={likedPosts.includes(item.id)}
-              isActive={isScreenFocused && currentIndex === index}
-              availableHeight={availableHeight}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            const isActive = isScreenFocused && currentIndex === index;
+            const distanceFromActive = index - currentIndex;
+            // Keep players alive: 5 behind + 3 ahead for caching
+            const shouldPreload = !isActive &&
+              distanceFromActive >= -5 && distanceFromActive <= 3;
+
+            return (
+              <PostItem
+                item={item}
+                index={index}
+                onLike={handleLike}
+                onComment={handleComment}
+                onShare={handleShare}
+                onReport={handleReport}
+                isLiked={likedPosts.includes(item.id)}
+                isActive={isActive}
+                shouldPreload={shouldPreload}
+                availableHeight={availableHeight}
+              />
+            );
+          }}
           keyExtractor={(item, index) => {
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
@@ -1096,6 +1161,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
+    overflow: 'visible',
   },
   media: {
     width: '100%',
@@ -1164,6 +1230,19 @@ const styles = StyleSheet.create({
   progressBar: {
     height: '100%',
     backgroundColor: '#fff',
+  },
+  videoProgressBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    zIndex: 100,
+  },
+  videoProgressBarFill: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
   },
   heartOverlay: {
     position: 'absolute',

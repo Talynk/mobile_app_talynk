@@ -256,6 +256,34 @@ export default function ProfileScreen() {
     }, [user, activeTab])
   );
 
+  // Auto-poll processing posts: check every 5s if any processing post has finished HLS
+  useEffect(() => {
+    const processingPosts = posts.filter(
+      (p: any) => p.type === 'video' && p.processing_status && p.processing_status !== 'completed' && p.processing_status !== 'failed'
+    );
+    if (processingPosts.length === 0 || !isScreenFocused) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const results = await Promise.all(
+          processingPosts.map((p: any) => postsApi.getProcessingStatus(p.id))
+        );
+        const anyCompleted = results.some(
+          (r) => r.status === 'success' && r.data?.processing?.hlsReady
+        );
+        if (anyCompleted) {
+          // A video just finished processing — reload posts + profile (postCount may have changed)
+          loadPosts(false);
+          loadProfile(false);
+        }
+      } catch (e) {
+        // Ignore poll errors
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [posts, isScreenFocused]);
+
   useEffect(() => {
     if (!user) {
       router.replace('/auth/login');
@@ -291,18 +319,22 @@ export default function ProfileScreen() {
         // Get following count from profile - backend returns followingCount directly
         let followingCount = userData.followingCount || 0;
 
-        // If still 0, try statistics endpoint
-        if (followingCount === 0 && statsResponse.status === 'success' && statsResponse.data) {
+        // Use LIVE posts_count from statistics endpoint (not stale user.posts_count)
+        let livePostsCount = userData.posts_count || 0;
+        if (statsResponse.status === 'success' && statsResponse.data) {
           const stats = (statsResponse.data as any).statistics || statsResponse.data;
-          followingCount = stats.following_count || 0;
+          livePostsCount = stats.posts_count ?? livePostsCount;
+          if (followingCount === 0) {
+            followingCount = stats.following_count || 0;
+          }
         }
 
         setProfile({
           ...userData,
           name: userData.username,
           followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
-          following_count: followingCount, // Use followingCount from backend
-          posts_count: userData.posts_count || userData.postsCount || 0,
+          following_count: followingCount,
+          posts_count: livePostsCount, // LIVE count from getStatistics
           phone1: userData.phone1,
           phone2: userData.phone2,
           email: userData.email,
@@ -398,8 +430,8 @@ export default function ProfileScreen() {
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
-            // Apply HLS filter for active posts
-            filteredPosts = filterHlsReady(filteredPosts);
+            // DON'T filter out processing posts — show them as dark "Processing..." cards
+            // filterHlsReady is only for the FEED (index.tsx), not for the owner's profile
             break;
           case 'draft':
             filteredPosts = filteredPosts.filter((p: any) => p.status === 'draft');
@@ -419,8 +451,8 @@ export default function ProfileScreen() {
               p.status === 'approved' || // Legacy support
               !p.status // Default to active
             );
-            // Apply HLS filter for active posts
-            filteredPosts = filterHlsReady(filteredPosts);
+          // DON'T filter out processing posts — show them as dark "Processing..." cards
+          // filterHlsReady is only for the FEED (index.tsx), not for the owner's profile
         }
 
         if (__DEV__) {
@@ -438,12 +470,8 @@ export default function ProfileScreen() {
 
         setPosts(filteredPosts);
 
-        // Update profile posts_count to only show published posts (exclude drafts)
-        const publishedPostsCount = response.data.posts.filter((p: any) => p.status !== 'draft').length;
-        setProfile((prevProfile: any) => ({
-          ...prevProfile,
-          posts_count: publishedPostsCount,
-        }));
+        // DON'T override posts_count here — it's already set correctly
+        // from the live getStatistics() endpoint in loadProfile()
 
         // Calculate total likes
         const likes = filteredPosts.reduce((sum: number, post: any) => {
@@ -455,7 +483,7 @@ export default function ProfileScreen() {
         setError({ type: 'server', message: response.message || 'Failed to load posts' });
       }
     } catch (error: any) {
-      console.error('Error loading posts:', error);
+      console.warn('[Profile] Error loading posts:', error?.message || 'Unknown error');
       const isNetworkError = error?.message?.includes('Network') || error?.code === 'NETWORK_ERROR' || !error?.response;
       setError({
         type: isNetworkError ? 'network' : 'server',

@@ -6,6 +6,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   TouchableOpacity,
+  Pressable,
   Image,
   useWindowDimensions,
   StatusBar,
@@ -14,7 +15,6 @@ import {
   Alert,
   Modal,
   AppState,
-  PanResponder,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -172,8 +172,6 @@ const PostItem: React.FC<PostItemProps> = ({
   const [videoDuration, setVideoDuration] = useState(0);
   const [imageLoading, setImageLoading] = useState(true);
   const [videoLoading, setVideoLoading] = useState(true);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const [isPausedByPress, setIsPausedByPress] = useState(false);
   const progressBarRef = useRef<View>(null);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
@@ -206,21 +204,24 @@ const PostItem: React.FC<PostItemProps> = ({
   };
 
   // Instagram-style long-press to pause, release to resume
+  // Uses ref to track state to avoid stale closure issues with Pressable
+  const isPausedByPressRef = useRef(false);
+
   const handleLongPress = () => {
     if (videoPlayer) {
       try {
         videoPlayer.pause();
-        setIsPausedByPress(true);
+        isPausedByPressRef.current = true;
       } catch (e) { /* player released */ }
     }
   };
 
   const handlePressOut = () => {
-    if (isPausedByPress && videoPlayer && isActive) {
+    if (isPausedByPressRef.current && videoPlayer && isActive) {
       try {
         videoPlayer.play();
       } catch (e) { /* player released */ }
-      setIsPausedByPress(false);
+      isPausedByPressRef.current = false;
     }
   };
 
@@ -374,47 +375,25 @@ const PostItem: React.FC<PostItemProps> = ({
     return () => clearTimeout(timer);
   }, [videoPlayer, isActive]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        setIsSeeking(true);
-      },
-      onPanResponderMove: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoPlayer || !playerValidRef.current) return;
-
-        const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
-        const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
-
-        setVideoProgress(progressFraction);
-
-        try {
-          if (playerValidRef.current) {
-            videoPlayer.currentTime = newPosition;
-          }
-        } catch (error) {
-          playerValidRef.current = false;
+  // Instagram-style progress tracking: poll currentTime/duration every 250ms
+  // CRITICAL: Don't require isPlaying — poll whenever player is active
+  useEffect(() => {
+    if (!videoPlayer || !isActive) {
+      return;
+    }
+    const interval = setInterval(() => {
+      try {
+        const ct = videoPlayer.currentTime || 0;
+        const dur = videoPlayer.duration || 0;
+        if (dur > 0) {
+          setVideoProgress(ct / dur);
+          setVideoDuration(dur);
         }
-      },
-      onPanResponderRelease: async (evt, gestureState) => {
-        if (videoDuration === 0 || !videoPlayer || !playerValidRef.current) return;
+      } catch (_) { /* player released */ }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [videoPlayer, isActive]);
 
-        const progressFraction = Math.max(0, Math.min(1, gestureState.moveX / screenWidth));
-        const newPosition = (progressFraction * videoDuration) / 1000; // Convert to seconds
-
-        try {
-          if (playerValidRef.current) {
-            videoPlayer.currentTime = newPosition;
-          }
-        } catch (error) {
-          playerValidRef.current = false;
-        }
-
-        setIsSeeking(false);
-      },
-    })
-  ).current;
 
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
@@ -554,88 +533,87 @@ const PostItem: React.FC<PostItemProps> = ({
     >
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
-          <TouchableOpacity
-            style={styles.mediaWrapper}
-            activeOpacity={1}
-            onPress={handleMuteToggle}
-            onLongPress={handleLongPress}
-            onPressOut={handlePressOut}
-            delayLongPress={200}
-          >
-            {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING */}
-            {/* DATA SAVER: Only use thumbnail_url (server-generated). NEVER load raw MP4 as image. */}
-            {getThumbnailUrl(item) ? (
-              <Image
-                source={{ uri: getThumbnailUrl(item)! }}
-                style={[
-                  styles.media,
-                  {
-                    position: 'absolute',
-                    zIndex: 1,
-                    opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
-                  }
-                ]}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={[styles.media, { position: 'absolute', zIndex: 1, backgroundColor: '#111' }]} />
-            )}
+          <>
+            <Pressable
+              style={styles.mediaWrapper}
+              onPress={handleMuteToggle}
+              onLongPress={handleLongPress}
+              onPressOut={handlePressOut}
+              delayLongPress={300}
+            >
+              {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING */}
+              {/* DATA SAVER: Only use thumbnail_url (server-generated). NEVER load raw MP4 as image. */}
+              {getThumbnailUrl(item) ? (
+                <Image
+                  source={{ uri: getThumbnailUrl(item)! }}
+                  style={[
+                    styles.media,
+                    {
+                      position: 'absolute',
+                      zIndex: 1,
+                      opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
+                    }
+                  ]}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.media, { position: 'absolute', zIndex: 1, backgroundColor: '#111' }]} />
+              )}
 
-            {/* LAYER 1.5: Processing state overlay — show when HLS is not yet ready */}
-            {isVideo && !hlsReady && (
-              <View style={[styles.media, styles.placeholderContainer, { zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                {isProcessing ? (
-                  <>
-                    <ActivityIndicator size="large" color="#fff" />
-                    <Text style={[styles.placeholderText, { marginTop: 12 }]}>Processing video…</Text>
-                  </>
-                ) : item.processing_status === 'failed' ? (
-                  <>
-                    <Feather name="alert-circle" size={48} color="#ff4444" />
-                    <Text style={[styles.placeholderText, { marginTop: 12, color: '#ff4444' }]}>Processing failed</Text>
-                  </>
-                ) : null}
-              </View>
-            )}
+              {/* LAYER 1.5: Processing state overlay — show when HLS is not yet ready */}
+              {isVideo && !hlsReady && (
+                <View style={[styles.media, styles.placeholderContainer, { zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)' }]}>
+                  {isProcessing ? (
+                    <>
+                      <ActivityIndicator size="large" color="#fff" />
+                      <Text style={[styles.placeholderText, { marginTop: 12 }]}>Processing video…</Text>
+                    </>
+                  ) : item.processing_status === 'failed' ? (
+                    <>
+                      <Feather name="alert-circle" size={48} color="#ff4444" />
+                      <Text style={[styles.placeholderText, { marginTop: 12, color: '#ff4444' }]}>Processing failed</Text>
+                    </>
+                  ) : null}
+                </View>
+              )}
 
-            {/* LAYER 2: VideoView - render for active or preloading */}
-            {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
-              <VideoView
-                player={videoPlayer}
-                style={[
-                  styles.media,
-                  {
-                    position: 'absolute',
-                    zIndex: 2,
-                  }
-                ]}
-                contentFit="cover"
-                nativeControls={useNativeControls}
-              />
-            )}
+              {/* LAYER 2: VideoView - WRAPPED IN pointerEvents=none SO IT CANNOT STEAL TOUCHES */}
+              {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
+                <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
+                  <VideoView
+                    player={videoPlayer}
+                    style={styles.media}
+                    contentFit="cover"
+                    nativeControls={false}
+                  />
+                </View>
+              )}
 
-            {/* NO play icon overlay - Instagram doesn't show this */}
-            {/* Thumbnail is always visible until video plays */}
+              {/* Show error state */}
+              {videoError && (
+                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                  <Feather name="video-off" size={48} color="#666" />
+                  <Text style={styles.placeholderText}>Video unavailable</Text>
+                </View>
+              )}
 
-            {/* CRITICAL FIX: Remove loading spinner - videos should preload silently in background */}
-            {/* No loading indicator - preloading happens invisibly, video appears instantly when ready */}
+              {/* Show placeholder if no media URL */}
+              {!mediaUrl && (
+                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
+                  <Feather name="video-off" size={48} color="#666" />
+                  <Text style={styles.placeholderText}>Video unavailable</Text>
+                </View>
+              )}
 
-            {/* Show error state */}
-            {videoError && (
-              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                <Feather name="video-off" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Video unavailable</Text>
-              </View>
-            )}
+              {/* Instagram-style mute indicator — inside Pressable so it shows on top */}
+              <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
+                <View style={styles.muteIndicatorBadge}>
+                  <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
+                </View>
+              </Animated.View>
 
-            {/* Show placeholder if no media URL */}
-            {!mediaUrl && (
-              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                <Feather name="video-off" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Video unavailable</Text>
-              </View>
-            )}
-          </TouchableOpacity>
+            </Pressable>
+          </>
         ) : (
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
@@ -653,14 +631,7 @@ const PostItem: React.FC<PostItemProps> = ({
           </View>
         )}
 
-        {/* Instagram-style mute indicator — shows on toggle and fades away */}
-        {isVideo && (
-          <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
-            <View style={styles.muteIndicatorBadge}>
-              <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
-            </View>
-          </Animated.View>
-        )}
+
 
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
           <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
@@ -772,35 +743,14 @@ const PostItem: React.FC<PostItemProps> = ({
           )}
         </View>
 
-        {isVideo && !useNativeControls && videoDuration > 0 && (
-          <View
-            ref={progressBarRef}
-            style={[
-              styles.progressBarContainer,
-              {
-                position: 'absolute',
-                bottom: 60 + insets.bottom - 48,
-                left: 0,
-                right: 0,
-              },
-            ]}
-            pointerEvents="box-only"
-            {...panResponder.panHandlers}
-          >
-
-            <View style={styles.progressBarTrack}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  {
-                    width: `${videoProgress * 100}%`,
-                    backgroundColor: isSeeking ? '#ff6b9d' : '#60a5fa',
-                  }
-                ]}
-              />
-            </View>
+        {/* PROGRESS BAR — renders LAST so it's on top of everything */}
+        {/* bottom pushed UP above tab bar so it's visible on screen */}
+        {isVideo && isActive && (
+          <View style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 11 }]} pointerEvents="none">
+            <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
           </View>
         )}
+
       </View>
     </View>
   );
@@ -1090,6 +1040,20 @@ export default function FeedScreen() {
     return () => subscription?.remove();
   }, [activeTab]);
 
+  // AUTO-RETRY: When network goes offline→online, reload feed automatically
+  const wasOfflineRef = useRef(isOffline);
+  useEffect(() => {
+    if (wasOfflineRef.current && !isOffline) {
+      // Network just came back — reload the feed so user doesn't have to pull-to-refresh
+      console.log('[Feed] Network restored — auto-reloading feed');
+      setCurrentPage(1);
+      setHasMore(true);
+      setNetworkError(false);
+      loadPosts(activeTab, true, 1);
+    }
+    wasOfflineRef.current = isOffline;
+  }, [isOffline, activeTab]);
+
   const currentIndexRef = useRef(currentIndex);
 
   useEffect(() => {
@@ -1371,13 +1335,19 @@ export default function FeedScreen() {
               renderItem={({ item, index }) => {
                 const isActive = isScreenFocused && currentIndex === index;
 
-                // INSTAGRAM STYLE: ALWAYS preload 5 ahead + 1 behind
-                // This ensures instant playback when scrolling in any direction
+                // CACHING FIX: Keep players alive much longer — especially backwards
+                // When you scroll back to a previously viewed video, the player
+                // still has its buffered HLS segments in native cache.
+                // Forward: preload 3 ahead for smooth scrolling
+                // Backward: keep 5 behind so recently-watched videos still play offline
                 const distanceFromActive = index - currentIndex;
 
-                // Preload items within range: 1 behind (-1) to 5 ahead (+5)
+                // Offline mode: keep ALL nearby players alive (never destroy buffered content)
+                const backwardWindow = isOffline ? 10 : 5;
+                const forwardWindow = isOffline ? 5 : 3;
+
                 const shouldPreload = !isActive &&
-                  distanceFromActive >= -1 && distanceFromActive <= 5;
+                  distanceFromActive >= -backwardWindow && distanceFromActive <= forwardWindow;
 
                 // STREAMING: Videos stream directly - native player handles buffering
 
@@ -1580,6 +1550,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
+    overflow: 'visible',
   },
   media: {
     backgroundColor: '#000',
@@ -1834,6 +1805,19 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
+  },
+  videoProgressBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    zIndex: 100,
+  },
+  videoProgressBarFill: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
   },
   root: {
     flex: 1,

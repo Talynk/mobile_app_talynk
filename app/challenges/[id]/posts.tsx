@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
+  Pressable,
   StatusBar,
   RefreshControl,
   Dimensions,
@@ -21,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { Post } from '@/types';
-import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
+import { getThumbnailUrl, getFileUrl, getPostMediaUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -206,6 +207,11 @@ export default function ChallengePostsScreen() {
   const FullscreenPostViewer = ({ item, index, cachedMediaUrl }: { item: Post; index: number; cachedMediaUrl?: string | null }) => {
     const { isMuted, toggleMute } = useVideoMute();
     const muteOpacity = useRef(new Animated.Value(0)).current;
+    const [isPausedByPress, setIsPausedByPress] = useState(false);
+    const [videoProgress, setVideoProgress] = useState(0);
+    const [videoDuration, setVideoDuration] = useState(0);
+    const [videoReady, setVideoReady] = useState(false);
+    const [isPlaying, setIsPlaying] = useState(false);
 
     // Get media URL using the utility function
     const mediaUrl = getPostMediaUrl(item) || '';
@@ -219,14 +225,15 @@ export default function ChallengePostsScreen() {
           mediaUrl.toLowerCase().includes('.webm') ||
           mediaUrl.toLowerCase().includes('.m3u8')));
 
-    // For videos, use the mediaUrl directly; for images, also use mediaUrl
-    const videoUrl = isVideo ? mediaUrl : null;
+    // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete
+    const playbackUrl = getPlaybackUrl(item);
+    const hlsReady = !!playbackUrl;
+    const videoUrl = isVideo && hlsReady ? playbackUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
 
     // HLS OPTIMIZATION: Server thumbnail_url takes priority
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const isHls = mediaUrl.endsWith('.m3u8');
 
     // DATA SAVER: Don't download raw MP4 for thumbnails — use server-generated thumbnail
     const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
@@ -239,20 +246,48 @@ export default function ChallengePostsScreen() {
       ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
       : (imageUrl || mediaUrl || fallbackImageUrl);
 
-    // Initialize expo-video player
-    const videoPlayerSource = cachedMediaUrl || videoUrl || '';
-    const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
+    // Initialize expo-video player — HLS only
+    const videoPlayerSource = videoUrl || '';
+    const videoPlayer = useVideoPlayer(videoPlayerSource || null, (player) => {
       player.loop = true;
       player.muted = isMuted;
-      player.play();
+      if (videoPlayerSource) player.play();
     });
+
+    // Track playback state for thumbnail layer
+    useEffect(() => {
+      if (!videoPlayer) return;
+      try {
+        const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
+          setIsPlaying(event.isPlaying);
+          if (event.isPlaying) setVideoReady(true);
+        });
+        return () => { try { sub.remove(); } catch { } };
+      } catch { return () => { }; }
+    }, [videoPlayer]);
 
     // Sync mute state
     useEffect(() => {
       if (videoPlayer) {
-        videoPlayer.muted = isMuted;
+        try { videoPlayer.muted = isMuted; } catch { }
       }
     }, [isMuted, videoPlayer]);
+
+    // Progress tracking: poll currentTime/duration every 250ms
+    useEffect(() => {
+      if (!videoPlayer) return;
+      const interval = setInterval(() => {
+        try {
+          const ct = videoPlayer.currentTime || 0;
+          const dur = videoPlayer.duration || 0;
+          if (dur > 0) {
+            setVideoProgress(ct / dur);
+            setVideoDuration(dur);
+          }
+        } catch (_) { /* player released */ }
+      }, 250);
+      return () => clearInterval(interval);
+    }, [videoPlayer]);
 
     const handleVideoPress = () => {
       if (isVideo) {
@@ -274,6 +309,27 @@ export default function ChallengePostsScreen() {
       }
     };
 
+    // Instagram-style long-press to pause, release to resume
+    const isPausedByPressRef = useRef(false);
+
+    const handleLongPress = () => {
+      if (videoPlayer) {
+        try {
+          videoPlayer.pause();
+          isPausedByPressRef.current = true;
+        } catch (e) { /* player released */ }
+      }
+    };
+
+    const handlePressOut = () => {
+      if (isPausedByPressRef.current && videoPlayer) {
+        try {
+          videoPlayer.play();
+        } catch (e) { /* player released */ }
+        isPausedByPressRef.current = false;
+      }
+    };
+
     return (
       <View style={styles.fullscreenPostContainer}>
         <View style={styles.mediaContainer}>
@@ -289,7 +345,11 @@ export default function ChallengePostsScreen() {
               source={{ uri: staticThumbnailUrl }}
               style={[
                 styles.fullscreenMedia,
-                { position: 'absolute', zIndex: 1 } // Layer under video
+                {
+                  position: 'absolute',
+                  zIndex: 1,
+                  opacity: (isPlaying && videoReady) ? 0 : 1,
+                }
               ]}
               resizeMode="cover"
             />
@@ -299,19 +359,32 @@ export default function ChallengePostsScreen() {
             </View>
           )}
 
-          {/* Video Player */}
+          {/* Processing indicator */}
+          {isVideo && !hlsReady && isVideoProcessing(item) && (
+            <View style={[styles.fullscreenMedia, { position: 'absolute', zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }]}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={{ color: '#fff', marginTop: 12, fontSize: 14 }}>Processing video…</Text>
+            </View>
+          )}
+
+          {/* Video Player — HLS only */}
           {isVideo && videoUrl && (
-            <TouchableOpacity
-              activeOpacity={1}
+            <Pressable
               onPress={handleVideoPress}
+              onLongPress={handleLongPress}
+              onPressOut={handlePressOut}
+              delayLongPress={300}
               style={[styles.videoTouchable, { position: 'absolute', zIndex: 2, width: '100%', height: '100%' }]}
             >
-              <VideoView
-                player={videoPlayer}
-                style={styles.fullscreenMedia}
-                contentFit="cover"
-                nativeControls={false}
-              />
+              {/* VideoView wrapped in pointerEvents=none so it can't steal touches */}
+              <View pointerEvents="none" style={{ width: '100%', height: '100%' }}>
+                <VideoView
+                  player={videoPlayer}
+                  style={styles.fullscreenMedia}
+                  contentFit="cover"
+                  nativeControls={false}
+                />
+              </View>
 
               {/* Mute/Unmute Indicator Overlay */}
               <View style={styles.muteIndicatorOverlay} pointerEvents="none">
@@ -323,8 +396,10 @@ export default function ChallengePostsScreen() {
                   />
                 </Animated.View>
               </View>
-            </TouchableOpacity>
+            </Pressable>
           )}
+
+          {/* Instagram-style thin progress bar — moved AFTER gradient to render on top */}
 
           <LinearGradient
             colors={['transparent', 'rgba(0,0,0,0.8)']}
@@ -332,6 +407,13 @@ export default function ChallengePostsScreen() {
           >
             {/* Post info overlays... */}
           </LinearGradient>
+
+          {/* PROGRESS BAR — renders LAST, pushed UP above bottom edge */}
+          {isVideo && (
+            <View style={{ position: 'absolute', bottom: 20, left: 0, right: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', zIndex: 100 }} pointerEvents="none">
+              <View style={{ height: '100%', backgroundColor: 'rgba(255,255,255,0.7)', width: `${Math.min(videoProgress * 100, 100)}%` }} />
+            </View>
+          )}
         </View>
 
         <View style={styles.fullscreenContent}>

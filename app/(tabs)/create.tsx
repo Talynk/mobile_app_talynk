@@ -1081,6 +1081,19 @@ export default function CreatePostScreen() {
             return;
           }
 
+          // CRITICAL: Check HTTP status FIRST — don't trust response body on server errors
+          if (xhr.status < 200 || xhr.status >= 300) {
+            let errorMsg = `Server error (${xhr.status})`;
+            try {
+              const errResponse = JSON.parse(xhr.responseText);
+              errorMsg = errResponse.message || errResponse.error || errorMsg;
+            } catch (_) { }
+            console.error('[Upload] Challenge post server error:', xhr.status, errorMsg);
+            await uploadNotificationService.showUploadError(errorMsg, fileName);
+            Alert.alert('Upload Failed', errorMsg);
+            return;
+          }
+
           try {
             const response = JSON.parse(xhr.responseText);
             console.log('[Upload] Challenge post response:', response);

@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Image,
   ActivityIndicator,
   FlatList,
@@ -24,7 +25,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
-import { getPostMediaUrl, getProfilePictureUrl, getThumbnailUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getProfilePictureUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 
@@ -59,6 +60,9 @@ export default function PostDetailScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
+  const [isPausedByPress, setIsPausedByPress] = useState(false);
+  const [videoProgress, setVideoProgress] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
 
   // Try to parse postData if it was passed
   let initialPost = null;
@@ -265,9 +269,14 @@ export default function PostDetailScreen() {
         mediaUrl.toLowerCase().includes('.webm') ||
         mediaUrl.toLowerCase().includes('.m3u8')));
 
-  // expo-video player (replaces expo-av Video)
+  // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete
+  const playbackUrl = getPlaybackUrl(post);
+  const hlsReady = !!playbackUrl;
+  const videoSourceUrl = isVideo && hlsReady ? playbackUrl : null;
+
+  // expo-video player (HLS only)
   const videoPlayer = useVideoPlayer(
-    isVideo && mediaUrl ? mediaUrl : null,
+    videoSourceUrl,
     (player) => {
       if (player) {
         player.loop = false;
@@ -320,6 +329,43 @@ export default function PostDetailScreen() {
       }).start();
     }
   };
+
+  // Instagram-style long-press to pause, release to resume
+  const isPausedByPressRef = useRef(false);
+
+  const handleLongPress = () => {
+    if (videoPlayer) {
+      try {
+        videoPlayer.pause();
+        isPausedByPressRef.current = true;
+      } catch (e) { /* player released */ }
+    }
+  };
+
+  const handlePressOut = () => {
+    if (isPausedByPressRef.current && videoPlayer) {
+      try {
+        videoPlayer.play();
+      } catch (e) { /* player released */ }
+      isPausedByPressRef.current = false;
+    }
+  };
+
+  // Progress tracking: poll currentTime/duration every 250ms
+  useEffect(() => {
+    if (!videoPlayer) return;
+    const interval = setInterval(() => {
+      try {
+        const ct = videoPlayer.currentTime || 0;
+        const dur = videoPlayer.duration || 0;
+        if (dur > 0) {
+          setVideoProgress(ct / dur);
+          setVideoDuration(dur);
+        }
+      } catch (_) { /* player released */ }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [videoPlayer]);
 
   return (
     <KeyboardAvoidingView
@@ -381,47 +427,55 @@ export default function PostDetailScreen() {
       {/* Media */}
       <View style={styles.mediaContainer}>
         {hasValidMedia ? (
-          <View style={styles.mediaWrapper}>
+          <View style={[styles.mediaWrapper, { overflow: 'visible' }]}>
             {isVideo ? (
-              <TouchableOpacity
-                activeOpacity={0.95}
-                onPress={handleVideoPress}
-                style={styles.videoTouchable}
-              >
-                {/* LAYER 1: Thumbnail — visible until video is playing (zero black screens) */}
-                <Image
-                  source={{ uri: getThumbnailUrl(post) || mediaUrl! }}
-                  style={[
-                    styles.media,
-                    {
-                      position: 'absolute',
-                      zIndex: 1,
-                      opacity: (isPlaying && videoReady) ? 0 : 1,
-                    }
-                  ]}
-                  resizeMode="cover"
-                />
-
-                {/* LAYER 2: VideoView (expo-video) */}
-                {videoPlayer && (
-                  <VideoView
-                    player={videoPlayer}
+              <>
+                <Pressable
+                  onPress={handleVideoPress}
+                  onLongPress={handleLongPress}
+                  onPressOut={handlePressOut}
+                  delayLongPress={300}
+                  style={styles.videoTouchable}
+                >
+                  {/* LAYER 1: Thumbnail — visible until video is playing (zero black screens) */}
+                  <Image
+                    source={{ uri: getThumbnailUrl(post) || mediaUrl! }}
                     style={[
                       styles.media,
-                      { position: 'absolute', zIndex: 2 }
+                      {
+                        position: 'absolute',
+                        zIndex: 1,
+                        opacity: (isPlaying && videoReady) ? 0 : 1,
+                      }
                     ]}
-                    contentFit="cover"
-                    nativeControls={false}
+                    resizeMode="cover"
                   />
-                )}
 
-                {/* Instagram-style mute indicator — fades away */}
-                <Animated.View style={[styles.muteIndicatorContainer, { opacity: muteOpacity }]} pointerEvents="none">
-                  <View style={styles.muteIndicatorBadge}>
-                    <Feather name={muteIconRef.current} size={24} color="rgba(255,255,255,0.8)" />
-                  </View>
-                </Animated.View>
-              </TouchableOpacity>
+                  {/* LAYER 2: VideoView — WRAPPED IN pointerEvents=none */}
+                  {videoPlayer && (
+                    <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
+                      <VideoView
+                        player={videoPlayer}
+                        style={styles.media}
+                        contentFit="cover"
+                        nativeControls={false}
+                      />
+                    </View>
+                  )}
+
+                  {/* Instagram-style mute indicator — fades away */}
+                  <Animated.View style={[styles.muteIndicatorContainer, { opacity: muteOpacity }]} pointerEvents="none">
+                    <View style={styles.muteIndicatorBadge}>
+                      <Feather name={muteIconRef.current} size={24} color="rgba(255,255,255,0.8)" />
+                    </View>
+                  </Animated.View>
+                </Pressable>
+
+                {/* Instagram-style thin progress bar — pushed UP above bottom edge */}
+                <View style={{ position: 'absolute', bottom: 10, left: 0, right: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', zIndex: 100 }} pointerEvents="none">
+                  <View style={{ height: '100%', backgroundColor: 'rgba(255,255,255,0.7)', width: `${Math.min(videoProgress * 100, 100)}%` }} />
+                </View>
+              </>
             ) : (
               <Image
                 source={{ uri: mediaUrl! }}
@@ -438,11 +492,12 @@ export default function PostDetailScreen() {
             <Feather name="image" size={48} color="#666" />
             <Text style={styles.noMediaText}>No media available</Text>
           </View>
-        )}
-      </View>
+        )
+        }
+      </View >
 
       {/* Actions Bar */}
-      <View style={styles.actionsBar}>
+      < View style={styles.actionsBar} >
         <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
           <Feather
             name="heart"
@@ -461,74 +516,80 @@ export default function PostDetailScreen() {
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
           <Feather name="share-2" size={24} color="#fff" />
         </TouchableOpacity>
-      </View>
+      </View >
 
       {/* Post Info and Comments - Scrollable */}
-      <ScrollView
+      < ScrollView
         style={styles.scrollContent}
         contentContainerStyle={styles.scrollContentContainer}
         showsVerticalScrollIndicator={false}
       >
         {/* Caption - Show only once, prefer caption over description over content */}
-        <View style={styles.captionContainer}>
+        < View style={styles.captionContainer} >
           <Text style={styles.caption}>
             {post.caption || post.description || post.content || ''}
           </Text>
-          {post.category && (
-            <TouchableOpacity
-              style={styles.categoryBadge}
-              onPress={() => router.push({
-                pathname: '/category/[name]',
-                params: { name: typeof post.category === 'string' ? post.category : post.category.name }
-              })}
-            >
-              <Text style={styles.categoryText}>
-                #{typeof post.category === 'string' ? post.category : post.category.name}
+          {
+            post.category && (
+              <TouchableOpacity
+                style={styles.categoryBadge}
+                onPress={() => router.push({
+                  pathname: '/category/[name]',
+                  params: { name: typeof post.category === 'string' ? post.category : post.category.name }
+                })}
+              >
+                <Text style={styles.categoryText}>
+                  #{typeof post.category === 'string' ? post.category : post.category.name}
+                </Text>
+              </TouchableOpacity>
+            )
+          }
+          {
+            (post.createdAt || post.uploadDate) && (
+              <Text style={styles.postDate}>
+                {timeAgo(post.createdAt || post.uploadDate)}
               </Text>
-            </TouchableOpacity>
-          )}
-          {(post.createdAt || post.uploadDate) && (
-            <Text style={styles.postDate}>
-              {timeAgo(post.createdAt || post.uploadDate)}
-            </Text>
-          )}
-        </View>
+            )
+          }
+        </View >
 
         {/* Comments */}
-        <View style={styles.commentsSection}>
+        < View style={styles.commentsSection} >
           <Text style={styles.commentsTitle}>Comments</Text>
 
-          {comments.length > 0 ? (
-            comments.map((item, index) => (
-              <View key={item.comment_id?.toString() || `comment-${index}`} style={styles.commentItem}>
-                <Avatar
-                  user={item.User || item.user}
-                  size={32}
-                  style={styles.commentAvatar}
-                />
-                <View style={styles.commentContent}>
-                  <Text style={styles.commentUsername}>
-                    {item.User?.name || item.User?.username || item.user?.name || item.user?.username || 'unknown'}
-                  </Text>
-                  <Text style={styles.commentText}>
-                    {item.comment_text || item.content || item.comment || ''}
-                  </Text>
-                  <Text style={styles.commentDate}>
-                    {item.comment_date || item.createdAt || item.created_at
-                      ? new Date(item.comment_date || item.createdAt || item.created_at).toLocaleDateString()
-                      : ''}
-                  </Text>
+          {
+            comments.length > 0 ? (
+              comments.map((item, index) => (
+                <View key={item.comment_id?.toString() || `comment-${index}`} style={styles.commentItem}>
+                  <Avatar
+                    user={item.User || item.user}
+                    size={32}
+                    style={styles.commentAvatar}
+                  />
+                  <View style={styles.commentContent}>
+                    <Text style={styles.commentUsername}>
+                      {item.User?.name || item.User?.username || item.user?.name || item.user?.username || 'unknown'}
+                    </Text>
+                    <Text style={styles.commentText}>
+                      {item.comment_text || item.content || item.comment || ''}
+                    </Text>
+                    <Text style={styles.commentDate}>
+                      {item.comment_date || item.createdAt || item.created_at
+                        ? new Date(item.comment_date || item.createdAt || item.created_at).toLocaleDateString()
+                        : ''}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.noComments}>No comments yet. Be the first to comment!</Text>
-          )}
-        </View>
-      </ScrollView>
+              ))
+            ) : (
+              <Text style={styles.noComments}>No comments yet. Be the first to comment!</Text>
+            )
+          }
+        </View >
+      </ScrollView >
 
       {/* Comment Input */}
-      <View style={[styles.commentInputContainer, { paddingBottom: insets.bottom + 12 }]}>
+      < View style={[styles.commentInputContainer, { paddingBottom: insets.bottom + 12 }]} >
         <TextInput
           style={styles.commentInput}
           placeholder="Add a comment..."
@@ -551,10 +612,10 @@ export default function PostDetailScreen() {
             <Feather name="send" size={20} color="#fff" />
           )}
         </TouchableOpacity>
-      </View>
+      </View >
 
       {/* Menu Modal */}
-      <Modal visible={menuVisible} transparent animationType="fade">
+      < Modal visible={menuVisible} transparent animationType="fade" >
         <TouchableOpacity
           style={styles.menuOverlay}
           onPress={() => setMenuVisible(false)}
@@ -584,10 +645,10 @@ export default function PostDetailScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
-      </Modal>
+      </Modal >
 
       {/* Report Modal */}
-      <ReportModal
+      < ReportModal
         isVisible={reportModalVisible}
         onClose={() => setReportModalVisible(false)}
         postId={post.id}
@@ -596,7 +657,7 @@ export default function PostDetailScreen() {
           Alert.alert('Reported', 'Thank you for reporting this content.');
         }}
       />
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView >
   );
 }
 
