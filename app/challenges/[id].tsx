@@ -776,7 +776,7 @@ export default function ChallengeDetailScreen() {
                       <>
                         <MaterialIcons name="person-add" size={20} color="#fff" />
                         <Text style={styles.joinButtonText}>
-                          Join Challenge
+                          Join Competition
                         </Text>
                       </>
                     )}
@@ -1027,7 +1027,7 @@ export default function ChallengeDetailScreen() {
             colors={[C.primary]}
           />
         }
-        ListFooterComponent={<View style={{ height: 100 }} />}
+        ListFooterComponent={<View style={{ height: 200 }} />}
       />
 
       {/* Fullscreen Post Viewer Modal */}

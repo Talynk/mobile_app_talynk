@@ -368,26 +368,71 @@ export default function CreatePostScreen() {
         setLoadingChallenges(true);
         console.log('[Create] Fetching joined challenges...');
         const response = await challengesApi.getJoinedChallenges();
-        console.log('[Create] Joined challenges API response:', {
+        console.log('[Create] Joined challenges API response:', JSON.stringify({
           status: response.status,
-          dataLength: response.data?.length,
-          data: response.data
-        });
+          dataType: typeof response.data,
+          dataIsArray: Array.isArray(response.data),
+          dataKeys: response.data ? Object.keys(response.data) : [],
+          challengesLength: response.data?.challenges?.length,
+        }));
 
-        if (response.status === 'success' && response.data && Array.isArray(response.data)) {
-          const challenges = response.data
+        if (response.status === 'success' && response.data) {
+          // Handle multiple response shapes robustly:
+          // Shape 1: { challenges: [...] } (from API wrapper)
+          // Shape 2: [...] (raw array)
+          // Shape 3: { data: [...] } (legacy)
+          let rawList: any[] = [];
+          if (Array.isArray(response.data)) {
+            rawList = response.data;
+          } else if (Array.isArray(response.data.challenges)) {
+            rawList = response.data.challenges;
+          } else if (Array.isArray(response.data.data)) {
+            rawList = response.data.data;
+          } else if (typeof response.data === 'object') {
+            // Try to extract any array from the response
+            const values = Object.values(response.data);
+            const arrValue = values.find(v => Array.isArray(v));
+            if (arrValue) {
+              rawList = arrValue as any[];
+            }
+          }
+
+          // Unwrap challenge sub-objects (participations → challenges)
+          const allChallenges = rawList
             .map((item: any) => {
-              if (item.challenge) {
-                return item.challenge;
-              }
+              if (item.challenge) return item.challenge;
               return item;
             })
-            .filter((challenge: any) => challenge && challenge.id && challenge.name);
+            .filter((challenge: any) => challenge && challenge.id);
 
-          console.log('[Create] Extracted challenges:', challenges.length, challenges);
-          setJoinedChallenges(challenges);
+          // Filter to only show challenges where user can actually post:
+          // - Status must be 'active' or 'approved'
+          // - Must be within date range (started and not ended)
+          const now = new Date();
+          const activeChallenges = allChallenges.filter((c: any) => {
+            const status = c.status?.toLowerCase();
+            const isActiveStatus = status === 'active' || status === 'approved';
 
-          if (params.challengeId && challenges.some((c: any) => c.id === params.challengeId)) {
+            // Check date range if dates are available
+            let isInDateRange = true;
+            if (c.start_date) {
+              const startDate = new Date(c.start_date);
+              if (now < startDate) isInDateRange = false; // Not started yet
+            }
+            if (c.end_date) {
+              const endDate = new Date(c.end_date);
+              if (now > endDate) isInDateRange = false; // Already ended
+            }
+
+            return isActiveStatus && isInDateRange;
+          });
+
+          console.log('[Create] Extracted challenges:', allChallenges.length,
+            '→ active/in-range:', activeChallenges.length,
+            activeChallenges.map((c: any) => ({ name: c.name, status: c.status })));
+          setJoinedChallenges(activeChallenges);
+
+          if (params.challengeId && activeChallenges.some((c: any) => c.id === params.challengeId)) {
             setSelectedChallengeId(params.challengeId as string);
             console.log('[Create] Auto-selected challenge:', params.challengeId);
           }

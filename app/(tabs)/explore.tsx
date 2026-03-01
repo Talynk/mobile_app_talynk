@@ -353,7 +353,7 @@ export default function ExploreScreen() {
         <Text style={styles.searchUserName}>{item.name || item.username}</Text>
         <Text style={styles.searchUserHandle}>@{item.username}</Text>
         <Text style={styles.searchUserFollowers}>
-          {item.followers_count || 0} followers
+          {(item as any).followers_count || (item as any).follower_count || (item as any).followersCount || 0} followers
         </Text>
       </View>
       <Feather name="chevron-right" size={20} color="#666" />

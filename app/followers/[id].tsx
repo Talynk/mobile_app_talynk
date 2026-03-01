@@ -56,7 +56,7 @@ export default function FollowersScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [followLoading, setFollowLoading] = useState<string | null>(null);
   const [profile, setProfile] = useState<any>(null);
-  const colorScheme = useColorScheme() || 'light';
+  const colorScheme = 'dark'; // Force dark theme to match app
   const C = COLORS[colorScheme];
 
   // Hide the parent navigation header
@@ -85,13 +85,13 @@ export default function FollowersScreen() {
   // Fetch users based on active tab
   const fetchUsers = async () => {
     if (!id) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
       let response;
-      
+
       if (activeTab === 'followers') {
         response = await followsApi.getFollowers(id as string);
       } else if (activeTab === 'following') {
@@ -99,24 +99,35 @@ export default function FollowersScreen() {
       } else if (activeTab === 'suggestions') {
         response = await userApi.getSuggestions();
       }
-      
+
       if (response && response.status === 'success') {
         // Handle different response structures
         let userData = response.data;
         let usersList: any[] = [];
-        
+
         if (Array.isArray(userData)) {
-          usersList = userData;
+          // Each item might be the user directly, or wrapped in { follower: user } / { following: user }
+          usersList = userData.map((item: any) => {
+            if (item.follower) return { ...item.follower, isFollowing: item.isFollowing ?? false };
+            if (item.following) return { ...item.following, isFollowing: true };
+            return item;
+          });
         } else if (userData && Array.isArray(userData.users)) {
           usersList = userData.users;
         } else if (userData && Array.isArray(userData.followers)) {
-          usersList = userData.followers;
+          usersList = userData.followers.map((item: any) => {
+            if (item.follower) return { ...item.follower, isFollowing: item.isFollowing ?? false };
+            return item;
+          });
         } else if (userData && Array.isArray(userData.following)) {
-          usersList = userData.following;
+          usersList = userData.following.map((item: any) => {
+            if (item.following) return { ...item.following, isFollowing: true };
+            return { ...item, isFollowing: true };
+          });
         }
-        
+
         setUsers(usersList);
-        
+
         // Log for debugging
         if (__DEV__) {
           console.log(`📋 [fetchUsers] ${activeTab} tab:`, {
@@ -163,7 +174,7 @@ export default function FollowersScreen() {
       const response = await followsApi.follow(userId);
       if (response.status === 'success') {
         // Update the user's follow status in the list
-        setUsers(prev => prev.map(user => 
+        setUsers(prev => prev.map(user =>
           user.id === userId ? { ...user, isFollowing: true } : user
         ));
       }
@@ -180,7 +191,7 @@ export default function FollowersScreen() {
       const response = await followsApi.unfollow(userId);
       if (response.status === 'success') {
         // Update the user's follow status in the list
-        setUsers(prev => prev.map(user => 
+        setUsers(prev => prev.map(user =>
           user.id === userId ? { ...user, isFollowing: false } : user
         ));
       }
@@ -220,7 +231,7 @@ export default function FollowersScreen() {
     }
 
     return (
-      <TouchableOpacity 
+      <TouchableOpacity
         style={[styles.userCard, { backgroundColor: C.card, borderColor: C.border }]}
         onPress={() => navigateToProfile(item.id)}
         activeOpacity={0.7}
@@ -248,9 +259,9 @@ export default function FollowersScreen() {
         <TouchableOpacity
           style={[
             styles.followButton,
-            { 
+            {
               backgroundColor: item.isFollowing ? 'transparent' : C.primary,
-              borderColor: C.primary 
+              borderColor: C.primary
             }
           ]}
           onPress={(e) => {
@@ -324,7 +335,7 @@ export default function FollowersScreen() {
       {error ? (
         <View style={styles.errorContainer}>
           <Text style={[styles.errorText, { color: C.textSecondary }]}>{error}</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.retryButton, { backgroundColor: C.primary }]}
             onPress={fetchUsers}
           >

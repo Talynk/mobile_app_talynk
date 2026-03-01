@@ -672,6 +672,81 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
       }
 
       // Log posts structure for debugging
+      // CRITICAL: Normalize posts from API — backend returns camelCase fields
+      // but the video player and UI expects snake_case fields
+      postsArray = postsArray.map((p: any) => {
+        const videoUrl = p.video_url || p.videoUrl || '';
+        const hlsUrl = p.hlsUrl || p.hls_url || '';
+        const mediaUrl = p.mediaUrl || videoUrl || '';
+        return {
+          ...p,
+          video_url: videoUrl,
+          videoUrl: p.videoUrl || videoUrl,
+          fullUrl: p.fullUrl || hlsUrl || videoUrl || mediaUrl,
+          type: p.type || p.mediaType || (videoUrl ? 'video' : 'image'),
+          processing_status: p.processing_status || p.processingStatus,
+          processingStatus: p.processingStatus || p.processing_status,
+          hlsReady: p.hlsReady || false,
+          thumbnail_url: p.thumbnail_url || p.thumbnailUrl || '',
+          thumbnailUrl: p.thumbnailUrl || p.thumbnail_url || '',
+          thumbnail: p.thumbnail || p.thumbnail_url || p.thumbnailUrl || '',
+          likes: p.likes ?? p.likesCount ?? 0,
+          comments_count: p.comments_count ?? p.commentsCount ?? p.comment_count ?? 0,
+          createdAt: p.createdAt || p.created_at,
+          user: p.user || {
+            id: p.user_id || p.userId || userId,
+            username: p.authorName || p.username || '',
+            profile_picture: p.authorProfilePicture || p.profile_picture || '',
+          },
+        };
+      });
+
+      // CRITICAL ENRICHMENT: The user-post endpoints return hlsReady:true but
+      // OMIT hls_url and thumbnail_url. Enrich from individual post endpoint.
+      const postsNeedingEnrichment = postsArray.filter(
+        (p: any) => p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8')
+      );
+
+      if (postsNeedingEnrichment.length > 0) {
+        if (__DEV__) {
+          console.log(`🔄 [ProfileFeed] Enriching ${postsNeedingEnrichment.length} posts with full data...`);
+        }
+
+        const enrichResults = await Promise.allSettled(
+          postsNeedingEnrichment.map((p: any) => postsApi.getById(p.id))
+        );
+
+        const enrichMap = new Map<string, any>();
+        enrichResults.forEach((result, idx) => {
+          if (result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
+            const fullPost = result.value.data;
+            enrichMap.set(postsNeedingEnrichment[idx].id, fullPost);
+          }
+        });
+
+        // Merge enriched data back
+        postsArray = postsArray.map((p: any) => {
+          const enriched = enrichMap.get(p.id);
+          if (!enriched) return p;
+          return {
+            ...p,
+            hls_url: enriched.hls_url || enriched.hlsUrl || p.hls_url,
+            hlsUrl: enriched.hlsUrl || enriched.hls_url || p.hlsUrl,
+            fullUrl: enriched.fullUrl || enriched.hls_url || enriched.hlsUrl || p.fullUrl,
+            thumbnail_url: enriched.thumbnail_url || enriched.thumbnailUrl || p.thumbnail_url,
+            thumbnailUrl: enriched.thumbnailUrl || enriched.thumbnail_url || p.thumbnailUrl,
+            thumbnail: enriched.thumbnail || enriched.thumbnail_url || enriched.thumbnailUrl || p.thumbnail,
+            processing_status: enriched.processing_status || enriched.processingStatus || p.processing_status,
+            video_url: enriched.video_url || enriched.videoUrl || p.video_url,
+            user: enriched.user || p.user,
+          };
+        });
+
+        if (__DEV__) {
+          console.log(`✅ [ProfileFeed] Enriched ${enrichMap.size} posts with HLS data`);
+        }
+      }
+
       // Apply HLS filter — only show HLS-transcoded video posts
       postsArray = filterHlsReady(postsArray);
 

@@ -247,16 +247,16 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           // Normalize user data structure
           setProfile({
             ...userData,
-            name: userData.name || userData.username || 'User',
+            name: userData.name || (userData as any).fullName || userData.username || 'User',
             username: userData.username || '',
-            profile_picture: userData.profile_picture || '',
+            profile_picture: userData.profile_picture || (userData as any).profilePicture || '',
             bio: userData.bio || '',
             email: (userData as any).email || '',
             phone1: (userData as any).phone1 || '',
             phone2: (userData as any).phone2 || '',
-            followers_count: userData.followers_count || (userData as any).follower_count || 0,
-            following_count: userData.following_count || (userData as any).subscribers || 0,
-            posts_count: userData.posts_count || 0,
+            followers_count: (userData as any).followersCount ?? userData.followers_count ?? (userData as any).follower_count ?? 0,
+            following_count: (userData as any).followingCount ?? userData.following_count ?? (userData as any).subscribers ?? 0,
+            posts_count: userData.posts_count || (userData as any).postsCount || 0,
             id: userData.id || id as string,
           } as any);
         } else {
@@ -403,15 +403,58 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             processing_status: p.processing_status || p.processingStatus,
             processingStatus: p.processingStatus || p.processing_status,
             hlsReady: p.hlsReady || false,
+            // CRITICAL: Map thumbnail URL — backend may return camelCase or snake_case
+            thumbnail_url: p.thumbnail_url || p.thumbnailUrl || '',
+            thumbnailUrl: p.thumbnailUrl || p.thumbnail_url || '',
+            thumbnail: p.thumbnail || p.thumbnail_url || p.thumbnailUrl || '',
             comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
             likes: p.likes ?? p.likesCount ?? 0,
+            // CRITICAL: Always attach profile user data so profile-feed shows correct username
             user: userFromPost || {
               id: (profile as any)?.id || p.user_id || p.userId,
-              username: authorName,
-              profile_picture: authorProfilePicture,
+              username: authorName || (profile as any)?.username || 'unknown',
+              profile_picture: authorProfilePicture || (profile as any)?.profile_picture,
+              name: (profile as any)?.name,
             },
           };
         });
+
+        // CRITICAL ENRICHMENT: Backend user-post endpoints return hlsReady:true
+        // but OMIT hls_url and thumbnail_url. Fetch from individual post endpoint.
+        const needsEnrichment = normalized.filter(
+          (p: any) => p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8')
+        );
+
+        if (needsEnrichment.length > 0) {
+          const enrichResults = await Promise.allSettled(
+            needsEnrichment.map((p: any) => postsApi.getById(p.id))
+          );
+
+          const enrichMap = new Map<string, any>();
+          enrichResults.forEach((result, idx) => {
+            if (result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
+              enrichMap.set(needsEnrichment[idx].id, result.value.data);
+            }
+          });
+
+          // Merge enriched data
+          for (let i = 0; i < normalized.length; i++) {
+            const enriched = enrichMap.get(normalized[i].id);
+            if (enriched) {
+              normalized[i] = {
+                ...normalized[i],
+                hls_url: enriched.hls_url || enriched.hlsUrl,
+                hlsUrl: enriched.hlsUrl || enriched.hls_url,
+                fullUrl: enriched.fullUrl || enriched.hls_url || enriched.hlsUrl || normalized[i].fullUrl,
+                thumbnail_url: enriched.thumbnail_url || enriched.thumbnailUrl || normalized[i].thumbnail_url,
+                thumbnailUrl: enriched.thumbnailUrl || enriched.thumbnail_url || normalized[i].thumbnailUrl,
+                thumbnail: enriched.thumbnail || enriched.thumbnail_url || normalized[i].thumbnail,
+                processing_status: enriched.processing_status || normalized[i].processing_status,
+                video_url: enriched.video_url || enriched.videoUrl || normalized[i].video_url,
+              };
+            }
+          }
+        }
 
         // Apply HLS filter — only show HLS-transcoded video posts
         setApprovedPosts(filterHlsReady(normalized));

@@ -73,7 +73,7 @@ export function getPostMediaUrl(post: any): string | null {
  */
 export function getThumbnailUrl(post: any): string | null {
   // Server-generated thumbnail takes priority (from HLS processing)
-  const url = post?.thumbnail_url || post?.thumbnail || '';
+  const url = post?.thumbnail_url || post?.thumbnailUrl || post?.thumbnail || '';
 
   if (!url || url.trim() === '') {
     return null;
@@ -166,17 +166,22 @@ export function isHlsUrl(url: string | null | undefined): boolean {
  * @returns HLS master playlist URL, or null if not ready
  */
 export function getPlaybackUrl(post: any): string | null {
-  if (!post || post.type !== 'video') return null;
+  if (!post) return null;
 
-  // Only play when HLS is ready
-  const hlsReady =
-    post.processing_status === 'completed' &&
-    (post.hls_url || post.fullUrl?.includes('.m3u8'));
+  // Check both type and mediaType fields
+  const isVideo = post.type === 'video' || post.mediaType === 'video';
+  if (!isVideo) return null;
 
-  if (!hlsReady) return null;
+  // Only play when HLS is ready — check both camelCase and snake_case
+  const processingDone = post.processing_status === 'completed' || post.processingStatus === 'completed';
+  const hasHlsUrl = post.hls_url || post.hlsUrl || post.fullUrl?.includes('.m3u8');
+  const hlsReady = processingDone && hasHlsUrl;
 
-  // Prefer hls_url, then fullUrl (which backend sets to hls_url when completed)
-  const url = post.hls_url || post.fullUrl;
+  // Also allow if hlsReady boolean flag is set
+  if (!hlsReady && !post.hlsReady) return null;
+
+  // Prefer hls_url, then hlsUrl, then fullUrl (which backend sets to hls_url when completed)
+  const url = post.hls_url || post.hlsUrl || post.fullUrl;
   if (!url) return null;
 
   return getFileUrl(url);

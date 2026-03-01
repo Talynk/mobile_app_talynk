@@ -162,7 +162,7 @@ export default function SearchScreen() {
           <Text style={styles.userName}>{item.name || item.username}</Text>
           <Text style={styles.userUsername}>@{item.username}</Text>
           <Text style={styles.userStats}>
-            {formatNumber(item.followers_count || 0)} followers
+            {formatNumber((item as any).followersCount ?? item.followers_count ?? (item as any).follower_count ?? 0)} followers
           </Text>
         </View>
         {user && user.id !== item.id && (

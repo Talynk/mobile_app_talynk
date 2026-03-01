@@ -946,7 +946,9 @@ export const userApi = {
     try {
       // Use the appropriate endpoint based on status
       let endpoint = `/api/users/${userId}/posts`;
-      if (status === 'approved') {
+      if (status === 'approved' || status === 'active') {
+        // Both 'active' and 'approved' should use the /approved endpoint
+        // which returns full post data including thumbnails, HLS URLs, etc.
         endpoint = `/api/users/${userId}/posts/approved`;
       }
       const response = await apiClient.get(`${endpoint}?page=${page}&limit=${limit}`);
@@ -1348,12 +1350,49 @@ export const challengesApi = {
   getJoinedChallenges: async (): Promise<ApiResponse<any>> => {
     try {
       const response = await apiClient.get('/api/challenges/joined');
-      return response.data;
+      const apiResponse = response.data;
+
+      console.log('[API] getJoinedChallenges raw response:', {
+        status: apiResponse?.status,
+        dataIsArray: Array.isArray(apiResponse?.data),
+        dataLength: Array.isArray(apiResponse?.data) ? apiResponse.data.length : 'N/A',
+        firstItem: apiResponse?.data?.[0] ? Object.keys(apiResponse.data[0]) : 'none',
+      });
+
+      // Backend returns: { status: 'success', data: [...participations], pagination: {...} }
+      // Each participation is { id, user_id, challenge_id, joined_at, challenge: { ...challengeData } }
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const participations = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+
+        // Unwrap challenge sub-objects from participations
+        const challenges = participations
+          .map((item: any) => item.challenge || item)
+          .filter((c: any) => c && c.id);
+
+        console.log('[API] getJoinedChallenges extracted challenges:', challenges.length,
+          challenges.map((c: any) => ({ id: c.id, name: c.name, status: c.status })));
+
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Joined challenges fetched successfully',
+          data: {
+            challenges: challenges,
+            pagination: apiResponse.pagination || {}
+          }
+        };
+      }
+
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch joined challenges',
+        data: { challenges: [], pagination: {} },
+      };
     } catch (error: any) {
+      console.error('[API] getJoinedChallenges error:', error.message, error.response?.status);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch joined challenges',
-        data: [],
+        data: { challenges: [], pagination: {} },
       };
     }
   },
