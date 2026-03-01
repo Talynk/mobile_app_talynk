@@ -25,7 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { Avatar } from '@/components/Avatar';
-import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getFileUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
@@ -423,25 +423,19 @@ export default function ChallengeDetailScreen() {
     const [isLoaded, setIsLoaded] = useState(false);
     const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
 
+    // STRICT: Only HLS for playback — never raw MP4, never download
+    const playbackUrl = getPlaybackUrl(item);
     const mediaUrl = getPostMediaUrl(item) || '';
-    const isVideo =
-      item.type === 'video' ||
-      (mediaUrl !== null &&
-        mediaUrl !== '' &&
-        (mediaUrl.toLowerCase().includes('.mp4') ||
-          mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm') ||
-          mediaUrl.toLowerCase().includes('.m3u8')));
-
-    const videoUrl = isVideo ? mediaUrl : null;
+    const isVideo = item.type === 'video' || item.mediaType === 'video';
+    const hasHlsPlayback = playbackUrl != null && playbackUrl !== '';
+    const videoUrl = isVideo && hasHlsPlayback ? playbackUrl : null;
     const imageUrl = !isVideo ? mediaUrl : null;
 
     // HLS OPTIMIZATION: Server thumbnail_url takes priority
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const isHls = (mediaUrl || '').endsWith('.m3u8');
 
-    // Use raw video_url (MP4) for thumbnail generation
+    // Use raw video_url (MP4) only for thumbnail image generation — never for playback
     const rawVideoUrl = getFileUrl(item.video_url) || '';
     const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
       (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
@@ -509,12 +503,20 @@ export default function ChallengeDetailScreen() {
               style={styles.fullscreenMediaImage}
               resizeMode="contain"
             />
-          ) : isVideo && staticThumbnailUrl && !isLoaded ? (
-            <Image
-              source={{ uri: staticThumbnailUrl }}
-              style={styles.fullscreenMediaImage}
-              resizeMode="cover"
-            />
+          ) : isVideo && staticThumbnailUrl && (!isLoaded || !videoUrl) ? (
+            <>
+              <Image
+                source={{ uri: staticThumbnailUrl }}
+                style={styles.fullscreenMediaImage}
+                resizeMode="cover"
+              />
+              {!videoUrl && (
+                <View style={[styles.fullscreenMediaImage, StyleSheet.absoluteFillObject, styles.hlsOnlyOverlay]}>
+                  <MaterialIcons name="hourglass-empty" size={32} color="rgba(255,255,255,0.9)" />
+                  <Text style={styles.hlsOnlyText}>HLS only — playback when ready</Text>
+                </View>
+              )}
+            </>
           ) : !isVideo ? (
             <View style={[styles.fullscreenMediaImage, styles.noMediaPlaceholder]}>
               <MaterialIcons name="image" size={48} color="#444" />
@@ -1628,6 +1630,16 @@ const styles = StyleSheet.create({
   fullscreenMediaVideo: {
     width: '100%',
     height: '100%',
+  },
+  hlsOnlyOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  hlsOnlyText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
+    marginTop: 8,
   },
   fullscreenVideoWrapper: {
     position: 'absolute',

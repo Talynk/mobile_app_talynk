@@ -1146,40 +1146,8 @@ export default function CreatePostScreen() {
             if (response.status === 'success') {
               await uploadNotificationService.showUploadComplete(fileName);
 
-              // Extract media URL from response for preview
-              // Backend returns: response.data.post.video_url
-              const postData = response.data?.post || response.data;
-              let mediaUrl = postData?.video_url || postData?.fullUrl || postData?.image_url;
-
-              // CRITICAL FIX: For images, we need to ensure proper URL handling
-              // Verify the URL is complete and valid before setting
-              if (mediaUrl) {
-                // Add cache busting for fresh image loads
-                const cacheBustUrl = mediaUrl.includes('?')
-                  ? `${mediaUrl}&t=${Date.now()}`
-                  : `${mediaUrl}?t=${Date.now()}`;
-
-                console.log('[Upload] Challenge post - URL Details:', {
-                  originalUrl: mediaUrl,
-                  cacheBustUrl: cacheBustUrl,
-                  fileType: postData?.type || 'unknown',
-                  isImage: postData?.type === 'image'
-                });
-
-                // Use original URL without cache bust to keep it clean
-                // But log both for debugging
-                setServerMediaUrl(mediaUrl);
-                console.log('[Upload] Challenge post - Setting server media URL:', mediaUrl);
-              } else {
-                console.warn('[Upload] Challenge post - No media URL found in response:', {
-                  responseData: response.data,
-                  postData: postData,
-                  allKeys: postData ? Object.keys(postData) : []
-                });
-              }
-
+              const challengeIdToOpen = selectedChallengeId;
               setRecordedVideoUri(null);
-              // Keep capturedImageUri for preview display
               setEditedVideoUri(null);
               setThumbnailUri(null);
               setCaption('');
@@ -1187,13 +1155,29 @@ export default function CreatePostScreen() {
               setSelectedCategoryId('');
               setSelectedChallengeId(null);
               setIsVideoPlaying(false);
+              setServerMediaUrl(null);
+              setCapturedImageUri(null);
+              setUploading(false);
+              setUploadProgress(0);
 
-              // Delay navigation to show the server image
-              setTimeout(() => {
-                setServerMediaUrl(null);
-                setCapturedImageUri(null);
-                router.back();
-              }, 1500);
+              // Success popup: informative message + link to view challenge (no redirect to home)
+              Alert.alert(
+                'Success',
+                'Video posted successfully to the Competition. It will appear in the challenge with HLS ready to play. Tap "View challenge" to see it at the bottom.',
+                [
+                  {
+                    text: 'View challenge',
+                    onPress: () => {
+                      if (challengeIdToOpen) {
+                        router.replace(`/challenges/${challengeIdToOpen}` as any);
+                      } else {
+                        router.back();
+                      }
+                    },
+                  },
+                  { text: 'Done', onPress: () => router.back() },
+                ]
+              );
             } else {
               const errorMsg = response.message || 'Failed to create post in challenge';
               await uploadNotificationService.showUploadError(errorMsg, fileName);
