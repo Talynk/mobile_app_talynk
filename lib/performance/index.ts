@@ -39,7 +39,7 @@ export const FLATLIST_MEMORY_PRESETS = {
     initialNumToRender: 5,
     maxToRenderPerBatch: 5,
     updateCellsBatchingPeriod: 50,
-    removeClippedSubviews: true,
+    removeClippedSubviews: false,
   },
   /** Standard devices (3-6GB RAM) */
   medium: {
@@ -47,7 +47,7 @@ export const FLATLIST_MEMORY_PRESETS = {
     initialNumToRender: 3,
     maxToRenderPerBatch: 3,
     updateCellsBatchingPeriod: 100,
-    removeClippedSubviews: true,
+    removeClippedSubviews: false,
   },
   /** Memory-constrained mode (for video-heavy feeds) */
   high: {
@@ -55,7 +55,7 @@ export const FLATLIST_MEMORY_PRESETS = {
     initialNumToRender: 1,
     maxToRenderPerBatch: 1,
     updateCellsBatchingPeriod: 150,
-    removeClippedSubviews: true,
+    removeClippedSubviews: false,
   },
 } as const;
 

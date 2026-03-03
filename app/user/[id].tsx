@@ -458,6 +458,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
         // Apply HLS filter — only show HLS-transcoded video posts
         setApprovedPosts(filterHlsReady(normalized));
+        // Profile "Posts" stat = count of published (approved) posts only, not drafts
+        setProfile((prev) => (prev ? { ...prev, posts_count: normalized.length } : null));
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }

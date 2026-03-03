@@ -91,14 +91,16 @@ function RootLayoutNav() {
   // Force dark theme
   const theme = DarkTheme;
 
-  // Initialize Redux store from AsyncStorage
+  // Initialize Redux store from AsyncStorage (never crash app)
   useEffect(() => {
-    initializeStore();
+    initializeStore().catch(() => {});
   }, []);
 
-  // Initialize image cache
+  // Initialize image cache (never crash app)
   useEffect(() => {
-    imageCache.initialize();
+    try {
+      imageCache.initialize();
+    } catch (_) {}
   }, []);
 
   // Memory management: Clear caches when app goes to background

@@ -214,7 +214,10 @@ function OptimizedFlatListComponent<T>({
       initialNumToRender={memorySettings.initialNumToRender}
       maxToRenderPerBatch={memorySettings.maxToRenderPerBatch}
       updateCellsBatchingPeriod={memorySettings.updateCellsBatchingPeriod}
-      removeClippedSubviews={true}
+      // IMPORTANT: removeClippedSubviews can cause IndexOutOfBounds crashes on Android
+      // when lists are nested inside complex view hierarchies (e.g. ScreenStack).
+      // Disable globally for stability across devices.
+      removeClippedSubviews={false}
       
       // Layout optimization
       getItemLayout={getItemLayout}

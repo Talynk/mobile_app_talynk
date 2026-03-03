@@ -60,7 +60,6 @@ export default function PostDetailScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
-  const [isPausedByPress, setIsPausedByPress] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
 
@@ -315,40 +314,29 @@ export default function PostDetailScreen() {
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
 
-  const handleVideoPress = () => {
-    if (isVideo) {
-      toggleMute();
-      const newMuted = !isMuted;
-      muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
-      muteOpacity.setValue(1);
-      Animated.timing(muteOpacity, {
-        toValue: 0,
-        duration: 800,
-        delay: 300,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
+  const pauseIndicatorOpacity = useRef(new Animated.Value(0)).current;
 
-  // Instagram-style long-press to pause, release to resume
-  const isPausedByPressRef = useRef(false);
-
-  const handleLongPress = () => {
-    if (videoPlayer) {
-      try {
+  const handleTapToPause = () => {
+    if (!isVideo || !videoPlayer) return;
+    try {
+      if (videoPlayer.playing) {
         videoPlayer.pause();
-        isPausedByPressRef.current = true;
-      } catch (e) { /* player released */ }
-    }
+        pauseIndicatorOpacity.setValue(1);
+      } else {
+        videoPlayer.play();
+        pauseIndicatorOpacity.setValue(0);
+      }
+    } catch (_) {}
   };
 
-  const handlePressOut = () => {
-    if (isPausedByPressRef.current && videoPlayer) {
-      try {
-        videoPlayer.play();
-      } catch (e) { /* player released */ }
-      isPausedByPressRef.current = false;
+  const handleMuteToggle = () => {
+    const newMuted = toggleMute();
+    if (videoPlayer) {
+      try { videoPlayer.muted = newMuted; } catch (_) {}
     }
+    muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
+    muteOpacity.setValue(1);
+    Animated.timing(muteOpacity, { toValue: 0, duration: 800, delay: 300, useNativeDriver: true }).start();
   };
 
   // Progress tracking: poll currentTime/duration every 250ms
@@ -431,10 +419,7 @@ export default function PostDetailScreen() {
             {isVideo ? (
               <>
                 <Pressable
-                  onPress={handleVideoPress}
-                  onLongPress={handleLongPress}
-                  onPressOut={handlePressOut}
-                  delayLongPress={300}
+                  onPress={handleTapToPause}
                   style={styles.videoTouchable}
                 >
                   {/* LAYER 1: Thumbnail — visible until video is playing (zero black screens) */}
@@ -463,12 +448,15 @@ export default function PostDetailScreen() {
                     </View>
                   )}
 
-                  {/* Instagram-style mute indicator — fades away */}
-                  <Animated.View style={[styles.muteIndicatorContainer, { opacity: muteOpacity }]} pointerEvents="none">
+                  {/* Pause indicator */}
+                  <Animated.View style={[styles.muteIndicatorContainer, { opacity: pauseIndicatorOpacity }]} pointerEvents="none">
                     <View style={styles.muteIndicatorBadge}>
-                      <Feather name={muteIconRef.current} size={24} color="rgba(255,255,255,0.8)" />
+                      <Feather name="play" size={48} color="rgba(255,255,255,0.95)" />
                     </View>
                   </Animated.View>
+                  <TouchableOpacity style={[styles.muteButtonCorner, { top: insets.top + 12 }]} onPress={handleMuteToggle} activeOpacity={0.8}>
+                    <Feather name={isMuted ? 'volume-x' : 'volume-2'} size={22} color="rgba(255,255,255,0.9)" />
+                  </TouchableOpacity>
                 </Pressable>
 
                 {/* Instagram-style thin progress bar — pushed UP above bottom edge */}
@@ -785,6 +773,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 40,
     padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  muteButtonCorner: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },

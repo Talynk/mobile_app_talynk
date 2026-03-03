@@ -727,9 +727,9 @@ export default function CreatePostScreen() {
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
-          if (newDuration >= 150) {
+          if (newDuration >= 300) {
             stopRecording();
-            return 150;
+            return 300;
           }
           return newDuration;
         });
@@ -761,8 +761,10 @@ export default function CreatePostScreen() {
         return;
       }
 
+      // Support longer videos across devices (e.g. 2m30s–5m). 300s = 5 min.
+      const MAX_RECORDING_SECONDS = 300;
       const recordingOptions: any = {
-        maxDuration: 150,
+        maxDuration: MAX_RECORDING_SECONDS,
         mute: false,
         quality: 'high',
       };
@@ -775,9 +777,10 @@ export default function CreatePostScreen() {
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
       } else {
-        recordingOptions.maxFileSize = 100 * 1024 * 1024;
+        // Android: allow large file so duration isn't capped too early (e.g. 200MB for ~5 min)
+        recordingOptions.maxFileSize = 200 * 1024 * 1024;
         recordingOptions.extension = '.mp4';
-        recordingOptions.videoBitrate = 5000000;
+        recordingOptions.videoBitrate = 4000000;
         recordingOptions.audioBitrate = 256000;
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
@@ -822,10 +825,10 @@ export default function CreatePostScreen() {
               // Continue anyway - file might still be valid
             }
 
-            if (recordingDuration > 150) {
+            if (recordingDuration > 300) {
               Alert.alert(
                 'Video Too Long',
-                'Your recording is longer than 2 minutes and 30 seconds. Please record a shorter video.'
+                'Your recording is longer than 5 minutes. Please record a shorter video.'
               );
               if (isMountedRef.current) {
                 setShowCamera(false);
@@ -978,6 +981,8 @@ export default function CreatePostScreen() {
     setCameraFacing(current => current === 'back' ? 'front' : 'back');
   };
 
+  const MAX_DRAFTS = 3;
+
   // --- SUBMIT ---
   const handleCreatePost = async (status: 'active' | 'draft' = 'active') => {
     if (!isAuthenticated || !user) {
@@ -996,6 +1001,24 @@ export default function CreatePostScreen() {
         ]
       );
       return;
+    }
+
+    // Validate draft count BEFORE starting upload — do not upload if already at max drafts
+    if (status === 'draft') {
+      try {
+        const draftRes = await postsApi.getDrafts(1, 10);
+        const count = (draftRes.data?.posts?.length) ?? 0;
+        if (count >= MAX_DRAFTS) {
+          Alert.alert(
+            'Maximum drafts reached',
+            'You have reached the maximum number of drafts. Publish or delete a draft to save another.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      } catch (_) {
+        // If we can't fetch drafts, allow attempt (backend will reject if over limit)
+      }
     }
 
     const isValid = await validate();
@@ -1144,9 +1167,28 @@ export default function CreatePostScreen() {
             console.log('[Upload] Challenge post response:', response);
 
             if (response.status === 'success') {
+              const challengeIdToOpen = selectedChallengeId;
+              const createdPostId = response.data?.post?.id as string | undefined;
+
+              // Wait for HLS to be ready before telling user it's done (like normal posts)
+              if (createdPostId) {
+                try {
+                  const maxAttempts = 20;
+                  const delayMs = 3000;
+                  for (let i = 0; i < maxAttempts; i++) {
+                    const statusRes = await postsApi.getProcessingStatus(createdPostId);
+                    if (statusRes.status === 'success' && statusRes.data?.processing?.status === 'completed') {
+                      break;
+                    }
+                    await new Promise(res => setTimeout(res, delayMs));
+                  }
+                } catch {
+                  // If polling fails, backend will still finish processing
+                }
+              }
+
               await uploadNotificationService.showUploadComplete(fileName);
 
-              const challengeIdToOpen = selectedChallengeId;
               setRecordedVideoUri(null);
               setEditedVideoUri(null);
               setThumbnailUri(null);
@@ -1160,10 +1202,9 @@ export default function CreatePostScreen() {
               setUploading(false);
               setUploadProgress(0);
 
-              // Success popup: informative message + link to view challenge (no redirect to home)
               Alert.alert(
                 'Success',
-                'Video posted successfully to the Competition. It will appear in the challenge with HLS ready to play. Tap "View challenge" to see it at the bottom.',
+                'Video posted successfully to the Competition and is ready to play. Tap "View challenge" to see it at the bottom.',
                 [
                   {
                     text: 'View challenge',

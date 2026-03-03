@@ -16,21 +16,27 @@ import {
   Animated,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { challengesApi, postsApi } from '@/lib/api';
+import { challengesApi, postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { Avatar } from '@/components/Avatar';
-import { getPostMediaUrl, getThumbnailUrl, getFileUrl, getPlaybackUrl } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
 import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
-import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
+import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
+import ReportModal from '@/components/ReportModal';
+import CommentsModal from '@/components/CommentsModal';
+import { useCache } from '@/lib/cache-context';
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
+import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
+import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { Share } from 'react-native';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const FULLSCREEN_AVAILABLE_HEIGHT = screenHeight - 80;
 const POST_ITEM_SIZE = (screenWidth - 4) / 3;
 
 const COLORS = {
@@ -70,6 +76,15 @@ export default function ChallengeDetailScreen() {
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportPostId, setReportPostId] = useState<string | null>(null);
+  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
+  const { followedUsers, updateFollowedUsers } = useCache();
+  const dispatch = useAppDispatch();
+  const likesManager = useLikesManager();
+  const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const [activeTab, setActiveTab] = useState<'posts' | 'participants'>('posts');
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
@@ -348,6 +363,75 @@ export default function ChallengeDetailScreen() {
 
   const isOrganizer = challenge?.organizer_id === user?.id;
 
+  const handleLike = async (postId: string) => {
+    if (!user) {
+      Alert.alert('Login Required', 'Please log in to like posts.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Log In', onPress: () => router.push('/auth/login' as any) },
+      ]);
+      return;
+    }
+    await likesManager.toggleLike(postId);
+    const newCount = likesManager.getLikeCount(postId);
+    setPosts((prev: any[]) => prev.map((p: any) => (p.id === postId ? { ...p, likes: newCount } : p)));
+  };
+
+  const handleComment = (postId: string) => {
+    setCommentsPostId(postId);
+    setCommentsModalVisible(true);
+  };
+
+  const handleShare = async (postId: string) => {
+    const post = posts.find((p: any) => p.id === postId);
+    if (post) {
+      try {
+        const url = getPostMediaUrl(post) || (post as any).fullUrl || '';
+        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talentix', url: url || undefined });
+      } catch (_) {}
+    }
+  };
+
+  const handleReport = (postId: string) => {
+    if (!user) {
+      router.push('/auth/login' as any);
+      return;
+    }
+    setReportPostId(postId);
+    setReportModalVisible(true);
+  };
+
+  const handleFollow = async (targetUserId: string) => {
+    if (!user) return;
+    updateFollowedUsers(targetUserId, true);
+    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+    try {
+      const res = await followsApi.follow(targetUserId);
+      if (res.status !== 'success') {
+        updateFollowedUsers(targetUserId, false);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      }
+    } catch {
+      updateFollowedUsers(targetUserId, false);
+      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+    }
+  };
+
+  const handleUnfollow = async (targetUserId: string) => {
+    if (!user) return;
+    updateFollowedUsers(targetUserId, false);
+    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+    try {
+      const res = await followsApi.unfollow(targetUserId);
+      if (res.status !== 'success') {
+        updateFollowedUsers(targetUserId, true);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      }
+    } catch {
+      updateFollowedUsers(targetUserId, true);
+      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+    }
+  };
+
   const GridPostCard = ({ item, index }: { item: any; index: number }) => {
     const mediaUrl = getPostMediaUrl(item) || '';
     const isHls = mediaUrl.endsWith('.m3u8');
@@ -412,197 +496,6 @@ export default function ChallengeDetailScreen() {
     );
   };
 
-  const FullscreenPostViewer = ({ item, index, insets, C }: { item: any; index: number; insets: any; C: any }) => {
-    const { isMuted, toggleMute } = useVideoMute();
-    // Use opacity animation for mute indicator
-    const muteOpacity = useRef(new Animated.Value(0)).current;
-
-    // State for progress bar
-    const [videoProgress, setVideoProgress] = useState(0);
-    const [videoDuration, setVideoDuration] = useState(0);
-    const [isLoaded, setIsLoaded] = useState(false);
-    const { height: screenHeight, width: screenWidth } = Dimensions.get('window');
-
-    // STRICT: Only HLS for playback — never raw MP4, never download
-    const playbackUrl = getPlaybackUrl(item);
-    const mediaUrl = getPostMediaUrl(item) || '';
-    const isVideo = item.type === 'video' || item.mediaType === 'video';
-    const hasHlsPlayback = playbackUrl != null && playbackUrl !== '';
-    const videoUrl = isVideo && hasHlsPlayback ? playbackUrl : null;
-    const imageUrl = !isVideo ? mediaUrl : null;
-
-    // HLS OPTIMIZATION: Server thumbnail_url takes priority
-    const serverThumbnail = getThumbnailUrl(item);
-    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-
-    // Use raw video_url (MP4) only for thumbnail image generation — never for playback
-    const rawVideoUrl = getFileUrl(item.video_url) || '';
-    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      (isVideo && !serverThumbnail && rawVideoUrl) ? rawVideoUrl : null,
-      fallbackImageUrl || '',
-      1000
-    );
-    // PRIORITY: Server thumbnail > generated thumbnail > fallback
-    const staticThumbnailUrl = isVideo
-      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
-      : (imageUrl || mediaUrl || fallbackImageUrl);
-
-    const player = useVideoPlayer(videoUrl, (player) => {
-      player.loop = true;
-      player.muted = isMuted;
-      player.play();
-    });
-
-    // Mute sync
-    useEffect(() => {
-      if (player) {
-        player.muted = isMuted;
-      }
-    }, [isMuted, player]);
-
-    // Progress tracking
-    useEffect(() => {
-      const interval = setInterval(() => {
-        if (player.playing && player.duration > 0) {
-          setVideoProgress(player.currentTime / player.duration);
-          setVideoDuration(player.duration * 1000); // duration is seconds in expo-video
-          setIsLoaded(true);
-        }
-      }, 200);
-      return () => clearInterval(interval);
-    }, [player]);
-
-    const handleVideoPress = () => {
-      if (isVideo) {
-        toggleMute();
-        // Animate mute indicator
-        Animated.sequence([
-          Animated.timing(muteOpacity, {
-            toValue: 1,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-          Animated.delay(800),
-          Animated.timing(muteOpacity, {
-            toValue: 0,
-            duration: 500,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      }
-    };
-
-    const availableHeight = screenHeight - 80;
-
-    return (
-      <View style={[styles.fullscreenPostViewer, { height: availableHeight, width: screenWidth }]}>
-        <View style={styles.fullscreenMediaWrapper}>
-          {!isVideo && imageUrl ? (
-            <Image
-              source={{ uri: imageUrl }}
-              style={styles.fullscreenMediaImage}
-              resizeMode="contain"
-            />
-          ) : isVideo && staticThumbnailUrl && (!isLoaded || !videoUrl) ? (
-            <>
-              <Image
-                source={{ uri: staticThumbnailUrl }}
-                style={styles.fullscreenMediaImage}
-                resizeMode="cover"
-              />
-              {!videoUrl && (
-                <View style={[styles.fullscreenMediaImage, StyleSheet.absoluteFillObject, styles.hlsOnlyOverlay]}>
-                  <MaterialIcons name="hourglass-empty" size={32} color="rgba(255,255,255,0.9)" />
-                  <Text style={styles.hlsOnlyText}>HLS only — playback when ready</Text>
-                </View>
-              )}
-            </>
-          ) : !isVideo ? (
-            <View style={[styles.fullscreenMediaImage, styles.noMediaPlaceholder]}>
-              <MaterialIcons name="image" size={48} color="#444" />
-            </View>
-          ) : null}
-
-          {isVideo && videoUrl && (
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={handleVideoPress}
-              style={styles.fullscreenVideoWrapper}
-            >
-              <VideoView
-                player={player}
-                style={styles.fullscreenMediaVideo}
-                contentFit="contain"
-                nativeControls={false}
-              />
-
-              {/* Mute Animation Overlay */}
-              <View style={[styles.muteIndicatorOverlay, { pointerEvents: 'none' }]}>
-                <Animated.View style={[styles.muteIndicatorBadge, { opacity: muteOpacity }]}>
-                  <Feather name={isMuted ? "volume-x" : "volume-2"} size={32} color="rgba(255,255,255,0.8)" />
-                </Animated.View>
-              </View>
-            </TouchableOpacity>
-          )}
-
-          {isVideo && isLoaded && videoDuration > 0 && (
-            <View
-              style={[
-                styles.progressBarContainerFullscreen,
-                {
-                  position: 'absolute',
-                  bottom: 60 + insets.bottom - 48,
-                  left: 0,
-                  right: 0,
-                },
-              ]}
-            >
-              <View style={styles.progressBarTrack}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${videoProgress * 100}%`,
-                      backgroundColor: '#60a5fa',
-                    }
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-        </View>
-
-        <View style={[styles.fullscreenPostInfo, { bottom: insets.bottom + 20 }]}>
-          <View style={styles.fullscreenPostInfoContent}>
-            {item.user && (
-              <TouchableOpacity onPress={() => {
-                if (item.user?.id) {
-                  router.push({
-                    pathname: '/user/[id]',
-                    params: { id: item.user.id }
-                  });
-                }
-              }}>
-                <Text style={styles.fullscreenUsername}>@{item.user?.username || 'unknown'}</Text>
-              </TouchableOpacity>
-            )}
-
-            {(item.caption || item.description || item.title) && (
-              <Text style={styles.fullscreenCaption} numberOfLines={2}>
-                {item.caption || item.description || item.title || ''}
-              </Text>
-            )}
-
-            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
-              <Text style={styles.fullscreenTimestamp}>
-                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
-              </Text>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  };
 
   // Render header component - all the content above posts/participants
   const renderHeader = () => {
@@ -622,12 +515,10 @@ export default function ChallengeDetailScreen() {
           <View style={styles.headerContentWrapper}>
             <Text style={styles.challengeTitle}>{challenge.name}</Text>
             <View style={styles.badgesContainer}>
-              {challenge.has_rewards && (
-                <View style={styles.rewardBadge}>
-                  <MaterialIcons name="emoji-events" size={16} color="#fff" />
-                  <Text style={styles.rewardBadgeText}>Has Rewards</Text>
-                </View>
-              )}
+              <View style={[styles.rewardBadge, { backgroundColor: challenge.has_rewards ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.25)' }]}>
+                <MaterialIcons name="emoji-events" size={14} color="#fff" />
+                <Text style={styles.rewardBadgeText}>Reward: {challenge.has_rewards ? 'Yes' : 'No'}</Text>
+              </View>
               <View style={[styles.statusBadge, { backgroundColor: status.color }]}>
                 <Text style={styles.statusText}>{status.label}</Text>
               </View>
@@ -1056,29 +947,60 @@ export default function ChallengeDetailScreen() {
           <FlatList
             ref={fullscreenListRef}
             data={posts}
-            renderItem={({ item, index }) => (
-              <FullscreenPostViewer item={item} index={index} insets={insets} C={C} />
-            )}
+            renderItem={({ item, index }) => {
+              const isActive = fullscreenIndex === index;
+              const distance = index - fullscreenIndex;
+              const shouldPreload = !isActive && distance >= -3 && distance <= 3;
+              return (
+                <FullscreenFeedPostItem
+                  item={item}
+                  index={index}
+                  onLike={handleLike}
+                  onComment={handleComment}
+                  onShare={handleShare}
+                  onReport={handleReport}
+                  onFollow={handleFollow}
+                  onUnfollow={handleUnfollow}
+                  isLiked={likedPosts.includes(item.id)}
+                  isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isActive={isActive}
+                  shouldPreload={shouldPreload}
+                  availableHeight={FULLSCREEN_AVAILABLE_HEIGHT}
+                />
+              );
+            }}
             keyExtractor={(item) => item.id}
             pagingEnabled
+            snapToInterval={FULLSCREEN_AVAILABLE_HEIGHT}
+            snapToAlignment="start"
+            decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             onMomentumScrollEnd={(event) => {
-              const index = Math.round(
-                event.nativeEvent.contentOffset.y /
-                event.nativeEvent.layoutMeasurement.height
-              );
-              setFullscreenIndex(index);
+              const index = Math.round(event.nativeEvent.contentOffset.y / FULLSCREEN_AVAILABLE_HEIGHT);
+              setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
             }}
             initialScrollIndex={fullscreenIndex}
-            getItemLayout={(data, index) => ({
-              length: Dimensions.get('window').height - 80,
-              offset: (Dimensions.get('window').height - 80) * index,
+            getItemLayout={(_, index) => ({
+              length: FULLSCREEN_AVAILABLE_HEIGHT,
+              offset: FULLSCREEN_AVAILABLE_HEIGHT * index,
               index,
             })}
           />
         </SafeAreaView>
       </Modal>
+
+      <ReportModal
+        isVisible={reportModalVisible}
+        postId={reportPostId}
+        onClose={() => { setReportModalVisible(false); setReportPostId(null); }}
+        onReported={() => { setReportModalVisible(false); setReportPostId(null); }}
+      />
+      <CommentsModal
+        visible={commentsModalVisible && !!commentsPostId}
+        onClose={() => { setCommentsModalVisible(false); setCommentsPostId(null); }}
+        postId={commentsPostId || ''}
+      />
 
       {/* Participants Modal */}
       <Modal visible={participantsModalVisible} transparent animationType="slide">
@@ -1664,6 +1586,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 40,
     padding: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  muteButtonCorner: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },

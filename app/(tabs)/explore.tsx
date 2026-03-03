@@ -15,7 +15,7 @@ import {
   Modal,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi, followsApi, categoriesApi, searchApi } from '@/lib/api';
+import { postsApi, userApi, followsApi, categoriesApi, searchApi, countriesApi } from '@/lib/api';
 import { Post, User, Country } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
@@ -30,18 +30,6 @@ import { filterHlsReady } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-const CONFIGURED_COUNTRIES = [
-  { id: 140, name: 'Rwanda', code: 'RW', flag_emoji: '🇷🇼' },
-  { id: 2, name: 'Kenya', code: 'KE', flag_emoji: '🇰🇪' },
-  { id: 3, name: 'Uganda', code: 'UG', flag_emoji: '🇺🇬' },
-  { id: 4, name: 'Tanzania', code: 'TZ', flag_emoji: '🇹🇿' },
-  { id: 5, name: 'Nigeria', code: 'NG', flag_emoji: '🇳🇬' },
-  { id: 6, name: 'Ghana', code: 'GH', flag_emoji: '🇬🇭' },
-  { id: 7, name: 'South Africa', code: 'ZA', flag_emoji: '🇿🇦' },
-  { id: 8, name: 'United States', code: 'US', flag_emoji: '🇺🇸' },
-  { id: 9, name: 'United Kingdom', code: 'GB', flag_emoji: '🇬🇧' },
-];
 
 export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,6 +46,8 @@ export default function ExploreScreen() {
   const [selectedCountryId, setSelectedCountryId] = useState<number | null>(null);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
+  const [countriesList, setCountriesList] = useState<Country[]>([]);
+  const [loadingCountries, setLoadingCountries] = useState(false);
 
   // Search results
   const [searchUsers, setSearchUsers] = useState<User[]>([]);
@@ -74,6 +64,33 @@ export default function ExploreScreen() {
 
   useEffect(() => {
     loadInitialContent();
+  }, []);
+
+  // Fetch countries from backend (no hardcoding)
+  useEffect(() => {
+    const loadCountries = async () => {
+      try {
+        setLoadingCountries(true);
+        const res = await countriesApi.getAll();
+        const list: Country[] = [];
+        if (res.status === 'success' && res.data) {
+          const raw = (res.data as any).countries ?? (Array.isArray((res.data as any).data) ? (res.data as any).data : res.data);
+          if (Array.isArray(raw)) {
+            raw.forEach((c: any) => {
+              if (c && c.id != null && c.name && c.code && (c.is_active !== false)) {
+                list.push({ id: c.id, name: c.name, code: c.code, flag_emoji: c.flag_emoji });
+              }
+            });
+          }
+        }
+        setCountriesList(list);
+      } catch (_) {
+        setCountriesList([]);
+      } finally {
+        setLoadingCountries(false);
+      }
+    };
+    loadCountries();
   }, []);
 
   // Category display name mapping for frontend
@@ -248,9 +265,12 @@ export default function ExploreScreen() {
     setCountrySearchQuery('');
   };
 
-  const filteredCountries = CONFIGURED_COUNTRIES.filter(c =>
-    c.name.toLowerCase().includes(countrySearchQuery.toLowerCase())
-  );
+  const filteredCountries = !countrySearchQuery.trim()
+    ? countriesList
+    : countriesList.filter(c =>
+        (c.name || '').toLowerCase().includes(countrySearchQuery.toLowerCase().trim()) ||
+        (c.code || '').toLowerCase().includes(countrySearchQuery.toLowerCase().trim())
+      );
 
   // ============ GRID COMPONENTS ============
   const GridPostCard = ({ item, index }: { item: Post; index: number }) => {
@@ -285,16 +305,24 @@ export default function ExploreScreen() {
       || fallbackImageUrl
       || (!isVideo ? mediaUrl : null); // For images, use media URL directly
 
-    return (
-      <TouchableOpacity
-        style={styles.gridCard}
-        onPress={() =>
-          router.push({
-            pathname: '/post/[id]',
-            params: { id: item.id, postData: JSON.stringify(item) },
-          })
-        }
-      >
+  return (
+    <TouchableOpacity
+      style={styles.gridCard}
+      onPress={() =>
+        router.push({
+          pathname: '/profile-feed/explore' as any,
+          params: {
+            initialPostId: item.id,
+            mainCategoryId: String(selectedMainCategoryId ?? ''),
+            subCategoryId: String(selectedSubCategoryId ?? ''),
+            countryId: String(selectedCountryId ?? ''),
+            // Pass the currently visible grid posts so explore feed
+            // shows EXACTLY the same items instead of re-fetching.
+            postsData: JSON.stringify(gridPosts),
+          },
+        })
+      }
+    >
         {thumbnailLoading ? (
           // Show spinner while generating thumbnail (max 5 seconds)
           <View style={[styles.gridMedia, styles.gridNoMedia]}>
@@ -515,7 +543,7 @@ export default function ExploreScreen() {
             >
               <MaterialIcons name="public" size={18} color="#60a5fa" />
               <Text style={styles.filterButtonText}>
-                {CONFIGURED_COUNTRIES.find(c => c.id === selectedCountryId)?.name ||
+                {countriesList.find((c: Country) => c.id === selectedCountryId)?.name ||
                   'All Countries'}
               </Text>
               <Feather name="chevron-down" size={16} color="#666" />
@@ -681,54 +709,69 @@ export default function ExploreScreen() {
               />
             </View>
 
-            <ScrollView style={styles.countryList}>
-              <TouchableOpacity
-                style={[
-                  styles.countryItem,
-                  !selectedCountryId && styles.countryItemActive,
-                ]}
-                onPress={() => handleCountrySelect(null)}
-              >
-                <MaterialIcons
-                  name="public"
-                  size={24}
-                  color={!selectedCountryId ? '#60a5fa' : '#666'}
-                />
-                <Text
-                  style={[
-                    styles.countryItemText,
-                    !selectedCountryId && styles.countryItemTextActive,
-                  ]}
-                >
-                  All Countries
-                </Text>
-                {!selectedCountryId && <Feather name="check" size={20} color="#60a5fa" />}
-              </TouchableOpacity>
-
-              {filteredCountries.map((country) => (
-                <TouchableOpacity
-                  key={country.id}
-                  style={[
-                    styles.countryItem,
-                    selectedCountryId === country.id && styles.countryItemActive,
-                  ]}
-                  onPress={() => handleCountrySelect(country)}
-                >
-                  <Text style={styles.countryFlag}>{country.flag_emoji || '🏳️'}</Text>
-                  <Text
+            {loadingCountries ? (
+              <View style={styles.countryList}>
+                <ActivityIndicator size="small" color="#60a5fa" style={{ paddingVertical: 24 }} />
+              </View>
+            ) : (
+              <FlatList
+                data={filteredCountries}
+                keyExtractor={(item) => String(item.id)}
+                style={styles.countryList}
+                keyboardShouldPersistTaps="handled"
+                ListHeaderComponent={
+                  <TouchableOpacity
                     style={[
-                      styles.countryItemText,
-                      selectedCountryId === country.id && styles.countryItemTextActive,
+                      styles.countryItem,
+                      !selectedCountryId && styles.countryItemActive,
                     ]}
+                    onPress={() => handleCountrySelect(null)}
                   >
-                    {country.name}
-                  </Text>
-                  {selectedCountryId === country.id && (
-                    <Feather name="check" size={20} color="#60a5fa" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+                    <MaterialIcons
+                      name="public"
+                      size={24}
+                      color={!selectedCountryId ? '#60a5fa' : '#666'}
+                    />
+                    <Text
+                      style={[
+                        styles.countryItemText,
+                        !selectedCountryId && styles.countryItemTextActive,
+                      ]}
+                    >
+                      All Countries
+                    </Text>
+                    {!selectedCountryId && <Feather name="check" size={20} color="#60a5fa" />}
+                  </TouchableOpacity>
+                }
+                renderItem={({ item: country }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.countryItem,
+                      selectedCountryId === country.id && styles.countryItemActive,
+                    ]}
+                    onPress={() => handleCountrySelect(country)}
+                  >
+                    <Text style={styles.countryFlag}>{country.flag_emoji || '🏳️'}</Text>
+                    <Text
+                      style={[
+                        styles.countryItemText,
+                        selectedCountryId === country.id && styles.countryItemTextActive,
+                      ]}
+                    >
+                      {country.name}
+                    </Text>
+                    {selectedCountryId === country.id && (
+                      <Feather name="check" size={20} color="#60a5fa" />
+                    )}
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={
+                  <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                    <Text style={{ color: '#666' }}>No countries match your search</Text>
+                  </View>
+                }
+              />
+            )}
           </View>
         </View>
       </Modal>

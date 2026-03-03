@@ -18,25 +18,16 @@ import {
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { router, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi, followsApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import {
-  addLikedPost,
-  removeLikedPost,
-  setPostLikeCount,
-  setPostLikeCounts,
-  updateLikeCount,
-  clearLikes,
-} from '@/lib/store/slices/likesSlice';
+import { setPostLikeCounts, clearLikes } from '@/lib/store/slices/likesSlice';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
-import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
 import ReportModal from '@/components/ReportModal';
@@ -44,7 +35,6 @@ import CommentsModal from '@/components/CommentsModal';
 import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
-import { useMute } from '@/lib/mute-context';
 
 // expo-video handles video playback - no need for manual video ref management
 
@@ -54,707 +44,9 @@ const FEED_TABS = [
   { key: 'challenges', label: 'Competitions' },
 ];
 
-const formatNumber = (num: number): string => {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-  }
-  return num.toString();
-};
-
-
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getFileUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { filterHlsReady } from '@/lib/utils/post-filter';
-import { Avatar } from '@/components/Avatar';
-import { timeAgo } from '@/lib/utils/time-ago';
-
-
-const getMediaUrl = (post: Post): string | null => {
-  return getPostMediaUrl(post);
-};
-
-interface PostItemProps {
-  item: Post;
-  index: number;
-  onLike: (postId: string) => void;
-  onComment: (postId: string) => void;
-  onShare: (postId: string) => void;
-  onReport: (postId: string) => void;
-  onFollow: (userId: string) => void;
-  onUnfollow: (userId: string) => void;
-  isLiked: boolean;
-  isFollowing: boolean;
-  isActive: boolean;
-  shouldPreload: boolean;
-  availableHeight: number;
-  // STREAMING: No cachedMediaUrl - we stream directly from network
-}
-
-const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!text) return null;
-
-  const estimatedLines = text.length / 50;
-  const shouldTruncate = estimatedLines > maxLines || text.split('\n').length > maxLines;
-
-  return (
-    <View>
-      <Text
-        style={styles.caption}
-        numberOfLines={expanded ? undefined : maxLines}
-      >
-        {text}
-      </Text>
-      {shouldTruncate && (
-        <TouchableOpacity onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
-          <Text style={styles.showMoreText}>
-            {expanded ? 'Show less' : 'Show more'}
-          </Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-};
-
-const PostItem: React.FC<PostItemProps> = ({
-  item,
-  index,
-  onLike,
-  onComment,
-  onShare,
-  onReport,
-  onFollow,
-  onUnfollow,
-  isLiked,
-  isFollowing,
-  isActive,
-  shouldPreload,
-  availableHeight,
-}) => {
-  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-
-  const { user } = useAuth();
-  const { sendLikeAction } = useRealtime();
-  const dispatch = useAppDispatch();
-  const likedPosts = useAppSelector(state => state.likes.likedPosts);
-  const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
-
-  const isPostLiked = likedPosts.includes(item.id);
-
-  const cachedLikeCount = postLikeCounts[item.id];
-  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
-
-  const { likes, comments, isLiked: realtimeIsLiked, updateLikesLocally } = useRealtimePost({
-    postId: item.id,
-    initialLikes: initialLikeCount,
-    initialComments: item.comments_count || item.comment_count || 0,
-    initialIsLiked: isPostLiked || isLiked,
-  });
-
-  const wasActiveRef = useRef(isActive);
-  const playerValidRef = useRef(false); // Track if video player is valid (not released)
-  const isMountedRef = useRef(true); // CRITICAL FIX: Track if component is mounted to prevent state updates after unmount
-  const [isPlayerValid, setIsPlayerValid] = useState(false); // CRITICAL FIX: State-based validity for triggering re-renders
-  const [isLiking, setIsLiking] = useState(false);
-  const [imageError, setImageError] = useState(false);
-  const { isMuted, toggleMute } = useMute();
-  const [videoError, setVideoError] = useState(false);
-  const [videoLoaded, setVideoLoaded] = useState(false);
-  const [videoReady, setVideoReady] = useState(false); // INSTAGRAM STYLE: Track when video is ready to display
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [useNativeControls, setUseNativeControls] = useState(false);
-  const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
-  const [imageLoading, setImageLoading] = useState(true);
-  const [videoLoading, setVideoLoading] = useState(true);
-  const progressBarRef = useRef<View>(null);
-  const muteOpacity = useRef(new Animated.Value(0)).current;
-  const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
-
-  // Instagram-style mute toggle with fade indicator
-  // CRITICAL: Try to set videoPlayer.muted DIRECTLY — even if playerValidRef is not yet true
-  const handleMuteToggle = () => {
-    const newMuted = !isMuted;
-    toggleMute(); // Update global context for other components
-
-    // IMMEDIATELY set on the current player — try even without playerValidRef
-    // This fixes mute not working on the first post
-    if (videoPlayer) {
-      try {
-        videoPlayer.muted = newMuted;
-      } catch (e) {
-        // Player might be released — not a concern for first post
-      }
-    }
-
-    muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
-    // Show indicator then fade out
-    muteOpacity.setValue(1);
-    Animated.timing(muteOpacity, {
-      toValue: 0,
-      duration: 800,
-      delay: 300,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  // Instagram-style long-press to pause, release to resume
-  // Uses ref to track state to avoid stale closure issues with Pressable
-  const isPausedByPressRef = useRef(false);
-
-  const handleLongPress = () => {
-    if (videoPlayer) {
-      try {
-        videoPlayer.pause();
-        isPausedByPressRef.current = true;
-      } catch (e) { /* player released */ }
-    }
-  };
-
-  const handlePressOut = () => {
-    if (isPausedByPressRef.current && videoPlayer && isActive) {
-      try {
-        videoPlayer.play();
-      } catch (e) { /* player released */ }
-      isPausedByPressRef.current = false;
-    }
-  };
-
-  const mediaUrl = getMediaUrl(item);
-  const isVideo = item.type === 'video';
-
-  // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete, null otherwise
-  const playbackUrl = getPlaybackUrl(item);
-  const isProcessing = isVideoProcessing(item);
-  const hlsReady = !!playbackUrl;
-
-  // Only create a video player when HLS is ready AND this video is active or preloading
-  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
-
-  // HLS master playlist URL — native player handles adaptive bitrate selection
-  const videoSourceUrl = playbackUrl;
-
-  // CRITICAL: Only create player for videos with a valid HLS source
-  const videoPlayerSource = shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null;
-  const videoPlayer = useVideoPlayer(
-    videoPlayerSource,
-    (player) => {
-      if (player) {
-        try {
-          player.loop = true;
-          player.muted = isMuted; // Only use muted state, always active
-        } catch (error) {
-          console.warn('[VideoPlayer] Error setting player properties:', error);
-        }
-      }
-    }
-  );
-
-  // CRITICAL FIX: Track if player is valid to prevent using released players
-  // This must run immediately when player changes AND trigger re-renders
-  useEffect(() => {
-    if (videoPlayer) {
-      // Player exists - mark as valid
-      playerValidRef.current = true;
-      if (isMountedRef.current) {
-        setIsPlayerValid(true);
-      }
-    } else {
-      // Player is null - mark as invalid immediately
-      playerValidRef.current = false;
-      if (isMountedRef.current) {
-        setIsPlayerValid(false);
-      }
-    }
-  }, [videoPlayer]);
-
-  // CRITICAL FIX: Track component mount state for safe state updates
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      playerValidRef.current = false;
-      // Don't call setIsPlayerValid here as component is unmounting
-    };
-  }, []);
-
-  // CRITICAL FIX: Also check player validity when source changes
-  // When source changes, old player gets released, so we need to invalidate immediately
-  useEffect(() => {
-    if (!videoPlayerSource) {
-      // No source - player will be null, mark as invalid
-      playerValidRef.current = false;
-      if (isMountedRef.current) {
-        setIsPlayerValid(false);
-      }
-    }
-  }, [videoPlayerSource]);
-
-  // CRITICAL FIX: Optimized playback management with proper error handling
-  // Prevents "released object" errors by checking player validity
-  // CRITICAL: This ensures cached videos play instantly when scrolling back
-  useEffect(() => {
-    if (!videoPlayer || !playerValidRef.current) return;
-
-    try {
-      if (isActive && !decoderErrorDetected) {
-        // Active: unmute and play
-        videoPlayer.muted = isMuted;
-        videoPlayer.play();
-        setVideoLoading(false);
-        setVideoLoaded(true);
-      } else {
-        // Not active: pause and mute (preloading silently)
-        videoPlayer.muted = true;
-        videoPlayer.pause();
-      }
-
-      // Reset to start when becoming active again
-      if (isActive && !wasActiveRef.current) {
-        videoPlayer.currentTime = 0;
-        // DON'T reset videoReady here — the video was already loaded,
-        // resetting causes a black flash. videoReady resets via videoPlayerSource effect.
-      }
-
-      wasActiveRef.current = isActive;
-    } catch (error) {
-      // Player was released - mark as invalid
-      console.warn('[VideoPlayer] Player released, marking invalid:', error);
-      playerValidRef.current = false;
-    }
-  }, [isActive, isMuted, videoPlayer, decoderErrorDetected, index]);
-
-  // CRITICAL FIX: Instant video playback with proper error handling
-  useEffect(() => {
-    if (!videoPlayer || !playerValidRef.current) return;
-
-    try {
-      const subscription = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
-        if (isMountedRef.current) {
-          setIsPlaying(event.isPlaying);
-
-          if (event.isPlaying && isActive) {
-            // MUX STYLE: Video is playing - NOW hide the thumbnail
-            setVideoReady(true);
-            setVideoLoading(false);
-            setVideoLoaded(true);
-          }
-        }
-      });
-
-      return () => {
-        try {
-          subscription.remove();
-        } catch (error) {
-          // Silently handle cleanup errors
-        }
-      };
-    } catch (error) {
-      // Player was released - mark as invalid
-      playerValidRef.current = false;
-      return () => { };
-    }
-  }, [videoPlayer, isActive]);
-
-  // CRITICAL FIX: Also hide loading when video is ready (even if not playing yet)
-  useEffect(() => {
-    if (!videoPlayer || !isActive) return;
-
-    // If video player exists and is active, assume it's ready
-    // This prevents the spinner from showing unnecessarily
-    const timer = setTimeout(() => {
-      setVideoLoading(false);
-      setVideoLoaded(true);
-    }, 100); // Very short delay to allow video to initialize
-
-    return () => clearTimeout(timer);
-  }, [videoPlayer, isActive]);
-
-  // Instagram-style progress tracking: poll currentTime/duration every 250ms
-  // CRITICAL: Don't require isPlaying — poll whenever player is active
-  useEffect(() => {
-    if (!videoPlayer || !isActive) {
-      return;
-    }
-    const interval = setInterval(() => {
-      try {
-        const ct = videoPlayer.currentTime || 0;
-        const dur = videoPlayer.duration || 0;
-        if (dur > 0) {
-          setVideoProgress(ct / dur);
-          setVideoDuration(dur);
-        }
-      } catch (_) { /* player released */ }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [videoPlayer, isActive]);
-
-
-  const likeScale = useRef(new Animated.Value(1)).current;
-  const likeOpacity = useRef(new Animated.Value(0)).current;
-
-  if (__DEV__ && index < 3) {
-    console.log(`📄 [PostItem ${index}] Post data:`, {
-      id: item.id,
-      type: item.type,
-      video_url: item.video_url,
-      image: item.image,
-      imageUrl: item.imageUrl,
-      fullUrl: (item as any).fullUrl,
-      mediaUrl: mediaUrl,
-      shouldPreload,
-      isActive,
-      allKeys: Object.keys(item),
-    });
-  }
-
-  // CRITICAL FIX: Don't show loading state - videos preload invisibly
-  // Only show loading if video actually fails to load
-  useEffect(() => {
-    if (!isActive) {
-      setVideoLoading(false);
-      setImageLoading(false);
-    }
-    // Don't set loading to true - preloading happens silently
-  }, [isActive, isVideo]);
-
-
-  const handleVideoTap = () => {
-    handleMuteToggle();
-  };
-
-  const handleLike = async () => {
-    if (!user) {
-      Alert.alert(
-        'Login Required',
-        'Please log in to like posts and interact with the community.',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel'
-          },
-          {
-            text: 'Log In',
-            onPress: () => router.push({ pathname: '/auth/login' as any })
-          }
-        ]
-      );
-      return;
-    }
-
-    if (isLiking) return;
-    setIsLiking(true);
-
-    const currentIsLiked = isPostLiked;
-    const newIsLiked = !currentIsLiked;
-
-    Animated.sequence([
-      Animated.timing(likeScale, {
-        toValue: 1.3,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(likeScale, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    if (newIsLiked) {
-      Animated.sequence([
-        Animated.timing(likeOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(likeOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-
-    sendLikeAction(item.id, newIsLiked);
-
-    await onLike(item.id);
-
-    setIsLiking(false);
-  };
-
-  const handleFollow = () => {
-    if (!user) {
-      router.push({ pathname: '/auth/login' as any });
-      return;
-    }
-
-    if (isFollowing) {
-      onUnfollow(item.user?.id || '');
-    } else {
-      onFollow(item.user?.id || '');
-    }
-  };
-
-  const handleComment = useCallback(() => {
-    if (onComment && item.id) {
-      onComment(item.id);
-    }
-  }, [onComment, item.id]);
-
-  const handleUserPress = () => {
-    if (item.user?.id) {
-      router.push({
-        pathname: '/user/[id]' as any,
-        params: { id: item.user.id }
-      });
-    }
-  };
-
-  const handleCategoryPress = () => {
-    const categoryName = typeof item.category === 'string' ? item.category : item.category?.name;
-    if (categoryName) {
-      router.push({
-        pathname: '/category/[name]' as any,
-        params: { name: categoryName }
-      });
-    }
-  };
-
-  return (
-    <View
-      style={[styles.postContainer, { height: availableHeight }]}
-      pointerEvents="box-none"
-    >
-      <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
-        {isVideo ? (
-          <>
-            <Pressable
-              style={styles.mediaWrapper}
-              onPress={handleMuteToggle}
-              onLongPress={handleLongPress}
-              onPressOut={handlePressOut}
-              delayLongPress={300}
-            >
-              {/* LAYER 1: Thumbnail - ALWAYS visible until video is PLAYING */}
-              {/* DATA SAVER: Only use thumbnail_url (server-generated). NEVER load raw MP4 as image. */}
-              {getThumbnailUrl(item) ? (
-                <Image
-                  source={{ uri: getThumbnailUrl(item)! }}
-                  style={[
-                    styles.media,
-                    {
-                      position: 'absolute',
-                      zIndex: 1,
-                      opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
-                    }
-                  ]}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={[styles.media, { position: 'absolute', zIndex: 1, backgroundColor: '#111' }]} />
-              )}
-
-              {/* LAYER 1.5: Processing state overlay — show when HLS is not yet ready */}
-              {isVideo && !hlsReady && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                  {isProcessing ? (
-                    <>
-                      <ActivityIndicator size="large" color="#fff" />
-                      <Text style={[styles.placeholderText, { marginTop: 12 }]}>Processing video…</Text>
-                    </>
-                  ) : item.processing_status === 'failed' ? (
-                    <>
-                      <Feather name="alert-circle" size={48} color="#ff4444" />
-                      <Text style={[styles.placeholderText, { marginTop: 12, color: '#ff4444' }]}>Processing failed</Text>
-                    </>
-                  ) : null}
-                </View>
-              )}
-
-              {/* LAYER 2: VideoView - WRAPPED IN pointerEvents=none SO IT CANNOT STEAL TOUCHES */}
-              {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
-                <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
-                  <VideoView
-                    player={videoPlayer}
-                    style={styles.media}
-                    contentFit="cover"
-                    nativeControls={false}
-                  />
-                </View>
-              )}
-
-              {/* Show error state */}
-              {videoError && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
-                </View>
-              )}
-
-              {/* Show placeholder if no media URL */}
-              {!mediaUrl && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
-                </View>
-              )}
-
-              {/* Instagram-style mute indicator — inside Pressable so it shows on top */}
-              <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
-                <View style={styles.muteIndicatorBadge}>
-                  <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
-                </View>
-              </Animated.View>
-
-            </Pressable>
-          </>
-        ) : (
-          <View style={styles.mediaWrapper}>
-            {mediaUrl && !imageError ? (
-              <Image
-                source={{ uri: mediaUrl }}
-                style={styles.media}
-                resizeMode="cover"
-              />
-            ) : (
-              <View style={[styles.media, styles.placeholderContainer]}>
-                <Feather name="image" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Image unavailable</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-
-
-        <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
-          <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Avatar
-              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
-              size={48}
-              style={styles.userAvatar}
-            />
-            {user && user.id !== item.user?.id && (
-              <TouchableOpacity
-                style={styles.followIconButton}
-                onPress={handleFollow}
-              >
-                <Feather
-                  name={isFollowing ? "check" : "plus"}
-                  size={16}
-                  color="#000"
-                />
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-            <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-              <Feather
-                name="heart"
-                size={24}
-                color={isPostLiked ? "#ff2d55" : "#fff"}
-                fill={isPostLiked ? "#ff2d55" : "none"}
-              />
-            </Animated.View>
-            <Text style={styles.actionCount}>{formatNumber(cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0))}</Text>
-          </TouchableOpacity>
-
-          <Animated.View
-            style={[
-              styles.likeAnimationOverlay,
-              { opacity: likeOpacity }
-            ]}
-          >
-            <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
-          </Animated.View>
-
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => {
-              handleComment();
-            }}
-            activeOpacity={0.7}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Feather name="message-circle" size={24} color="#fff" />
-            <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-            <Feather name="share-2" size={24} color="#fff" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-            <Feather name="more-horizontal" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={[styles.bottomInfo, { bottom: 60 + insets.bottom - 40 }]}>
-          <View style={styles.bottomInfoContent}>
-            <TouchableOpacity onPress={handleUserPress}>
-              <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-            </TouchableOpacity>
-
-            {/* Show caption/description only once - prefer caption, then description, then title */}
-            {(item.caption || item.description || item.title) && (
-              <ExpandableCaption
-                text={item.caption || item.description || item.title || ''}
-                maxLines={2}
-              />
-            )}
-            {/* Timestamp */}
-            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
-              <Text style={styles.timestamp}>
-                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
-              </Text>
-            )}
-          </View>
-
-          {item.category && (
-            <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-              <Text style={styles.categoryText}>
-                #{typeof item.category === 'string' ? item.category : item.category.name}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {user && user.id !== item.user?.id && (
-            <TouchableOpacity
-              style={[
-                styles.followButton,
-                { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }
-              ]}
-              onPress={handleFollow}
-            >
-              <Text style={[
-                styles.followButtonText,
-                { color: isFollowing ? '#fff' : '#000' }
-              ]}>
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* PROGRESS BAR — renders LAST so it's on top of everything */}
-        {/* bottom pushed UP above tab bar so it's visible on screen */}
-        {isVideo && isActive && (
-          <View style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 11 }]} pointerEvents="none">
-            <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
-          </View>
-        )}
-
-      </View>
-    </View>
-  );
-};
+import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 
 export default function FeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -939,7 +231,7 @@ export default function FeedScreen() {
         // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
         if (postsArray.length > 0 && page === 1) {
           const videoPosts = postsArray
-            .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
+            .filter(p => (p.type === 'video' || p.video_url) && getPostMediaUrl(p))
             .slice(0, 3); // Prefetch first 3 videos
 
           // Videos will be cached automatically when loaded by Expo AV
@@ -1207,7 +499,7 @@ export default function FeedScreen() {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const mediaUrl = getMediaUrl(post);
+        const mediaUrl = getPostMediaUrl(post);
         await Share.share({
           message: mediaUrl || post.caption || 'Check out this post on Talynk!',
           title: 'Check out this post on Talynk!',
@@ -1352,7 +644,7 @@ export default function FeedScreen() {
                 // STREAMING: Videos stream directly - native player handles buffering
 
                 return (
-                  <PostItem
+                  <FullscreenFeedPostItem
                     item={item}
                     index={index}
                     onLike={handleLike}
@@ -1553,7 +845,7 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   media: {
-    backgroundColor: '#000',
+    backgroundColor: '#0d0d0d',
     width: '100%',
     height: '100%',
   },
@@ -1581,6 +873,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 40,
     padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  muteButtonCorner: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },

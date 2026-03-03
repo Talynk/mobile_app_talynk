@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { postsApi, likesApi, userApi } from '@/lib/api';
+import { postsApi, likesApi, userApi, categoriesApi, followsApi } from '@/lib/api';
 import { API_BASE_URL } from '@/lib/config';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
@@ -34,525 +33,39 @@ import {
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useRealtime } from '@/lib/realtime-context';
 import RealtimeProvider from '@/lib/realtime-context';
-import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import { filterHlsReady } from '@/lib/utils/post-filter';
+import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
+import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-// Global mute context
-const MuteContext = createContext({ isMuted: false, setIsMuted: (v: boolean) => { } });
-const useMute = () => useContext(MuteContext);
-
-// Utility functions
-const formatNumber = (num: number): string => {
-  if (num >= 1000000) {
-    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-  }
-  if (num >= 1000) {
-    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
-  }
-  return num.toString();
-};
-
-
-import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
-import { Avatar } from '@/components/Avatar';
-import { timeAgo } from '@/lib/utils/time-ago';
-
-const getMediaUrl = (post: Post): string | null => {
-  return getPostMediaUrl(post);
-};
-
-interface PostItemProps {
-  item: Post;
-  index: number;
-  onLike: (postId: string) => void;
-  onComment: (postId: string) => void;
-  onShare: (postId: string) => void;
-  onReport: (postId: string) => void;
-  isLiked: boolean;
-  isActive: boolean;
-  shouldPreload: boolean;
-  availableHeight: number;
-}
-
-// Expandable caption component
-const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!text) return null;
-
-  const estimatedLines = text.length / 50;
-  const shouldTruncate = estimatedLines > maxLines || text.split('\n').length > maxLines;
-
-  return (
-    <View>
-      <Text
-        style={styles.caption}
-        numberOfLines={expanded ? undefined : maxLines}
-      >
-        {text}
-      </Text>
-      {shouldTruncate && (
-        <TouchableOpacity onPress={() => setExpanded(!expanded)} activeOpacity={0.7}>
-          <Text style={styles.showMoreText}>
-            {expanded ? 'Show less' : 'Show more'}
-          </Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
-};
-
-const PostItem = React.memo(({
-  item,
-  index,
-  onLike,
-  onComment,
-  onShare,
-  onReport,
-  isLiked,
-  isActive,
-  shouldPreload,
-  availableHeight
-}: PostItemProps) => {
-  const { user } = useAuth();
-  const { sendLikeAction } = useRealtime();
-  const dispatch = useAppDispatch();
-  const likedPosts = useAppSelector(state => state.likes.likedPosts);
-  const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
-
-  const isPostLiked = likedPosts.includes(item.id);
-  const cachedLikeCount = postLikeCounts[item.id];
-  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
-
-  const { likes, comments, isLiked: realtimeIsLiked, updateLikesLocally } = useRealtimePost({
-    postId: item.id,
-    initialLikes: initialLikeCount,
-    initialComments: item.comments_count || 0,
-    initialIsLiked: isPostLiked || isLiked,
-  });
-
-  const [isLiking, setIsLiking] = useState(false);
-  const [imageError, setImageError] = useState(false);
-  const { isMuted, setIsMuted } = useMute();
-  const [videoError, setVideoError] = useState(false);
-  const [videoReady, setVideoReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const insets = useSafeAreaInsets();
-
-  const likeScale = useRef(new Animated.Value(1)).current;
-  const likeOpacity = useRef(new Animated.Value(0)).current;
-  const muteOpacity = useRef(new Animated.Value(0)).current;
-  const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
-  const [isPausedByPress, setIsPausedByPress] = useState(false);
-  const isPausedByPressRef = useRef(false);
-  const [videoProgress, setVideoProgress] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
-
-  const mediaUrl = getMediaUrl(item);
-
-  // Log post item structure for debugging (only first 3 items to avoid spam)
-  if (__DEV__ && index < 3) {
-    console.log(`📄 [ProfileFeed PostItem ${index}] Post data:`, {
-      id: item.id,
-      type: item.type,
-      video_url: item.video_url,
-      image: item.image,
-      imageUrl: item.imageUrl,
-      fullUrl: (item as any).fullUrl,
-      mediaUrl: mediaUrl,
-      allKeys: Object.keys(item),
-    });
-  }
-  const isVideo =
-    item.type === 'video' ||
-    (mediaUrl !== null &&
-      (mediaUrl.includes('.mp4') ||
-        mediaUrl.includes('.mov') ||
-        mediaUrl.includes('.webm') ||
-        mediaUrl.includes('.m3u8')));
-
-  // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete
-  const playbackUrl = getPlaybackUrl(item);
-  const hlsReady = !!playbackUrl;
-  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
-
-  // expo-video player — handles HLS natively
-  const videoPlayer = useVideoPlayer(
-    shouldLoadVideo && playbackUrl ? playbackUrl : null,
-    (player) => {
-      if (player) {
-        player.loop = true;
-        player.muted = isMuted;
-      }
-    }
-  );
-
-  // Track playback state for thumbnail layer
-  useEffect(() => {
-    if (!videoPlayer) return;
-    try {
-      const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
-        setIsPlaying(event.isPlaying);
-        if (event.isPlaying) setVideoReady(true);
-      });
-      return () => { try { sub.remove(); } catch { } };
-    } catch { return () => { }; }
-  }, [videoPlayer]);
-
-  // Sync mute state
-  useEffect(() => {
-    if (!videoPlayer) return;
-    try { videoPlayer.muted = isMuted; } catch { }
-  }, [isMuted, videoPlayer]);
-
-  // Auto-play when active
-  useEffect(() => {
-    if (!videoPlayer) return;
-    if (isActive) {
-      try { videoPlayer.play(); } catch { }
-    } else {
-      try { videoPlayer.pause(); } catch { }
-      setVideoReady(false);
-      setIsPlaying(false);
-    }
-  }, [isActive, videoPlayer]);
-
-  const handleVideoTap = () => {
-    const newMuted = !isMuted;
-    setIsMuted(newMuted);
-    muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
-    muteOpacity.setValue(1);
-    Animated.timing(muteOpacity, {
-      toValue: 0,
-      duration: 800,
-      delay: 300,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  // Instagram-style long-press to pause, release to resume
-  const handleLongPress = () => {
-    if (videoPlayer) {
-      try {
-        videoPlayer.pause();
-        isPausedByPressRef.current = true;
-      } catch (e) { /* player released */ }
-    }
-  };
-
-  const handlePressOut = () => {
-    if (isPausedByPressRef.current && videoPlayer && isActive) {
-      try {
-        videoPlayer.play();
-      } catch (e) { /* player released */ }
-      isPausedByPressRef.current = false;
-    }
-  };
-
-  // Progress tracking: poll currentTime/duration every 250ms
-  useEffect(() => {
-    if (!videoPlayer || !isActive) return;
-    const interval = setInterval(() => {
-      try {
-        const ct = videoPlayer.currentTime || 0;
-        const dur = videoPlayer.duration || 0;
-        if (dur > 0) {
-          setVideoProgress(ct / dur);
-          setVideoDuration(dur);
-        }
-      } catch (_) { /* player released */ }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [videoPlayer, isActive]);
-
-  const handleLike = async () => {
-    if (!user) {
-      Alert.alert(
-        'Login Required',
-        'Please log in to like posts and interact with the community.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Log In', onPress: () => router.push('/auth/login') }
-        ]
-      );
-      return;
-    }
-
-    if (isLiking) return;
-    setIsLiking(true);
-
-    const currentIsLiked = isPostLiked;
-    const newIsLiked = !currentIsLiked;
-
-    Animated.sequence([
-      Animated.timing(likeScale, {
-        toValue: 1.3,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(likeScale, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
-
-    if (newIsLiked) {
-      Animated.sequence([
-        Animated.timing(likeOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(likeOpacity, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-
-    sendLikeAction(item.id, newIsLiked);
-    await onLike(item.id);
-
-    setIsLiking(false);
-  };
-
-  const handleComment = useCallback(() => {
-    if (onComment && item.id) {
-      onComment(item.id);
-    }
-  }, [onComment, item.id]);
-
-  const handleUserPress = () => {
-    if (item.user?.id) {
-      router.push({
-        pathname: '/user/[id]',
-        params: { id: item.user.id }
-      });
-    }
-  };
-
-  const handleCategoryPress = () => {
-    const categoryName = typeof item.category === 'string' ? item.category : item.category?.name;
-    if (categoryName) {
-      router.push({
-        pathname: '/category/[name]',
-        params: { name: categoryName }
-      });
-    }
-  };
-
-  return (
-    <View style={[styles.postContainer, { height: availableHeight }]}>
-      {/* Media */}
-      <View style={[styles.mediaContainer, { height: availableHeight }]}>
-        {isVideo ? (
-          <Pressable
-            style={styles.mediaWrapper}
-            onPress={handleVideoTap}
-            onLongPress={handleLongPress}
-            onPressOut={handlePressOut}
-            delayLongPress={300}
-          >
-            {/* LAYER 1: Thumbnail — ALWAYS visible until video is PLAYING (zero black screens) */}
-            {mediaUrl && (
-              <Image
-                source={{ uri: getThumbnailUrl(item) || mediaUrl }}
-                style={[
-                  styles.media,
-                  {
-                    position: 'absolute',
-                    zIndex: 1,
-                    opacity: (isActive && isPlaying && videoReady) ? 0 : 1,
-                  }
-                ]}
-                resizeMode="cover"
-              />
-            )}
-
-            {/* LAYER 2: VideoView (expo-video) — WRAPPED IN pointerEvents=none */}
-            {videoPlayer && isActive && !videoError && (
-              <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
-                <VideoView
-                  player={videoPlayer}
-                  style={styles.media}
-                  contentFit="cover"
-                  nativeControls={false}
-                />
-              </View>
-            )}
-
-            {/* Error state */}
-            {videoError && (
-              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                <Feather name="video-off" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Video unavailable</Text>
-              </View>
-            )}
-
-            {/* No media URL */}
-            {!mediaUrl && (
-              <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                <Feather name="video-off" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Video unavailable</Text>
-              </View>
-            )}
-          </Pressable>
-        ) : (
-          <View style={styles.mediaWrapper}>
-            {mediaUrl && !imageError ? (
-              <Image
-                source={{ uri: mediaUrl }}
-                style={styles.media}
-                resizeMode="cover"
-                onError={() => setImageError(true)}
-              />
-            ) : (
-              <View style={[styles.media, styles.placeholderContainer]}>
-                <Feather name="image" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Image unavailable</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* Instagram-style mute indicator — shows on toggle and fades away */}
-        {isVideo && isActive && (
-          <Animated.View style={[styles.muteIndicatorOverlay, { opacity: muteOpacity }]} pointerEvents="none">
-            <View style={styles.muteIndicatorBadge}>
-              <Feather name={muteIconRef.current} size={32} color="rgba(255,255,255,0.9)" />
-            </View>
-          </Animated.View>
-        )}
-
-        {/* Progress bar moved to render LAST - after bottomInfo */}
-
-
-        {/* Heart animation overlay */}
-        <Animated.View
-          style={[
-            styles.heartOverlay,
-            { opacity: likeOpacity }
-          ]}
-          pointerEvents="none"
-        >
-          <MaterialIcons name="favorite" size={100} color="#fff" />
-        </Animated.View>
-
-        {/* Right side actions */}
-        <View style={styles.actionsContainer}>
-          {/* User avatar */}
-          <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Avatar
-              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
-              size={40}
-              style={styles.avatar}
-            />
-          </TouchableOpacity>
-
-          {/* Like */}
-          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-            <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-              <MaterialIcons
-                name={isPostLiked ? 'favorite' : 'favorite-border'}
-                size={28}
-                color={isPostLiked ? '#ef4444' : '#fff'}
-              />
-            </Animated.View>
-            <Text style={styles.actionText}>{formatNumber(cachedLikeCount ?? likes)}</Text>
-          </TouchableOpacity>
-
-          {/* Comment */}
-          <TouchableOpacity style={styles.actionButton} onPress={handleComment}>
-            <Feather name="message-circle" size={26} color="#fff" />
-            <Text style={styles.actionText}>{formatNumber(comments)}</Text>
-          </TouchableOpacity>
-
-          {/* Share */}
-          <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-            <Feather name="share-2" size={24} color="#fff" />
-          </TouchableOpacity>
-
-          {/* More Actions */}
-          <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-            <Feather name="more-horizontal" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Bottom Info - positioned above progress bar */}
-        <View style={[styles.bottomInfo, { bottom: Math.max(insets.bottom + 5, 21) }]}>
-          <View style={styles.bottomInfoContent}>
-            <TouchableOpacity onPress={handleUserPress}>
-              <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-            </TouchableOpacity>
-
-            {/* Show caption/description only once - prefer caption, then description, then title */}
-            {(item.caption || item.description || item.title) && (
-              <ExpandableCaption
-                text={item.caption || item.description || item.title || ''}
-                maxLines={2}
-              />
-            )}
-            {/* Timestamp */}
-            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
-              <Text style={styles.timestamp}>
-                {timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}
-              </Text>
-            )}
-          </View>
-
-          {/* Category Badge */}
-          {item.category && (
-            <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-              <Text style={styles.categoryText}>
-                #{typeof item.category === 'string' ? item.category : item.category.name}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Publish button for draft posts - accessible from playback screen */}
-          {(item.status === 'draft' || item.status === 'Draft') && user && user.id === item.user?.id && (
-            <TouchableOpacity
-              style={styles.publishDraftButton}
-              onPress={() => onReport(item.id)}
-              activeOpacity={0.8}
-            >
-              <Feather name="send" size={16} color="#fff" />
-              <Text style={styles.publishDraftButtonText}>Publish</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* PROGRESS BAR — renders LAST, pushed UP above bottom edge */}
-        {isVideo && isActive && (
-          <View style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 20 }]} pointerEvents="none">
-            <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
-          </View>
-        )}
-
-        {/* Video progress handled by custom progress bar above */}
-      </View>
-    </View>
-  );
-});
-
 export default function ProfileFeedScreen() {
-  const { userId, initialPostId, status } = useLocalSearchParams();
+  const params = useLocalSearchParams<{
+    userId?: string;
+    initialPostId?: string;
+    status?: string;
+    initialPostData?: string;
+    mainCategoryId?: string;
+    subCategoryId?: string;
+    countryId?: string;
+    postsData?: string;
+  }>();
 
   return (
     <RealtimeProvider>
       <ProfileFeedContent
-        userId={userId as string}
-        initialPostId={initialPostId as string}
-        status={status as string}
-        initialPostData={useLocalSearchParams().initialPostData as string}
+        userId={(params.userId ?? params[0]) as string}
+        initialPostId={params.initialPostId as string}
+        status={params.status as string}
+        initialPostData={params.initialPostData as string}
+        exploreMainCategoryId={params.mainCategoryId}
+        exploreSubCategoryId={params.subCategoryId}
+        exploreCountryId={params.countryId}
+        explorePostsData={params.postsData}
       />
     </RealtimeProvider>
   );
@@ -563,9 +76,51 @@ interface ProfileFeedContentProps {
   initialPostId?: string;
   status?: string;
   initialPostData?: string;
+  exploreMainCategoryId?: string;
+  exploreSubCategoryId?: string;
+  exploreCountryId?: string;
+  explorePostsData?: string;
 }
 
-function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: ProfileFeedContentProps) {
+function applyExploreFilters(
+  posts: Post[],
+  categories: any[],
+  mainCategoryId: number | null,
+  subCategoryId: number | null,
+  countryId: number | null
+): Post[] {
+  let filtered = [...posts];
+  if (countryId) {
+    filtered = filtered.filter((p: any) => p.user?.country?.id === countryId);
+  }
+  if (subCategoryId) {
+    filtered = filtered.filter(
+      (p: any) => p.category_id === subCategoryId || p.category?.id === subCategoryId
+    );
+  } else if (mainCategoryId) {
+    const main = categories.find((c: any) => c.id === mainCategoryId);
+    const childIds: number[] = (main?.children || []).map((ch: any) => ch.id);
+    if (childIds.length) {
+      filtered = filtered.filter((p: any) => childIds.includes(p.category_id || p.category?.id));
+    } else {
+      filtered = filtered.filter(
+        (p: any) => p.category_id === mainCategoryId || p.category?.id === mainCategoryId
+      );
+    }
+  }
+  return filtered;
+}
+
+function ProfileFeedContent({
+  userId,
+  initialPostId,
+  status,
+  initialPostData,
+  exploreMainCategoryId,
+  exploreSubCategoryId,
+  exploreCountryId,
+  explorePostsData,
+}: ProfileFeedContentProps) {
   // Parse initial post data if available for instant loading
   const initialPost = initialPostData ? (() => {
     try { return JSON.parse(initialPostData); } catch (e) { return null; }
@@ -587,16 +142,15 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [commentsPostTitle, setCommentsPostTitle] = useState<string>('');
   const [commentsPostAuthor, setCommentsPostAuthor] = useState<string>('');
-  const [isMuted, setIsMuted] = useState(false); // Videos unmuted by default
   const [username, setUsername] = useState<string>('');
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
-  const { syncLikedPostsFromServer } = useCache();
+  const { syncLikedPostsFromServer, followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const insets = useSafeAreaInsets();
-
   const likesManager = useLikesManager();
+  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
 
   // Calculate available height for posts
   const headerHeight = insets.top + 50;
@@ -613,19 +167,72 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         setCurrentPage(1);
         setHasMore(true);
       } else if (page === 1) {
-        // Only set loading if we don't have posts (prevent hiding initial post)
         if (posts.length === 0) setLoading(true);
       } else {
         setLoadingMore(true);
       }
 
       const postStatus = status || 'active';
-      const isOwnProfile = user && user.id === userId;
+      const isExplore = userId === 'explore';
+      const isOwnProfile = !isExplore && user && user.id === userId;
 
       let response;
       let postsArray: Post[] = [];
 
-      if (isOwnProfile) {
+      if (isExplore) {
+        let explorePosts: Post[] = [];
+
+        // If Explore grid passed us the exact posts, use them directly
+        if (explorePostsData) {
+          try {
+            const parsed = JSON.parse(explorePostsData);
+            if (Array.isArray(parsed)) {
+              explorePosts = parsed as Post[];
+            }
+          } catch {
+            // Fallback to API fetch below
+          }
+        }
+
+        // Fallback: if we still have no posts, fetch via API + filters
+        if (explorePosts.length === 0) {
+          const [categoriesRes, postsRes] = await Promise.all([
+            categoriesApi.getAll(),
+            postsApi.getAll(1, 50),
+          ]);
+          const categories = (categoriesRes.data as any)?.categories ?? [];
+          const allPosts = (postsRes.data as any)?.posts ?? [];
+          const mainId = exploreMainCategoryId ? parseInt(exploreMainCategoryId, 10) : null;
+          const subId = exploreSubCategoryId ? parseInt(exploreSubCategoryId, 10) : null;
+          const cId = exploreCountryId ? parseInt(exploreCountryId, 10) : null;
+
+          explorePosts = filterHlsReady(allPosts);
+          explorePosts = applyExploreFilters(
+            explorePosts,
+            categories,
+            isNaN(mainId as number) ? null : mainId,
+            isNaN(subId as number) ? null : subId,
+            isNaN(cId as number) ? null : cId
+          );
+        }
+
+        // SAFETY: Always include the tapped post, even if filters are weird
+        if (initialPostId && !explorePosts.find(p => p.id === initialPostId)) {
+          try {
+            const singleRes = await postsApi.getById(initialPostId);
+            if (singleRes.status === 'success' && singleRes.data) {
+              explorePosts.unshift(singleRes.data as Post);
+            }
+          } catch {
+            // ignore – we just skip the safety post
+          }
+        }
+
+        postsArray = explorePosts;
+        // Explore feed does not depend on response.status
+        response = { status: 'success' } as any;
+        setHasMore(false);
+      } else if (isOwnProfile) {
         // Use getOwnPosts for current user's posts (has full data including media URLs)
         response = await userApi.getOwnPosts();
         if (response.status === 'success' && response.data?.posts) {
@@ -789,12 +396,28 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
+          const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))] as string[];
+          const followStatusPromises = uniqueUserIds.map(async (uid: string) => {
+            try {
+              const res = await followsApi.checkFollowing(uid);
+              return { userId: uid, isFollowing: !!res.data?.isFollowing };
+            } catch {
+              return { userId: uid, isFollowing: false };
+            }
+          });
+          const followStatuses = await Promise.all(followStatusPromises);
+          const followMap: Record<string, boolean> = {};
+          followStatuses.forEach(({ userId: uid, isFollowing }) => {
+            followMap[uid] = isFollowing;
+            updateFollowedUsers(uid, isFollowing);
+          });
+          setUserFollowStatus(prev => ({ ...prev, ...followMap }));
         }
 
         // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
         if (postsArray.length > 0 && (page === 1 || refresh)) {
           const videoPosts = postsArray
-            .filter(p => (p.type === 'video' || p.video_url) && getMediaUrl(p))
+            .filter(p => (p.type === 'video' || p.video_url) && getPostMediaUrl(p))
             .slice(0, 3); // Prefetch first 3 videos
 
           // Videos will be cached automatically when loaded by Expo AV
@@ -865,7 +488,7 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [userId, status, user, dispatch, syncLikedPostsFromServer, initialPostId, initialScrollDone]);
+  }, [userId, status, user, dispatch, syncLikedPostsFromServer, updateFollowedUsers, initialPostId, initialScrollDone, exploreMainCategoryId, exploreSubCategoryId, exploreCountryId, explorePostsData]);
 
   const loadMorePosts = useCallback(() => {
     if (!loadingMore && hasMore && !loading) {
@@ -956,7 +579,7 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const mediaUrl = getMediaUrl(post);
+        const mediaUrl = getPostMediaUrl(post);
         await Share.share({
           message: mediaUrl || post.caption || 'Check out this post on Talynk!',
           title: 'Check out this post on Talynk!',
@@ -975,6 +598,44 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
     }
     setReportPostId(postId);
     setReportModalVisible(true);
+  };
+
+  const handleFollow = async (targetUserId: string) => {
+    if (!user) return;
+    updateFollowedUsers(targetUserId, true);
+    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+    try {
+      const response = await followsApi.follow(targetUserId);
+      if (response.status !== 'success') {
+        updateFollowedUsers(targetUserId, false);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      } else {
+        const checkRes = await followsApi.checkFollowing(targetUserId);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: !!checkRes.data?.isFollowing }));
+      }
+    } catch {
+      updateFollowedUsers(targetUserId, false);
+      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+    }
+  };
+
+  const handleUnfollow = async (targetUserId: string) => {
+    if (!user) return;
+    updateFollowedUsers(targetUserId, false);
+    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+    try {
+      const response = await followsApi.unfollow(targetUserId);
+      if (response.status !== 'success') {
+        updateFollowedUsers(targetUserId, true);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      } else {
+        const checkRes = await followsApi.checkFollowing(targetUserId);
+        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: !!checkRes.data?.isFollowing }));
+      }
+    } catch {
+      updateFollowedUsers(targetUserId, true);
+      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+    }
   };
 
   const handlePublishDraft = async (postId: string) => {
@@ -1059,32 +720,31 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>
-          {username ? `@${username}'s Posts` : 'Posts'}
+          {userId === 'explore' ? 'Explore' : username ? `@${username}'s Posts` : 'Posts'}
         </Text>
 
         <View style={styles.headerSpacer} />
       </View>
 
-      <MuteContext.Provider value={{ isMuted, setIsMuted }}>
-        <FlatList
+      <FlatList
           ref={flatListRef}
           data={posts}
           renderItem={({ item, index }) => {
             const isActive = isScreenFocused && currentIndex === index;
             const distanceFromActive = index - currentIndex;
-            // Keep players alive: 5 behind + 3 ahead for caching
-            const shouldPreload = !isActive &&
-              distanceFromActive >= -5 && distanceFromActive <= 3;
-
+            const shouldPreload = !isActive && distanceFromActive >= -5 && distanceFromActive <= 3;
             return (
-              <PostItem
+              <FullscreenFeedPostItem
                 item={item}
                 index={index}
                 onLike={handleLike}
                 onComment={handleComment}
                 onShare={handleShare}
                 onReport={handleReport}
+                onFollow={handleFollow}
+                onUnfollow={handleUnfollow}
                 isLiked={likedPosts.includes(item.id)}
+                isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                 isActive={isActive}
                 shouldPreload={shouldPreload}
                 availableHeight={availableHeight}
@@ -1095,18 +755,16 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
           }}
-          pagingEnabled={false}
+          pagingEnabled={true}
           showsVerticalScrollIndicator={false}
           snapToInterval={availableHeight}
           snapToAlignment="start"
           decelerationRate="fast"
-          disableIntervalMomentum={true}
           contentContainerStyle={{ paddingBottom: 0 }}
-          windowSize={2}
-          initialNumToRender={1}
-          maxToRenderPerBatch={1}
-          updateCellsBatchingPeriod={100}
-          removeClippedSubviews={true}
+          windowSize={5}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          removeClippedSubviews={false}
           getItemLayout={(data, index) => ({
             length: availableHeight,
             offset: availableHeight * index,
@@ -1149,7 +807,6 @@ function ProfileFeedContent({ userId, initialPostId, status, initialPostData }: 
             }, 100);
           }}
         />
-      </MuteContext.Provider>
 
       {/* Report Modal */}
       <ReportModal
@@ -1291,6 +948,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 40,
     padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  muteButtonCorner: {
+    position: 'absolute',
+    right: 16,
+    zIndex: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'center',
     alignItems: 'center',
   },

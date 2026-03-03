@@ -896,7 +896,9 @@ export default function CommentsModal({
             <View style={[
               styles.inputWrapper,
               { 
-                paddingBottom: isKeyboardVisible ? 8 : Math.max(insets.bottom, 16)
+                paddingBottom: isKeyboardVisible
+                  ? keyboardHeight + Math.max(insets.bottom, 8)
+                  : Math.max(insets.bottom, 16)
               }
             ]}>
               {user ? (

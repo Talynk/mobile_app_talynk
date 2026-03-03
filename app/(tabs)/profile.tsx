@@ -50,11 +50,12 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
 
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
 
-  // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
-  // NEVER use video_url or fullUrl as image source — those are video files
+  // THUMBNAIL: video = server thumbnail_url or generated; image post = image URL (no HLS so use image directly)
   const serverThumbnail = getThumbnailUrl(post);
-  const imageUrl = getFileUrl((post as any).image || (post as any).thumbnail || '') || null;
-  const thumbnailUrl = serverThumbnail || imageUrl;
+  const postImage = (post as any).image || (post as any).thumbnail || (post as any).imageUrl || (post as any).fullUrl;
+  const imageUrl = getFileUrl(postImage || '') || null;
+  // For image posts, backend may not set thumbnail_url; use the actual image URL
+  const thumbnailUrl = serverThumbnail || imageUrl || (!isVideo && postImage ? getFileUrl(postImage) : null);
 
   return (
     <TouchableOpacity
@@ -319,22 +320,20 @@ export default function ProfileScreen() {
         // Get following count from profile - backend returns followingCount directly
         let followingCount = userData.followingCount || 0;
 
-        // Use LIVE posts_count from statistics endpoint (not stale user.posts_count)
-        let livePostsCount = userData.posts_count || 0;
         if (statsResponse.status === 'success' && statsResponse.data) {
           const stats = (statsResponse.data as any).statistics || statsResponse.data;
-          livePostsCount = stats.posts_count ?? livePostsCount;
           if (followingCount === 0) {
             followingCount = stats.following_count || 0;
           }
         }
 
-        setProfile({
+        // posts_count is set by loadPosts() to published-only count (not backend total/drafts)
+        setProfile((prev: any) => ({
           ...userData,
           name: userData.username,
           followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
           following_count: followingCount,
-          posts_count: livePostsCount, // LIVE count from getStatistics
+          posts_count: prev?.posts_count ?? 0, // loadPosts() overwrites with published-only count
           phone1: userData.phone1,
           phone2: userData.phone2,
           email: userData.email,
@@ -342,7 +341,7 @@ export default function ProfileScreen() {
           bio: userData.bio || '',
           username: userData.username,
           id: userData.id,
-        });
+        }));
       } else {
         setError({ type: 'server', message: profileResponse.message || 'Failed to load profile' });
       }
@@ -392,8 +391,11 @@ export default function ProfileScreen() {
           });
         }
         if (response.status === 'success' && response.data?.posts) {
-          setPosts(response.data.posts);
-          setTotalLikes(0); // Drafts don't have likes yet
+          const draftList = response.data.posts;
+          const draftById = new Map<string, any>();
+          draftList.forEach((p: any) => { if (p?.id) draftById.set(p.id, p); });
+          setPosts(Array.from(draftById.values()));
+          setTotalLikes(0);
           return;
         }
       }
@@ -424,57 +426,71 @@ export default function ProfileScreen() {
         // Filter by tab
         switch (activeTab) {
           case 'active':
-            // Show active posts (or legacy approved posts, or posts with no status default to active)
             filteredPosts = filteredPosts.filter((p: any) =>
               p.status === 'active' ||
-              p.status === 'approved' || // Legacy support
-              !p.status // Default to active
+              p.status === 'approved' ||
+              !p.status
             );
-            // DON'T filter out processing posts — show them as dark "Processing..." cards
-            // filterHlsReady is only for the FEED (index.tsx), not for the owner's profile
             break;
           case 'draft':
             filteredPosts = filteredPosts.filter((p: any) => p.status === 'draft');
             break;
           case 'suspended':
-            // Show suspended posts (or legacy rejected/reported posts)
             filteredPosts = filteredPosts.filter((p: any) =>
               p.status === 'suspended' ||
-              p.status === 'rejected' || // Legacy support
-              p.status === 'reported' // Legacy support
+              p.status === 'rejected' ||
+              p.status === 'reported'
             );
             break;
           default:
-            // Default to active
             filteredPosts = filteredPosts.filter((p: any) =>
               p.status === 'active' ||
-              p.status === 'approved' || // Legacy support
-              !p.status // Default to active
+              p.status === 'approved' ||
+              !p.status
             );
-          // DON'T filter out processing posts — show them as dark "Processing..." cards
-          // filterHlsReady is only for the FEED (index.tsx), not for the owner's profile
         }
 
+        // Production: do NOT show "Uploading..." / "Processing..." cards on profile. Only show completed posts.
+        const isStillProcessing = (p: any) => {
+          const status = p.processing_status ?? p.processingStatus ?? '';
+          return status === 'uploading' || status === 'pending' || status === 'processing';
+        };
+        filteredPosts = filteredPosts.filter((p: any) => !isStillProcessing(p));
+
+        // Deduplicate by post id (one card per post)
+        const byId = new Map<string, any>();
+        filteredPosts.forEach((p: any) => {
+          const id = p.id;
+          if (!id) return;
+          if (!byId.has(id)) byId.set(id, p);
+        });
+        const fresh = Array.from(byId.values());
+
         if (__DEV__) {
-          console.log('📥 [loadPosts] Filtered posts:', {
+          console.log('📥 [loadPosts] Profile posts (completed only, deduped):', {
             activeTab,
-            beforeFilter: response.data.posts.length,
-            afterFilter: filteredPosts.length,
-            statusBreakdown: filteredPosts.reduce((acc: any, p: any) => {
-              const status = p.status || 'active';
-              acc[status] = (acc[status] || 0) + 1;
-              return acc;
-            }, {}),
+            raw: response.data.posts.length,
+            displayed: fresh.length,
           });
         }
 
-        setPosts(filteredPosts);
+        setPosts(fresh);
 
-        // DON'T override posts_count here — it's already set correctly
-        // from the live getStatistics() endpoint in loadProfile()
+        // Override posts_count with PUBLISHED-ONLY count (exclude drafts/suspended)
+        // so the profile stat shows only published posts, not total in DB
+        const publishedOnly = response.data.posts.filter((p: any) => {
+          const status = p.status;
+          const isPublished = status === 'active' || status === 'approved' || !status;
+          const isStillProcessing = (p.processing_status ?? p.processingStatus ?? '') === 'uploading' || (p.processing_status ?? p.processingStatus ?? '') === 'pending' || (p.processing_status ?? p.processingStatus ?? '') === 'processing';
+          return isPublished && !isStillProcessing;
+        });
+        const publishedById = new Map<string, any>();
+        publishedOnly.forEach((p: any) => { if (p?.id) publishedById.set(p.id, p); });
+        const publishedCount = publishedById.size;
+        setProfile((prev: any) => (prev ? { ...prev, posts_count: publishedCount } : null));
 
         // Calculate total likes
-        const likes = filteredPosts.reduce((sum: number, post: any) => {
+        const likes = fresh.reduce((sum: number, post: any) => {
           const cachedCount = postLikeCounts[post.id];
           return sum + (cachedCount !== undefined ? cachedCount : (post.likes || 0));
         }, 0);
@@ -1371,13 +1387,18 @@ export default function ProfileScreen() {
 
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => {
+              onPress={async () => {
                 setPostOptionsModalVisible(false);
                 if (selectedPost) {
-                  Share.share({
-                    message: selectedPost.caption || selectedPost.description || '',
-                    url: selectedPost.video_url || selectedPost.image || '',
-                  });
+                  try {
+                    const mediaUrl = getThumbnailUrl(selectedPost) || getFileUrl((selectedPost as any).video_url || (selectedPost as any).image || (selectedPost as any).fullUrl || '') || '';
+                    const caption = selectedPost.caption || selectedPost.description || selectedPost.title || '';
+                    await Share.share({
+                      title: 'Check out this post on Talentix',
+                      message: caption ? `${caption}\n\n${mediaUrl || 'View in Talentix app'}` : (mediaUrl || 'Check out this post on Talentix!'),
+                      url: mediaUrl || undefined,
+                    });
+                  } catch (_) {}
                 }
               }}
             >

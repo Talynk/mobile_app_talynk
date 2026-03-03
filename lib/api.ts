@@ -225,12 +225,25 @@ export const authApi = {
   },
 };
 
-// Countries API
+// Countries API — backend returns { status: "success", data: { countries: [...] } }
 export const countriesApi = {
   getAll: async (): Promise<ApiResponse<{ countries: Country[] }>> => {
     try {
       const response = await apiClient.get('/api/countries');
-      return response.data;
+      const body = response.data as any;
+      // Backend shape: { status, data: { countries: [ { id, name, code, flag_emoji, is_active } ] } }
+      const list = Array.isArray(body?.data?.countries)
+        ? body.data.countries
+        : Array.isArray(body?.countries)
+          ? body.countries
+          : Array.isArray(body?.data)
+            ? body.data
+            : [];
+      return {
+        status: body?.status ?? 'success',
+        message: body?.message,
+        data: { countries: list },
+      };
     } catch (error: any) {
       return {
         status: 'error',
@@ -1404,7 +1417,7 @@ export const challengesApi = {
     } catch (error: any) {
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to create challenge',
+        message: error.response?.data?.message || 'Failed to create competition',
         data: null,
       };
     }

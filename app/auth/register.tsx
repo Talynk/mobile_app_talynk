@@ -42,19 +42,6 @@ const THEME = {
   buttonDisabled: '#444',
 };
 
-// Minimal country data. Extend as needed.
-const COUNTRIES = [
-  { id: 1, name: '🇷🇼 Rwanda', code: 'RW', dialCode: '+250' },
-  { id: 2, name: '🇰🇪 Kenya', code: 'KE', dialCode: '+254' },
-  { id: 3, name: '🇺🇬 Uganda', code: 'UG', dialCode: '+256' },
-  { id: 4, name: '🇹🇿 Tanzania', code: 'TZ', dialCode: '+255' },
-  { id: 5, name: '🇳🇬 Nigeria', code: 'NG', dialCode: '+234' },
-  { id: 6, name: '🇬🇭 Ghana', code: 'GH', dialCode: '+233' },
-  { id: 7, name: '🇿🇦 South Africa', code: 'ZA', dialCode: '+27' },
-  { id: 8, name: '🇺🇸 United States', code: 'US', dialCode: '+1' },
-  { id: 9, name: '🇬🇧 United Kingdom', code: 'GB', dialCode: '+44' },
-];
-
 const OTP_LENGTH = 6;
 
 export default function RegisterScreen() {
@@ -82,9 +69,9 @@ export default function RegisterScreen() {
   // 4 = Profile / Onboarding (name, username, country, phones)
   const [step, setStep] = useState(1);
   const [countryModalOpen, setCountryModalOpen] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // Default Rwanda
-  const [countries, setCountries] = useState<Country[]>(COUNTRIES);
-  const [filteredCountries, setFilteredCountries] = useState<Country[]>(COUNTRIES);
+  const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
+  const [countries, setCountries] = useState<Country[]>([]);
+  const [filteredCountries, setFilteredCountries] = useState<Country[]>([]);
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
   const [loadingCountries, setLoadingCountries] = useState(false);
   const [otpRequested, setOtpRequested] = useState(false);
@@ -102,65 +89,48 @@ export default function RegisterScreen() {
     clearError();
   }, []);
 
-  // Fetch countries from backend on mount (with fallback to static list)
+  // Fetch all countries from backend (no hardcoding)
   useEffect(() => {
     const loadCountries = async () => {
       try {
         setLoadingCountries(true);
         const res = await countriesApi.getAll();
-        if (res.status === 'success' && (res.data as any)?.countries?.length) {
-          // Map missing dial codes if needed; keep existing static dial codes for known ones
-          const fetched = (res.data as any).countries as Country[];
-          // Merge by code to preserve dial codes from static list when available
-          const byCode: Record<string, any> = {};
-          COUNTRIES.forEach(c => byCode[c.code] = c);
-          const merged = fetched.map(fc => ({
-            ...fc,
-            dialCode: (byCode[fc.code] && (byCode[fc.code] as any).dialCode) || '+000',
-          })) as any[];
-          
-          // Store ALL countries (for reference), but only display valid ones
-          setCountries(merged as any);
-          
-          // Set filtered countries to only show those with valid dial codes (backend-configured)
-          const validCountries = merged.filter((c: any) => {
-            const dialCode = (c.dialCode || '').trim();
-            return dialCode && dialCode !== '+000';
-          });
-          setFilteredCountries(validCountries as any);
-          
-          // If current selected not in valid list, default to Rwanda if present else first valid
-          const foundRw = validCountries.find((c: any) => c.code === 'RW');
-          setSelectedCountry(foundRw || validCountries[0]);
+        const list: Country[] = [];
+        if (res.status === 'success' && res.data) {
+          const raw = (res.data as any).countries ?? (Array.isArray((res.data as any).data) ? (res.data as any).data : res.data);
+          if (Array.isArray(raw)) {
+            raw.forEach((c: any) => {
+              if (c && c.id != null && c.name && c.code && (c.is_active !== false)) {
+                list.push({ id: c.id, name: c.name, code: c.code, flag_emoji: c.flag_emoji });
+              }
+            });
+          }
         }
-      } catch {}
-      finally {
+        setCountries(list);
+        setFilteredCountries(list);
+        if (list.length > 0 && !selectedCountry) {
+          setSelectedCountry(list[0]);
+        }
+      } catch (_) {
+        setCountries([]);
+        setFilteredCountries([]);
+      } finally {
         setLoadingCountries(false);
       }
     };
     loadCountries();
   }, []);
 
-  // Filter countries based on search query - ONLY show countries configured in backend (with valid dial codes)
+  // Searchable filter: by name or code
   useEffect(() => {
-    // First, filter out countries with +000 (not configured in backend)
-    const validCountries = countries.filter((country: any) => {
-      const dialCode = (country.dialCode || '').trim();
-      return dialCode && dialCode !== '+000'; // Only show countries with valid dial codes
-    });
-
     if (!countrySearchQuery.trim()) {
-      setFilteredCountries(validCountries);
+      setFilteredCountries(countries);
       return;
     }
-    
     const query = countrySearchQuery.toLowerCase().trim();
-    const filtered = validCountries.filter((country: any) => {
-      const name = (country.name || '').toLowerCase();
-      const code = (country.code || '').toLowerCase();
-      const dialCode = ((country.dialCode || '') as string).toLowerCase();
-      return name.includes(query) || code.includes(query) || dialCode.includes(query);
-    });
+    const filtered = countries.filter((c: Country) =>
+      (c.name || '').toLowerCase().includes(query) || (c.code || '').toLowerCase().includes(query)
+    );
     setFilteredCountries(filtered);
   }, [countrySearchQuery, countries]);
 
@@ -337,7 +307,7 @@ export default function RegisterScreen() {
   };
 
   const buildCompleteRegistrationPayload = () => {
-    if (!verificationToken) {
+    if (!verificationToken || !selectedCountry) {
       return null;
     }
 
@@ -345,23 +315,16 @@ export default function RegisterScreen() {
     const trimmedUsername = username.trim();
     const trimmedEmail = email.trim();
 
-    const digitsOnly = (v: string) => v.replace(/\D/g, '');
-
     const payload = {
       verificationToken,
       username: trimmedUsername,
       display_name: trimmedName || trimmedUsername,
       password,
       country_id: selectedCountry.id,
-      // For now, use a static date of birth placeholder; can be replaced with actual field later
       date_of_birth: '1990-01-01',
       email: trimmedEmail || undefined,
-      phone1: phone1.trim()
-        ? `${selectedCountry.dialCode}${digitsOnly(phone1)}`
-        : undefined,
-      phone2: phone2.trim()
-        ? `${selectedCountry.dialCode}${digitsOnly(phone2)}`
-        : undefined,
+      phone1: phone1.trim() || undefined,
+      phone2: phone2.trim() || undefined,
     };
 
     return payload;
@@ -383,8 +346,14 @@ export default function RegisterScreen() {
 
     if (!trimmedUsername) {
       errors.username = 'Please enter a username';
+    } else if (/\s/.test(trimmedUsername)) {
+      errors.username = 'Username cannot contain spaces';
     } else if (!/^[a-zA-Z0-9_]+$/.test(trimmedUsername)) {
       errors.username = 'Username can only contain letters, numbers, and underscores';
+    }
+
+    if (!selectedCountry) {
+      errors.country = 'Please select your country';
     }
 
     if (!otpVerified || !verificationToken) {
@@ -909,20 +878,32 @@ export default function RegisterScreen() {
                 activeOpacity={0.7}
                 style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, flexDirection: 'row', alignItems: 'center' }]}
               >
-                <Text style={{ color: C.text, flex: 1 }}>{selectedCountry.name}</Text>
-                <Text style={{ color: C.textSecondary }}>{selectedCountry.dialCode}</Text>
+                {loadingCountries ? (
+                  <Text style={{ color: C.textSecondary }}>Loading countries...</Text>
+                ) : selectedCountry ? (
+                  <>
+                    <Text style={{ color: C.textSecondary, marginRight: 6 }}>{selectedCountry.flag_emoji ?? '🏳️'}</Text>
+                    <Text style={{ color: C.text, flex: 1 }}>{selectedCountry.name}</Text>
+                    <Text style={{ color: C.textSecondary }}>{selectedCountry.code}</Text>
+                  </>
+                ) : (
+                  <Text style={{ color: C.placeholder }}>Select country</Text>
+                )}
               </TouchableOpacity>
+              {fieldErrors.country ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.country}</Text>
+              ) : null}
 
               <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
                 <Text style={[styles.label, { color: C.text }]}>Primary Phone (Optional)</Text>
               </View>
               <View style={styles.phoneInputRow}>
                 <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
+                  <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="7XX XXX XXX"
+                  placeholder="e.g. +1 234 567 890"
                   value={phone1}
                   onChangeText={setPhone1}
                   autoCapitalize="none"
@@ -938,11 +919,11 @@ export default function RegisterScreen() {
               </View>
               <View style={styles.phoneInputRow}>
                 <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry.dialCode}</Text>
+                  <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="7XX XXX XXX"
+                  placeholder="e.g. +1 234 567 890"
                   value={phone2}
                   onChangeText={setPhone2}
                   autoCapitalize="none"
@@ -953,7 +934,7 @@ export default function RegisterScreen() {
                 />
               </View>
               <Text style={[styles.helperText, { color: C.textSecondary }]}>
-                Your country code is pre-selected. Enter numbers without leading zero.
+                Include country code (e.g. +1 for US). Your country is saved with your profile.
               </Text>
 
               {Object.keys(fieldErrors).length > 0 && (
@@ -1087,16 +1068,17 @@ export default function RegisterScreen() {
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={styles.countryRow}
-                  onPress={() => { 
-                    setSelectedCountry(item as any); 
+                  onPress={() => {
+                    setSelectedCountry(item as Country);
                     setCountryModalOpen(false);
                     setCountrySearchQuery('');
                   }}
                   activeOpacity={0.8}
                 >
                   <View style={styles.countryRowContent}>
-                    <Text style={[styles.countryName, { color: C.text }]}>{item.name}</Text>
-                    <Text style={[styles.countryDial, { color: C.textSecondary }]}>{(item as any).dialCode || ''}</Text>
+                    <Text style={[styles.countryFlag, { marginRight: 8 }]}>{item.flag_emoji ?? '🏳️'}</Text>
+                    <Text style={[styles.countryName, { color: C.text, flex: 1 }]}>{item.name}</Text>
+                    <Text style={[styles.countryDial, { color: C.textSecondary }]}>{item.code}</Text>
                   </View>
                 </TouchableOpacity>
               )}
@@ -1314,8 +1296,10 @@ const styles = StyleSheet.create({
   },
   countryRowContent: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  countryFlag: {
+    fontSize: 20,
   },
   countryName: {
     fontSize: 16,
