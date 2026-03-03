@@ -837,16 +837,18 @@ function ProfileFeedContent({
   );
 }
 
+const FEED_BG = '#1a1a1a';
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
   },
   header: {
     position: 'absolute',
@@ -877,12 +879,12 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: screenWidth,
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
   },
   mediaContainer: {
     width: screenWidth,
     position: 'relative',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
@@ -892,13 +894,13 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
     overflow: 'visible',
   },
   media: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
   },
   placeholderContainer: {
     justifyContent: 'center',

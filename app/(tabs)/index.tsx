@@ -772,14 +772,16 @@ export default function FeedScreen() {
   );
 }
 
+const FEED_BG = '#1a1a1a';
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: FEED_BG,
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: FEED_BG,
   },
   header: {
     flexDirection: 'row',
@@ -830,7 +832,7 @@ const styles = StyleSheet.create({
   },
   postContainer: {
     width: '100%',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
     overflow: 'hidden',
   },
   mediaContainer: {
@@ -841,11 +843,11 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: FEED_BG,
     overflow: 'visible',
   },
   media: {
-    backgroundColor: '#0d0d0d',
+    backgroundColor: FEED_BG,
     width: '100%',
     height: '100%',
   },

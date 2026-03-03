@@ -563,7 +563,7 @@ const styles = StyleSheet.create({
   // Fullscreen Styles
   fullscreenContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
   },
   fullscreenHeader: {
     flexDirection: 'row',
@@ -590,7 +590,7 @@ const styles = StyleSheet.create({
   fullscreenPostContainer: {
     width: SCREEN_WIDTH,
     height: Dimensions.get('window').height - 80, // Full height minus header
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
     flexDirection: 'column',
     justifyContent: 'center',
     alignItems: 'center',
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
   mediaContainer: {
     width: '100%',
     aspectRatio: 16 / 9,
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
   },
   videoTouchable: {
     width: '100%',
@@ -640,7 +640,7 @@ const styles = StyleSheet.create({
   },
   postInfoScroll: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
   },
   postInfo: {
     padding: 16,

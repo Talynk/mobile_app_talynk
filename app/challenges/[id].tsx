@@ -1082,7 +1082,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
     zIndex: 10,
   },
   backButton: {
@@ -1511,7 +1511,7 @@ const styles = StyleSheet.create({
   },
   fullscreenContainer: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
   },
   fullscreenHeader: {
     flexDirection: 'row',
@@ -1536,12 +1536,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   fullscreenPostViewer: {
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
   },
   fullscreenMediaWrapper: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#000',
+    backgroundColor: '#1a1a1a',
     justifyContent: 'center',
     alignItems: 'center',
   },

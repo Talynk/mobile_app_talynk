@@ -13,7 +13,6 @@ import {
   useWindowDimensions,
   Animated,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -24,7 +23,7 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
-import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
+import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
@@ -124,11 +123,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
   const playbackUrl = getPlaybackUrl(item);
-  const isProcessing = isVideoProcessing(item);
   const hlsReady = !!playbackUrl;
   const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
   const videoSourceUrl = playbackUrl;
   const videoPlayerSource = shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null;
+
+  // Thumbnail or media URL for base layer — NEVER show black; always show thumbnail or dark gray placeholder
+  const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
 
   const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
     if (player) {
@@ -310,56 +311,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         {isVideo ? (
           <>
             <Pressable style={styles.mediaWrapper} onPress={handleTapToPause}>
-              <View style={[styles.media, { position: 'absolute', zIndex: 1, backgroundColor: '#0d0d0d' }]} />
-              {getThumbnailUrl(item) ? (
+              {/* Only thumbnail or video — nothing else (no placeholder, no base layer) */}
+              {thumbnailOrPlaceholderUrl ? (
                 <Image
-                  source={{ uri: getThumbnailUrl(item)! }}
+                  source={{ uri: thumbnailOrPlaceholderUrl }}
                   style={[
                     styles.media,
-                    {
-                      position: 'absolute',
-                      zIndex: 1,
-                      opacity: isActive && isPlaying && videoReady ? 0 : 1,
-                      backgroundColor: '#0d0d0d',
-                    },
+                    styles.mediaThumbnailLayer,
+                    { opacity: isActive && isPlaying && videoReady ? 0 : 1 },
                   ]}
                   resizeMode="cover"
                 />
               ) : null}
 
-              {isVideo && !hlsReady && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 5, backgroundColor: 'rgba(0,0,0,0.5)' }]}>
-                  {isProcessing ? (
-                    <>
-                      <ActivityIndicator size="large" color="#fff" />
-                      <Text style={[styles.placeholderText, { marginTop: 12 }]}>Processing video…</Text>
-                    </>
-                  ) : item.processing_status === 'failed' ? (
-                    <>
-                      <Feather name="alert-circle" size={48} color="#ff4444" />
-                      <Text style={[styles.placeholderText, { marginTop: 12, color: '#ff4444' }]}>Processing failed</Text>
-                    </>
-                  ) : null}
-                </View>
-              )}
-
               {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
                   <VideoView player={videoPlayer} style={styles.media} contentFit="cover" nativeControls={false} />
-                </View>
-              )}
-
-              {videoError && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
-                </View>
-              )}
-
-              {!mediaUrl && (
-                <View style={[styles.media, styles.placeholderContainer, { zIndex: 10 }]}>
-                  <Feather name="video-off" size={48} color="#666" />
-                  <Text style={styles.placeholderText}>Video unavailable</Text>
                 </View>
               )}
 
@@ -382,12 +349,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
               <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="cover" />
-            ) : (
-              <View style={[styles.media, styles.placeholderContainer]}>
-                <Feather name="image" size={48} color="#666" />
-                <Text style={styles.placeholderText}>Image unavailable</Text>
-              </View>
-            )}
+            ) : null}
           </View>
         )}
 
@@ -471,10 +433,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
 export default React.memo(FullscreenFeedPostItem);
 
+// Feed media: only thumbnail or video/image — no placeholders, no solid-color layers
 const styles = StyleSheet.create({
   postContainer: {
     width: '100%',
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
     overflow: 'hidden',
   },
   mediaContainer: {
@@ -485,23 +448,18 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
+    backgroundColor: 'transparent',
     overflow: 'visible',
   },
   media: {
-    backgroundColor: '#0d0d0d',
     width: '100%',
     height: '100%',
   },
-  placeholderContainer: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-  },
-  placeholderText: {
-    color: '#666',
-    fontSize: 14,
-    marginTop: 12,
+  mediaThumbnailLayer: {
+    position: 'absolute',
+    zIndex: 1,
+    width: '100%',
+    height: '100%',
   },
   muteIndicatorOverlay: {
     position: 'absolute',
