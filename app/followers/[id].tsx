@@ -16,6 +16,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 
 const COLORS = {
   light: {
@@ -76,13 +77,14 @@ export default function FollowersScreen() {
           setProfile(response.data);
         }
       } catch (error) {
-        console.error('Error fetching profile:', error);
+        console.warn('Error fetching profile:', error?.message);
       }
     };
     fetchProfile();
   }, [id]);
 
-  // Fetch users based on active tab
+  useRefetchOnReconnect(() => fetchUsers());
+
   const fetchUsers = async () => {
     if (!id) return;
 
@@ -335,12 +337,6 @@ export default function FollowersScreen() {
       {error ? (
         <View style={styles.errorContainer}>
           <Text style={[styles.errorText, { color: C.textSecondary }]}>{error}</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={fetchUsers}
-          >
-            <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
-          </TouchableOpacity>
         </View>
       ) : (
         <FlatList

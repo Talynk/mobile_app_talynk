@@ -22,6 +22,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
@@ -89,6 +90,8 @@ export default function PostDetailScreen() {
     }
     fetchComments();
   }, [id, initialPost]);
+
+  useRefetchOnReconnect(() => { fetchPost(); fetchComments(); });
 
   const fetchPost = async () => {
     try {

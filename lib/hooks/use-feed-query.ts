@@ -1,10 +1,9 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { feedApi, postsApi } from '@/lib/api';
-import { queryClient } from '@/lib/query-client';
+import { postsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
 import { filterHlsReady } from '@/lib/utils/post-filter';
-import { useMemo, useEffect } from 'react';
+import { useMemo } from 'react';
 
 type FeedTab = 'foryou' | 'following';
 
@@ -13,22 +12,12 @@ interface FeedPage {
   nextCursor: string | null;
 }
 
-function normalizeFeedResponse(raw: any): FeedPage {
-  const data = raw?.data ?? raw;
-  const posts: Post[] = Array.isArray(data?.posts) ? data.posts : [];
-  const nextCursor: string | null = data?.nextCursor ?? null;
-  return { posts: filterHlsReady(posts), nextCursor };
-}
-
-function normalizeFollowingResponse(raw: any, page: number, limit: number): FeedPage {
-  const data = raw?.data ?? raw;
-  const posts: Post[] = Array.isArray(data?.posts) ? data.posts : [];
-  const pagination = data?.pagination;
-  const hasNext = pagination?.hasNext ?? (posts.length >= limit);
-  return {
-    posts: filterHlsReady(posts),
-    nextCursor: hasNext ? String(page + 1) : null,
-  };
+function extractPosts(raw: any): Post[] {
+  if (Array.isArray(raw?.data?.posts)) return raw.data.posts;
+  if (Array.isArray(raw?.data?.data?.posts)) return raw.data.data.posts;
+  if (Array.isArray(raw?.posts)) return raw.posts;
+  if (Array.isArray(raw?.data)) return raw.data;
+  return [];
 }
 
 export function useFeedQuery(tab: FeedTab) {
@@ -41,57 +30,48 @@ export function useFeedQuery(tab: FeedTab) {
   const query = useInfiniteQuery<FeedPage>({
     queryKey,
     queryFn: async ({ pageParam }) => {
+      console.log(`🔵 [FEED] queryFn called: tab=${tab}, pageParam=${pageParam}`);
+
       if (tab === 'following') {
         if (!isAuthenticated) return { posts: [], nextCursor: null };
         const page = pageParam ? Number(pageParam) : 1;
-        const raw = await postsApi.getFollowing(page, 10);
-        return normalizeFollowingResponse(raw, page, 10);
+        const raw = await postsApi.getFollowing(page, 20);
+        const allPosts = extractPosts(raw);
+        const hlsPosts = filterHlsReady(allPosts);
+        console.log(`🔵 [FEED] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
+        const pagination = raw?.data?.pagination;
+        const hasNext = pagination?.hasNext ?? (allPosts.length >= 20);
+        return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
       }
 
-      const cursor = pageParam as string | undefined;
-      if (isAuthenticated) {
-        const raw = await feedApi.getPersonalized(cursor, 10);
-        return normalizeFeedResponse(raw);
-      }
-      const raw = await feedApi.getPublic(cursor, 10);
-      return normalizeFeedResponse(raw);
+      // FOR YOU: single call to GET /api/posts/all with large limit
+      const page = pageParam ? Number(pageParam) : 1;
+      console.log(`🔵 [FEED] ForYou: calling postsApi.getAll(page=${page}, limit=50)`);
+
+      const raw = await postsApi.getAll(page, 50);
+
+      console.log(`🔵 [FEED] ForYou: raw status=${raw?.status}, hasData=${!!raw?.data}`);
+
+      const allPosts = extractPosts(raw);
+      console.log(`🔵 [FEED] ForYou: extracted ${allPosts.length} posts from response`);
+
+      allPosts.forEach((p: any, i: number) => {
+        console.log(`🔵 [FEED] post[${i}]: id=${p.id?.slice(0,8)} type=${p.type} proc=${p.processing_status} hlsReady=${p.hlsReady} fullUrl=${(p.fullUrl || '').slice(0,50)}`);
+      });
+
+      const hlsPosts = filterHlsReady(allPosts);
+      console.log(`🔵 [FEED] ForYou: after HLS filter = ${hlsPosts.length} posts`);
+
+      const pagination = raw?.data?.pagination;
+      const hasNext = pagination ? (page < pagination.totalPages) : (allPosts.length >= 50);
+      return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    staleTime: 30_000,
+    staleTime: 0,
     gcTime: 5 * 60_000,
+    retry: 1,
   });
-
-  // Prefetch next page in background once first page loads
-  useEffect(() => {
-    const pages = query.data?.pages;
-    if (!pages || pages.length === 0) return;
-    const lastPage = pages[pages.length - 1];
-    if (!lastPage.nextCursor) return;
-
-    const nextCursor = lastPage.nextCursor;
-    queryClient.prefetchInfiniteQuery({
-      queryKey,
-      queryFn: async ({ pageParam }) => {
-        if (tab === 'following') {
-          if (!isAuthenticated) return { posts: [], nextCursor: null };
-          const page = pageParam ? Number(pageParam) : 1;
-          const raw = await postsApi.getFollowing(page, 10);
-          return normalizeFollowingResponse(raw, page, 10);
-        }
-        const cursor = pageParam as string | undefined;
-        if (isAuthenticated) {
-          const raw = await feedApi.getPersonalized(cursor, 10);
-          return normalizeFeedResponse(raw);
-        }
-        const raw = await feedApi.getPublic(cursor, 10);
-        return normalizeFeedResponse(raw);
-      },
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage: FeedPage) => lastPage.nextCursor ?? undefined,
-      pages: pages.length + 1,
-    });
-  }, [query.data?.pages?.length, tab, isAuthenticated, userId]);
 
   const posts = useMemo(
     () => query.data?.pages.flatMap((p) => p.posts) ?? [],

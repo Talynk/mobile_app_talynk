@@ -22,6 +22,7 @@ import { postsApi, likesApi, userApi, categoriesApi, followsApi } from '@/lib/ap
 import { API_BASE_URL } from '@/lib/config';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import {
@@ -34,7 +35,6 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useRealtime } from '@/lib/realtime-context';
 import RealtimeProvider from '@/lib/realtime-context';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
-import { useVideoPreload } from '@/lib/hooks/use-video-preload';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import { filterHlsReady } from '@/lib/utils/post-filter';
@@ -158,7 +158,9 @@ function ProfileFeedContent({
   const availableHeight = screenHeight - headerHeight - bottomNavHeight;
 
   // CRITICAL FIX: Increased limit to fetch all posts from database
-  const LIMIT = 100; // Fetch all posts, not just 20
+  const LIMIT = 100;
+
+  useRefetchOnReconnect(() => loadPosts(1, true));
 
   const loadPosts = useCallback(async (page = 1, refresh = false) => {
     try {
@@ -510,13 +512,6 @@ function ProfileFeedContent({
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
-
-  // CRITICAL FIX: Optimized preloading for profile feed
-  useVideoPreload(posts, currentIndex >= 0 ? currentIndex : -1, {
-    preloadCount: 5, // Preload 5 videos ahead for instant playback
-    backwardCount: 2, // Keep 2 behind for instant back-scroll
-    enabled: isScreenFocused,
-  });
 
   useFocusEffect(
     useCallback(() => {

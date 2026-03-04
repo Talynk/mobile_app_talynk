@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
 import { getFileUrl } from '@/lib/utils/file-url';
@@ -233,7 +234,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     }, [])
   );
 
-  // Fetch profile info
+  useRefetchOnReconnect(() => onRefresh());
+
   useEffect(() => {
     const fetchProfile = async () => {
       if (!id) return;
@@ -684,17 +686,6 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           <Text style={[styles.errorText, { color: C.text }]}>
             {profileError || 'Failed to load profile'}
           </Text>
-          {error && error.type === 'network' && (
-            <Text style={[styles.errorSubtext, { color: C.textSecondary }]}>
-              Please check your internet connection
-            </Text>
-          )}
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={onRefresh}
-          >
-            <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -857,12 +848,6 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             <View style={styles.loadingContainer}>
               <MaterialIcons name="error-outline" size={32} color={C.textSecondary} />
               <Text style={[styles.errorText, { color: C.textSecondary }]}>{postsError}</Text>
-              <TouchableOpacity
-                style={[styles.retryButton, { backgroundColor: C.primary, marginTop: 12 }]}
-                onPress={fetchApprovedPosts}
-              >
-                <Text style={[styles.retryButtonText, { color: C.buttonText }]}>Retry</Text>
-              </TouchableOpacity>
             </View>
           ) : approvedPosts.length === 0 ? (
             <View style={styles.emptyContainer}>

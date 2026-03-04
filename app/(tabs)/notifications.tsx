@@ -14,6 +14,7 @@ import { notificationsApi } from '@/lib/api';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { Notification } from '@/types';
@@ -105,6 +106,8 @@ export default function NotificationsScreen() {
 
     return unsubscribe;
   }, [onNewNotification, user]);
+
+  useRefetchOnReconnect(() => loadNotifications());
 
   const loadNotifications = async () => {
     if (!user) return;

@@ -444,7 +444,7 @@ export default function CreatePostScreen() {
           setJoinedChallenges([]);
         }
       } catch (error: any) {
-        console.error('[Create] Error fetching joined challenges:', error);
+        console.warn('[Create] Error fetching joined challenges:', error?.message);
         console.error('[Create] Error details:', {
           message: error.message,
           response: error.response?.data,
@@ -1154,7 +1154,7 @@ export default function CreatePostScreen() {
               const errResponse = JSON.parse(xhr.responseText);
               errorMsg = errResponse.message || errResponse.error || errorMsg;
             } catch (_) { }
-            console.error('[Upload] Challenge post server error:', xhr.status, errorMsg);
+            console.warn('[Upload] Challenge post server error:', xhr.status, errorMsg);
             await uploadNotificationService.showUploadError(errorMsg, fileName);
             Alert.alert('Upload Failed', errorMsg);
             return;

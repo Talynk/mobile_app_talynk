@@ -23,6 +23,46 @@ interface OnboardingPage {
   color: string;
 }
 
+// Define pageStyles first so it's available when pages array is evaluated
+const pageStyles = StyleSheet.create({
+  page: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  content: {
+    alignItems: 'center',
+    marginBottom: 100,
+  },
+  iconContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  iconGroup: {
+    position: 'relative',
+  },
+  title: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
+  description: {
+    color: '#9ca3af',
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+});
+
 const pages: OnboardingPage[] = [
   {
     id: '1',
@@ -173,45 +213,6 @@ export default function OnboardingScreen() {
     </View>
   );
 }
-
-const pageStyles = StyleSheet.create({
-  page: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  content: {
-    alignItems: 'center',
-    marginBottom: 100,
-  },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 40,
-  },
-  iconGroup: {
-    position: 'relative',
-  },
-  title: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: 16,
-    letterSpacing: -0.5,
-  },
-  description: {
-    color: '#9ca3af',
-    fontSize: 16,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-});
 
 const styles = StyleSheet.create({
   container: {

@@ -860,18 +860,10 @@ export default function CommentsModal({
                 ) : error ? (
                   <View style={styles.centerContainer}>
                     <View style={styles.errorIcon}>
-                      <Feather name="wifi-off" size={28} color="#ef4444" />
+                      <Feather name="alert-circle" size={28} color="#ef4444" />
                     </View>
                     <Text style={styles.errorTitle}>Couldn't load comments</Text>
                     <Text style={styles.errorSubtext}>{error}</Text>
-                    <TouchableOpacity 
-                      style={styles.retryButton}
-                      onPress={() => fetchComments(1, true)}
-                      activeOpacity={0.8}
-                    >
-                      <Feather name="refresh-cw" size={14} color="#fff" />
-                      <Text style={styles.retryButtonText}>Try Again</Text>
-                    </TouchableOpacity>
                   </View>
                 ) : (
                   <View style={styles.centerContainer}>

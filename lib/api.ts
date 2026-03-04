@@ -42,7 +42,7 @@ export const authApi = {
       return response.data;
     } catch (error: any) {
       // Enhanced error logging
-      console.error('Login API error:', {
+      console.warn('Login API error:', {
         message: error.message,
         status: error.response?.status,
         data: error.response?.data,
@@ -398,7 +398,7 @@ export const postsApi = {
       }
 
       // Log non-network errors for debugging
-      console.error('❌ Error fetching following posts:', {
+      console.warn('❌ Error fetching following posts:', {
         message: error.message,
         status: error.response?.status,
         statusText: error.response?.statusText,
@@ -488,7 +488,7 @@ export const postsApi = {
         data: { posts: [], pagination: {}, filters: {} },
       };
     } catch (error: any) {
-      console.error('Featured posts API error:', {
+      console.warn('Featured posts API error:', {
         message: error.message,
         status: error.response?.status,
         data: error.response?.data,
@@ -551,7 +551,7 @@ export const postsApi = {
       const response = await apiClient.post(`/api/posts/${postId}/like`);
       return response.data;
     } catch (error: any) {
-      console.error('Like API error details:', {
+      console.warn('Like API error details:', {
         message: error.message,
         status: error.response?.status,
         data: error.response?.data,
@@ -581,7 +581,7 @@ export const postsApi = {
       const response = await apiClient.post(`/api/posts/${postId}/like`);
       return response.data;
     } catch (error: any) {
-      console.error('Unlike API error details:', {
+      console.warn('Unlike API error details:', {
         message: error.message,
         status: error.response?.status,
         data: error.response?.data,
@@ -618,7 +618,7 @@ export const postsApi = {
         },
       };
     } catch (error: any) {
-      console.error('Check like status error:', error.response?.data || error.message);
+      console.warn('Check like status error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: 'Failed to check like status',
@@ -669,11 +669,11 @@ export const postsApi = {
           const response = await apiClient.get(altUrl);
           return response.data;
         } catch (altError: any) {
-          console.error('[API] Alternative comments endpoint also failed:', altError.message);
+          console.warn('[API] Alternative comments endpoint also failed:', altError.message);
         }
       }
 
-      console.error('[API] Get comments error:', {
+      console.warn('[API] Get comments error:', {
         message: error.message,
         code: error.code,
         status: error.response?.status,
@@ -745,7 +745,7 @@ export const postsApi = {
       );
       return response.data;
     } catch (error: any) {
-      console.error('Add comment API error:', error);
+      console.warn('Add comment API error:', error?.message);
       const errorMessage = error.response?.data?.message || error.message || 'Failed to add comment';
 
       return {
@@ -768,7 +768,7 @@ export const postsApi = {
       );
       return response.data;
     } catch (error: any) {
-      console.error('Delete comment API error:', error);
+      console.warn('Delete comment API error:', error?.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to delete comment',
@@ -786,7 +786,7 @@ export const postsApi = {
       const response = await apiClient.post(`/api/posts/comments/${commentId}/report`, body);
       return response.data;
     } catch (error: any) {
-      console.error('Report comment API error:', error);
+      console.warn('Report comment API error:', error?.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to report comment',
@@ -1179,7 +1179,7 @@ export const notificationsApi = {
       console.log('[Notifications API] ✅ Mark as read response:', response.data?.status);
       return response.data;
     } catch (error: any) {
-      console.error('[Notifications API] ❌ Error marking notification as read:', {
+      console.warn('[Notifications API] Error marking notification as read:', {
         notificationId,
         status: error.response?.status,
         message: error.response?.data?.message || error.message,
@@ -1206,7 +1206,7 @@ export const notificationsApi = {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[Notifications API] ❌ Error marking all as read:', {
+      console.warn('[Notifications API] Error marking all as read:', {
         status: error.response?.status,
         message: error.response?.data?.message || error.message,
       });
@@ -1225,7 +1225,7 @@ export const notificationsApi = {
       console.log('[Notifications API] ✅ Delete response:', response.data?.status);
       return response.data;
     } catch (error: any) {
-      console.error('[Notifications API] ❌ Error deleting notification:', {
+      console.warn('[Notifications API] Error deleting notification:', {
         notificationId,
         status: error.response?.status,
         message: error.response?.data?.message || error.message,
@@ -1248,7 +1248,7 @@ export const notificationsApi = {
       });
       return response.data;
     } catch (error: any) {
-      console.error('[Notifications API] ❌ Error deleting all notifications:', {
+      console.warn('[Notifications API] Error deleting all notifications:', {
         status: error.response?.status,
         message: error.response?.data?.message || error.message,
       });
@@ -1274,55 +1274,52 @@ export const challengesApi = {
         let activeChallenges: any[] = [];
         let approvedChallenges: any[] = [];
         let pagination: any = {};
+        let activeOk = false;
+        let approvedOk = false;
 
         try {
           const response = await apiClient.get(`/api/challenges?status=active`);
           const apiResponse = response.data;
+          activeOk = true;
           if (apiResponse?.status === 'success' && apiResponse?.data) {
             activeChallenges = Array.isArray(apiResponse.data) ? apiResponse.data : [];
             pagination = apiResponse.pagination || {};
           }
         } catch (error: any) {
-          console.warn('⚠️ Error fetching active challenges:', error.message);
+          console.warn('Error fetching active challenges:', error.message);
         }
 
         try {
           const approvedResponse = await apiClient.get(`/api/challenges?status=approved`);
           const approvedApiResponse = approvedResponse.data;
+          approvedOk = true;
           if (approvedApiResponse?.status === 'success' && approvedApiResponse?.data) {
             approvedChallenges = Array.isArray(approvedApiResponse.data) ? approvedApiResponse.data : [];
-            // Use approved pagination if active didn't have one
             if (!pagination || Object.keys(pagination).length === 0) {
               pagination = approvedApiResponse.pagination || {};
             }
           }
         } catch (error: any) {
-          console.warn('⚠️ Error fetching approved challenges:', error.message);
+          console.warn('Error fetching approved challenges:', error.message);
         }
 
-        // Combine and remove duplicates
+        // If both requests failed (e.g. no internet), throw so callers can detect network error
+        if (!activeOk && !approvedOk) {
+          throw new Error('Network Error');
+        }
+
         const allChallenges = [...activeChallenges, ...approvedChallenges];
         const uniqueChallenges = allChallenges.filter((challenge, index, self) =>
           index === self.findIndex((c) => c.id === challenge.id)
         );
 
-        // Return success if we got any challenges, even if one request failed
-        if (uniqueChallenges.length > 0 || (activeChallenges.length === 0 && approvedChallenges.length === 0)) {
-          return {
-            status: 'success',
-            message: 'Challenges fetched successfully',
-            data: {
-              challenges: uniqueChallenges,
-              pagination: pagination
-            }
-          };
-        }
-
-        // If both failed, return error
         return {
-          status: 'error',
-          message: 'Failed to fetch challenges',
-          data: { challenges: [], pagination: {} },
+          status: 'success',
+          message: 'Challenges fetched successfully',
+          data: {
+            challenges: uniqueChallenges,
+            pagination: pagination
+          }
         };
       }
 
@@ -1349,6 +1346,12 @@ export const challengesApi = {
         data: { challenges: [], pagination: {} },
       };
     } catch (error: any) {
+      const isNetwork =
+        error?.message?.includes('Network') ||
+        error?.message?.includes('timeout') ||
+        error?.code === 'ECONNABORTED' ||
+        !error?.response;
+      if (isNetwork) throw error;
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch challenges',
@@ -1381,6 +1384,12 @@ export const challengesApi = {
         data: { challenges: [], pagination: {} },
       };
     } catch (error: any) {
+      const isNetwork =
+        error?.message?.includes('Network') ||
+        error?.message?.includes('timeout') ||
+        error?.code === 'ECONNABORTED' ||
+        !error?.response;
+      if (isNetwork) throw error;
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch my challenges',
@@ -1430,7 +1439,13 @@ export const challengesApi = {
         data: { challenges: [], pagination: {} },
       };
     } catch (error: any) {
-      console.error('[API] getJoinedChallenges error:', error.message, error.response?.status);
+      console.warn('[API] getJoinedChallenges error:', error.message, error.response?.status);
+      const isNetwork =
+        error?.message?.includes('Network') ||
+        error?.message?.includes('timeout') ||
+        error?.code === 'ECONNABORTED' ||
+        !error?.response;
+      if (isNetwork) throw error;
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch joined challenges',
@@ -1459,7 +1474,7 @@ export const challengesApi = {
       console.log('[API] Join challenge response:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('[API] Join challenge error:', {
+      console.warn('[API] Join challenge error:', {
         message: error.message,
         status: error.response?.status,
         data: error.response?.data,
@@ -1584,7 +1599,7 @@ export const followsApi = {
       const response = await apiClient.post('/api/follows', { userId });
       return response.data;
     } catch (error: any) {
-      console.error('Follow API error:', error.response?.data || error.message);
+      console.warn('Follow API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Cannot follow this user',
@@ -1601,7 +1616,7 @@ export const followsApi = {
       });
       return response.data;
     } catch (error: any) {
-      console.error('Unfollow API error:', error.response?.data || error.message);
+      console.warn('Unfollow API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Cannot unfollow this user',
@@ -1615,7 +1630,7 @@ export const followsApi = {
       const response = await apiClient.get(`/api/follows/check/${followingId}`);
       return response.data;
     } catch (error: any) {
-      console.error('Check following API error:', error.response?.data || error.message);
+      console.warn('Check following API error:', error.response?.data || error.message);
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to check follow status',
@@ -1741,7 +1756,7 @@ export const likesApi = {
       }
 
       // Log other errors
-      console.error('Toggle like API error:', {
+      console.warn('Toggle like API error:', {
         message: errorMessage,
         status: status,
         data: error.response?.data,
@@ -1792,7 +1807,7 @@ export const likesApi = {
         } as any;
       }
 
-      console.error('Get like status API error:', error);
+      console.warn('Get like status API error:', error?.message);
       return {
         status: 'error',
         message: errorMessage,
@@ -1838,7 +1853,7 @@ export const likesApi = {
           data: {},
         };
       } else {
-        console.error('❌ Batch check like status API error:', error);
+        console.warn('Batch check like status API error:', error?.message);
         return {
           status: 'error',
           message: errorMessage,

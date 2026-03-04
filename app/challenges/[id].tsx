@@ -18,6 +18,7 @@ import {
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { challengesApi, postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -89,6 +90,8 @@ export default function ChallengeDetailScreen() {
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
 
+  useRefetchOnReconnect(() => fetchChallenge());
+
   const fetchChallenge = async () => {
     if (!id) return;
 
@@ -124,7 +127,7 @@ export default function ChallengeDetailScreen() {
         setPosts(normalizedPosts);
       }
     } catch (err: any) {
-      console.error('Error fetching challenge posts:', err);
+      console.warn('Error fetching challenge posts:', err?.message);
     } finally {
       setPostsLoading(false);
     }
@@ -148,7 +151,7 @@ export default function ChallengeDetailScreen() {
         setAllParticipants([]);
       }
     } catch (err: any) {
-      console.error('Error fetching challenge participants:', err);
+      console.warn('Error fetching challenge participants:', err?.message);
       setAllParticipants([]);
     } finally {
       setLoadingAllParticipants(false);
@@ -840,12 +843,6 @@ export default function ChallengeDetailScreen() {
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
           <Text style={[styles.errorText, { color: C.textSecondary }]}>{error || 'Competition not found'}</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={fetchChallenge}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );

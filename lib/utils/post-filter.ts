@@ -1,48 +1,38 @@
 /**
  * Post filtering utilities for HLS-only video display.
- * 
- * All video posts must be HLS-transcoded (.m3u8) before they are shown to users.
- * Image posts always pass through. Draft/processing posts are only shown on the
- * owner's own profile (handled by the caller, not here).
+ *
+ * STRICT: Only HLS (.m3u8) adaptive streaming. No MP4 or other formats are allowed
+ * to be played or fetched anywhere in the app. Image posts always pass.
  */
 
 /**
  * Check if a post is HLS-ready (safe to display).
- * 
- * Rules:
- * - Image posts: always pass
- * - Video posts: only pass if the media URL ends with `.m3u8`
- *   OR processing_status is 'completed'
+ * STRICT: Only HLS (.m3u8) or backend-confirmed completed. No MP4, no other formats.
  */
 export function isHlsReady(post: any): boolean {
     // Non-video posts always pass
     if (post.type !== 'video') return true;
 
-    // Check hlsReady boolean flag (returned by backend)
+    // Backend says HLS is ready
     if (post.hlsReady === true) return true;
 
-    // Check if any media URL ends with .m3u8
     const urls = [
         post.fullUrl,
         post.video_url,
         post.videoUrl,
-        post.image,
-        post.imageUrl,
         post.mediaUrl,
         post.hls_url,
         post.hlsUrl,
     ].filter(Boolean);
 
     for (const url of urls) {
-        if (typeof url === 'string' && url.toLowerCase().includes('.m3u8')) {
-            return true;
-        }
+        if (typeof url === 'string' && url.toLowerCase().includes('.m3u8')) return true;
     }
 
-    // Check processing_status (snake_case from some endpoints) OR processingStatus (camelCase from others)
+    // Processing completed (backend transcoded to HLS)
     if (post.processing_status === 'completed' || post.processingStatus === 'completed') return true;
 
-    // Raw MP4 video — hide from the feed
+    // No HLS — do not show (no MP4, no other formats)
     return false;
 }
 

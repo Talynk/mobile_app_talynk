@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, postsApi, likesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -303,6 +304,7 @@ export default function ProfileScreen() {
     loadPosts();
   }, [user, activeTab]);
 
+  useRefetchOnReconnect(() => { loadProfile(); loadPosts(); });
 
   const loadProfile = async (showLoading = false) => {
     try {

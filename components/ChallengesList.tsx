@@ -15,6 +15,7 @@ import { challengesApi } from '@/lib/api';
 import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { Avatar } from './Avatar';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 
 interface Challenge {
     id: string;
@@ -45,6 +46,8 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
     const [internalTab, setInternalTab] = useState<'active' | 'upcoming' | 'ended' | 'created'>('active');
     const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
     const { user } = useAuth();
+
+    useRefetchOnReconnect(() => fetchChallenges());
 
     const fetchChallenges = async () => {
         try {
@@ -218,8 +221,8 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     joinedCount: userJoinedIds.size,
                 });
             }
-        } catch (error) {
-            console.error('[ChallengesList] Error fetching challenges:', error);
+        } catch (error: any) {
+            console.warn('[ChallengesList] Error fetching challenges:', error?.message);
             setChallenges([]);
         } finally {
             setLoading(false);

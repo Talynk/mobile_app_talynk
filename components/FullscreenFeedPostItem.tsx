@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
+import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
@@ -127,7 +128,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const playbackUrl = item.playback_url || getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
   const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload) && !videoError;
-  const videoPlayerSource = shouldLoadVideo && playbackUrl ? playbackUrl : null;
+  const videoPlayerSource = shouldLoadVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
 

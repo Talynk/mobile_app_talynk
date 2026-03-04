@@ -18,6 +18,7 @@ import { router } from 'expo-router';
 import { postsApi, userApi, followsApi, categoriesApi, searchApi, countriesApi } from '@/lib/api';
 import { Post, User, Country } from '@/types';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useCache } from '@/lib/cache-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -159,6 +160,8 @@ export default function ExploreScreen() {
 
     return filtered;
   };
+
+  useRefetchOnReconnect(() => { loadInitialContent(); loadGridPosts(1, true); });
 
   const loadInitialContent = async () => {
     setLoading(true);

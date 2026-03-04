@@ -15,6 +15,7 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 import { challengesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -70,6 +71,8 @@ export default function ChallengesScreen() {
   const [participants, setParticipants] = useState<any[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
 
+  useRefetchOnReconnect(() => fetchChallenges());
+
   const normalizeChallenges = (response: any) => {
     if (!response) return [];
     if (Array.isArray(response.data)) return response.data;
@@ -86,7 +89,11 @@ export default function ChallengesScreen() {
     try {
       const [allRes, endedRes, myRes] = await Promise.all([
         challengesApi.getAll('active'),
-        challengesApi.getAll('ended').catch(() => ({ status: 'success', data: { challenges: [] } })),
+        challengesApi.getAll('ended').catch((e: any) => {
+          const isNet = e?.message?.includes('Network') || e?.message?.includes('timeout') || !e?.response;
+          if (isNet) throw e;
+          return { status: 'success' as const, data: { challenges: [] }, message: '' };
+        }),
         isAuthenticated ? challengesApi.getMyChallenges() : Promise.resolve(null),
       ]);
 
@@ -163,7 +170,7 @@ export default function ChallengesScreen() {
         setParticipants([]);
       }
     } catch (err) {
-      console.error('Error loading participants:', err);
+      console.warn('Error loading participants:', err?.message);
       setParticipants([]);
     } finally {
       setLoadingParticipants(false);
@@ -427,14 +434,11 @@ export default function ChallengesScreen() {
         </View>
       ) : error ? (
         <View style={styles.errorContainer}>
-          <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
-          <Text style={[styles.errorText, { color: C.textSecondary }]}>{error}</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={fetchChallenges}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
+          <Feather name="alert-circle" size={48} color={C.textSecondary} />
+          <Text style={[styles.errorText, { color: C.text }]}>{error}</Text>
+          <Text style={[styles.errorSubtext, { color: C.textSecondary }]}>
+            Something went wrong. Pull down to refresh.
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -766,6 +770,12 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 12,
     fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  errorSubtext: {
+    marginTop: 8,
+    fontSize: 14,
     textAlign: 'center',
   },
   retryButton: {

@@ -11,8 +11,8 @@ import {
   Share,
   Animated,
   Alert,
+  FlatList,
 } from 'react-native';
-import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { likesApi, followsApi } from '@/lib/api';
@@ -22,7 +22,6 @@ import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts, addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNetworkStatus } from '@/lib/hooks/use-network-status';
 import { useFeedQuery } from '@/lib/hooks/use-feed-query';
 import { queryClient } from '@/lib/query-client';
 import ReportModal from '@/components/ReportModal';
@@ -57,14 +56,13 @@ export default function FeedScreen() {
   const [createChallengeVisible, setCreateChallengeVisible] = useState(false);
   const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
-  const flatListRef = useRef<FlashListRef<Post>>(null);
+  const flatListRef = useRef<FlatList<Post>>(null);
   const { user } = useAuth();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
-  const { isOffline } = useNetworkStatus();
 
   const feedTab = activeTab === 'challenges' ? 'foryou' : activeTab as 'foryou' | 'following';
   const {
@@ -270,7 +268,8 @@ export default function FeedScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
-    const shouldPreload = !isActive && Math.abs(index - currentIndex) === 1;
+    const distance = index - currentIndex;
+    const shouldPreload = !isActive && distance >= -1 && distance <= 3;
 
     const isLiked = item.is_liked ?? likedPosts.includes(item.id);
     const isFollowing = item.is_following_author ?? false;
@@ -351,32 +350,26 @@ export default function FeedScreen() {
               ))}
             </View>
           ) : (
-            <FlashList
+            <FlatList
               ref={flatListRef}
               data={posts}
-              ListHeaderComponent={
-                isOffline ? (
-                  <View style={styles.offlineBanner}>
-                    <Feather name="wifi-off" size={16} color="#fff" />
-                    <Text style={styles.offlineBannerText}>
-                      No or low internet connection. Some features may not load.
-                    </Text>
-                  </View>
-                ) : null
-              }
-              stickyHeaderIndices={isOffline ? [0] : undefined}
+             
               renderItem={renderItem}
               keyExtractor={(item) => item.id}
-              estimatedItemSize={availableHeight}
+              getItemLayout={(_data, index) => ({
+                length: availableHeight,
+                offset: availableHeight * index,
+                index,
+              })}
               pagingEnabled={true}
               snapToAlignment="start"
               decelerationRate="fast"
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 0 }}
-              getItemType={() => 'post'}
-              drawDistance={availableHeight * 3}
+              windowSize={5}
+              maxToRenderPerBatch={3}
+              initialNumToRender={2}
+              removeClippedSubviews={true}
               scrollEventThrottle={16}
-              nestedScrollEnabled={false}
               scrollEnabled={true}
               bounces={false}
               refreshControl={
@@ -400,29 +393,29 @@ export default function FeedScreen() {
               viewabilityConfig={viewabilityConfig}
               ListEmptyComponent={
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
-                  <Feather name={isOffline ? "wifi-off" : "video"} size={64} color="#666" />
+                  <Feather name={activeTab === 'following' ? "user-plus" : "video"} size={64} color="#666" />
                   <Text style={styles.emptyText}>
-                    {isOffline ? 'No or Low Internet Connection' : 'No posts available'}
+                    {activeTab === 'following' && !user
+                      ? 'Sign in to see posts from people you follow'
+                      : activeTab === 'following'
+                        ? 'No posts here yet'
+                        : 'No posts available'}
                   </Text>
                   <Text style={styles.emptySubtext}>
-                    {isOffline
-                      ? 'Please check your connection and try again.'
-                      : activeTab === 'following' && !user
-                        ? 'Sign in to see posts from people you follow'
-                        : 'Pull down to refresh or check back later'
-                    }
+                    {activeTab === 'following' && !user
+                      ? 'Sign in to see posts from people you follow'
+                      : activeTab === 'following'
+                        ? 'Follow people to see their posts here'
+                        : 'Pull down to refresh or check back later'}
                   </Text>
-                  {isOffline && (
-                    <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-                      <Text style={styles.retryButtonText}>Retry</Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               }
             />
           )}
         </>
       )}
+
+
 
       <ReportModal
         isVisible={reportModalVisible}
@@ -472,20 +465,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     height: 56,
   },
-  offlineBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.92)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  offlineBannerText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
   tabsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -527,18 +506,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 40,
     lineHeight: 20,
-  },
-  retryButton: {
-    backgroundColor: '#60a5fa',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 24,
-    marginTop: 20,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
   loadMoreContainer: {
     paddingVertical: 20,

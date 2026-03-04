@@ -20,6 +20,8 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { imageCache } from '@/lib/utils/image-cache';
 import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
+import NetworkBanner from '@/components/NetworkBanner';
+import * as VideoCache from 'expo-video-cache';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -116,6 +118,11 @@ function RootLayoutNav() {
     } catch (_) {}
   }, []);
 
+  // Start video cache proxy server (iOS only, no-op on Android/Web)
+  useEffect(() => {
+    VideoCache.startServer(9000, 1024 * 1024 * 1024, true).catch(() => {});
+  }, []);
+
   // Memory management: Clear caches when app goes to background
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -144,38 +151,25 @@ function RootLayoutNav() {
         <MuteProvider>
           <AuthProvider>
             <ThemeProvider value={theme}>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  // CRITICAL FIX: Use 'none' animation for instant navigation - no delays
-                  animation: 'none', // Changed from 'fade' to 'none' for super fast navigation
-                  animationDuration: 0, // Instant transitions
-                }}
-              >
-                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="auth" options={{ headerShown: false }} />
-                <Stack.Screen
-                  name="post/[id]"
-                  options={{
+              <View style={{ flex: 1 }}>
+                <Stack
+                  screenOptions={{
                     headerShown: false,
+                    animation: 'none',
+                    animationDuration: 0,
                   }}
-                />
-                <Stack.Screen
-                  name="user/[id]"
-                  options={{
-                    headerShown: false,
-                  }}
-                />
-                <Stack.Screen
-                  name="profile-feed/[userId]"
-                  options={{
-                    headerShown: false,
-                  }}
-                />
-                <Stack.Screen name="search" options={{ headerShown: false }} />
-                <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
-              </Stack>
+                >
+                  <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="auth" options={{ headerShown: false }} />
+                  <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="profile-feed/[userId]" options={{ headerShown: false }} />
+                  <Stack.Screen name="search" options={{ headerShown: false }} />
+                  <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
+                </Stack>
+                <NetworkBanner />
+              </View>
               <StatusBar style="light" />
             </ThemeProvider>
           </AuthProvider>

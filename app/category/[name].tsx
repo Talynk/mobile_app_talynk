@@ -270,12 +270,6 @@ export default function CategoryScreen() {
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
           <Text style={[styles.errorText, { color: C.text }]}>Failed to load posts</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={() => refetch()}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -359,7 +353,8 @@ export default function CategoryScreen() {
             data={posts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const shouldPreload = !isActive && Math.abs(index - fullscreenIndex) === 1;
+              const distance = index - fullscreenIndex;
+              const shouldPreload = !isActive && distance >= -1 && distance <= 3;
               return (
                 <FullscreenFeedPostItem
                   item={item}

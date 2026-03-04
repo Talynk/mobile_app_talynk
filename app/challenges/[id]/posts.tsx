@@ -26,6 +26,7 @@ import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import { useAuth } from '@/lib/auth-context';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
@@ -89,6 +90,8 @@ export default function ChallengePostsScreen() {
     minimumViewTime: 100,
   }).current;
 
+  useRefetchOnReconnect(() => loadPosts(1, true));
+
   const loadPosts = async (page = 1, refresh = false) => {
     if (!id) return;
 
@@ -129,7 +132,7 @@ export default function ChallengePostsScreen() {
         setError(response.message || 'Failed to load posts');
       }
     } catch (err: any) {
-      console.error('Error loading challenge posts:', err);
+      console.warn('Error loading challenge posts:', err?.message);
       if (page === 1) {
         setPosts([]);
       }
@@ -310,12 +313,6 @@ export default function ChallengePostsScreen() {
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
           <Text style={[styles.errorText, { color: C.text }]}>{error}</Text>
-          <TouchableOpacity
-            style={[styles.retryButton, { backgroundColor: C.primary }]}
-            onPress={() => loadPosts(1, true)}
-          >
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -395,7 +392,8 @@ export default function ChallengePostsScreen() {
             data={posts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const shouldPreload = !isActive && Math.abs(index - fullscreenIndex) === 1;
+              const distance = index - fullscreenIndex;
+              const shouldPreload = !isActive && distance >= -1 && distance <= 3;
               return (
                 <FullscreenFeedPostItem
                   item={item}
