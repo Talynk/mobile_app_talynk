@@ -92,6 +92,12 @@ export interface Post {
   views?: number;
   comments?: Comment[];
   status?: 'active' | 'draft' | 'Draft' | 'suspended' | 'approved' | 'pending' | 'rejected'; // New statuses + legacy support
+  is_liked?: boolean;
+  is_following_author?: boolean;
+  like_count?: number;
+  view_count?: number;
+  playback_url?: string;
+  stream_type?: string;
   is_featured?: boolean;
   is_frozen?: boolean;
   report_count?: number;

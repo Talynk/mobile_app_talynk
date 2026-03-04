@@ -288,6 +288,22 @@ export const categoriesApi = {
   },
 };
 
+// Feed API (optimized endpoints with cursor pagination)
+export const feedApi = {
+  getPublic: async (cursor?: string, limit = 10) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    const res = await apiClient.get(`/api/feed/public?${params}`);
+    return res.data;
+  },
+  getPersonalized: async (cursor?: string, limit = 10) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    const res = await apiClient.get(`/api/feed/personalized?${params}`);
+    return res.data;
+  },
+};
+
 // Posts API
 export const postsApi = {
   getAll: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
@@ -298,6 +314,19 @@ export const postsApi = {
       return {
         status: 'error',
         message: 'Failed to fetch posts',
+        data: { posts: [], pagination: {}, filters: {} },
+      };
+    }
+  },
+
+  getByCategory: async (categoryId: number, page = 1, limit = 20): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/posts/all?category_id=${categoryId}&page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: 'Failed to fetch category posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }

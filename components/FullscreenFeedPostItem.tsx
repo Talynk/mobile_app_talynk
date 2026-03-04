@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   Animated,
   Alert,
+  Platform,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -82,22 +83,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   shouldPreload,
   availableHeight,
 }) => {
-  const { height: screenHeight, width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { sendLikeAction } = useRealtime();
   const likedPosts = useAppSelector((s) => s.likes.likedPosts);
   const postLikeCounts = useAppSelector((s) => s.likes.postLikeCounts);
 
-  const isPostLiked = likedPosts.includes(item.id);
+  const isPostLiked = likedPosts.includes(item.id) || isLiked;
   const cachedLikeCount = postLikeCounts[item.id];
-  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
+  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
 
   const { comments } = useRealtimePost({
     postId: item.id,
     initialLikes: initialLikeCount,
     initialComments: item.comments_count || item.comment_count || 0,
-    initialIsLiked: isPostLiked || isLiked,
+    initialIsLiked: isPostLiked,
   });
 
   const wasActiveRef = useRef(isActive);
@@ -112,23 +113,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
+  const [retryCount, setRetryCount] = useState(0);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
   const [pausedByUser, setPausedByUser] = useState(false);
   const pauseIndicatorOpacity = useRef(new Animated.Value(0)).current;
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
+  const thumbnailOpacity = useRef(new Animated.Value(1)).current;
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
-  const playbackUrl = getPlaybackUrl(item);
+  const playbackUrl = item.playback_url || getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
-  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload);
-  const videoSourceUrl = playbackUrl;
-  const videoPlayerSource = shouldLoadVideo && videoSourceUrl ? videoSourceUrl : null;
+  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload) && !videoError;
+  const videoPlayerSource = shouldLoadVideo && playbackUrl ? playbackUrl : null;
 
-  // Thumbnail or media URL for base layer — NEVER show black; always show thumbnail or dark gray placeholder
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
 
   const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
@@ -167,6 +167,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [videoPlayerSource]);
 
+  // Play/pause based on active state
   useEffect(() => {
     if (!videoPlayer || !playerValidRef.current) return;
     try {
@@ -186,6 +187,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [isActive, isMuted, videoPlayer, decoderErrorDetected, index]);
 
+  // Fade out thumbnail when video is playing and ready
+  useEffect(() => {
+    if (isActive && isPlaying && videoReady) {
+      Animated.timing(thumbnailOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      thumbnailOpacity.setValue(1);
+    }
+  }, [isActive, isPlaying, videoReady, thumbnailOpacity]);
+
+  // Track playing state
   useEffect(() => {
     if (!videoPlayer || !playerValidRef.current) return;
     try {
@@ -204,26 +219,29 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [videoPlayer, isActive]);
 
-  useEffect(() => {
-    if (!videoPlayer || !isActive) return;
-    const timer = setTimeout(() => {}, 100);
-    return () => clearTimeout(timer);
-  }, [videoPlayer, isActive]);
-
+  // Track progress
   useEffect(() => {
     if (!videoPlayer || !isActive) return;
     const interval = setInterval(() => {
       try {
         const ct = videoPlayer.currentTime || 0;
         const dur = videoPlayer.duration || 0;
-        if (dur > 0) {
-          setVideoProgress(ct / dur);
-          setVideoDuration(dur);
-        }
+        if (dur > 0) setVideoProgress(ct / dur);
       } catch (_) {}
     }, 250);
     return () => clearInterval(interval);
   }, [videoPlayer, isActive]);
+
+  // Retry on video error with exponential backoff
+  const handleRetry = useCallback(() => {
+    if (retryCount < 3) {
+      const delay = Math.pow(2, retryCount) * 1000;
+      setTimeout(() => {
+        setVideoError(false);
+        setRetryCount(prev => prev + 1);
+      }, delay);
+    }
+  }, [retryCount]);
 
   const handleTapToPause = () => {
     if (!videoPlayer || !isPlayerValid) return;
@@ -303,7 +321,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   };
 
-  const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.likes || 0);
+  const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
@@ -311,22 +329,36 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         {isVideo ? (
           <>
             <Pressable style={styles.mediaWrapper} onPress={handleTapToPause}>
-              {/* Only thumbnail or video — nothing else (no placeholder, no base layer) */}
               {thumbnailOrPlaceholderUrl ? (
-                <Image
+                <Animated.Image
                   source={{ uri: thumbnailOrPlaceholderUrl }}
-                  style={[
-                    styles.media,
-                    styles.mediaThumbnailLayer,
-                    { opacity: isActive && isPlaying && videoReady ? 0 : 1 },
-                  ]}
+                  style={[styles.media, styles.mediaThumbnailLayer, { opacity: thumbnailOpacity }]}
                   resizeMode="cover"
                 />
               ) : null}
 
               {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
-                  <VideoView player={videoPlayer} style={styles.media} contentFit="cover" nativeControls={false} />
+                  <VideoView
+                    player={videoPlayer}
+                    style={styles.media}
+                    contentFit="cover"
+                    nativeControls={false}
+                    {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as any } : {})}
+                  />
+                </View>
+              )}
+
+              {videoError && (
+                <View style={styles.errorOverlay}>
+                  <Feather name="alert-circle" size={32} color="#fff" />
+                  <Text style={styles.errorText}>Video unavailable</Text>
+                  {retryCount < 3 && (
+                    <TouchableOpacity style={styles.retryBtn} onPress={handleRetry}>
+                      <Feather name="refresh-cw" size={16} color="#fff" />
+                      <Text style={styles.retryBtnText}>Retry</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
@@ -348,7 +380,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         ) : (
           <View style={styles.mediaWrapper}>
             {mediaUrl && !imageError ? (
-              <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="cover" />
+              <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="cover" onError={() => setImageError(true)} />
             ) : null}
           </View>
         )}
@@ -431,9 +463,19 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   );
 };
 
-export default React.memo(FullscreenFeedPostItem);
+function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPostItemProps) {
+  return (
+    prev.item.id === next.item.id &&
+    prev.isActive === next.isActive &&
+    prev.shouldPreload === next.shouldPreload &&
+    prev.isLiked === next.isLiked &&
+    prev.isFollowing === next.isFollowing &&
+    prev.availableHeight === next.availableHeight
+  );
+}
 
-// Feed media: only thumbnail or video/image — no placeholders, no solid-color layers
+export default React.memo(FullscreenFeedPostItem, arePropsEqual);
+
 const styles = StyleSheet.create({
   postContainer: {
     width: '100%',
@@ -460,6 +502,33 @@ const styles = StyleSheet.create({
     zIndex: 1,
     width: '100%',
     height: '100%',
+  },
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 5,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 14,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  retryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   muteIndicatorOverlay: {
     position: 'absolute',

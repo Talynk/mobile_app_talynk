@@ -260,6 +260,9 @@ export default function CreatePostScreen() {
   const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
+  const [draftReplaceModalVisible, setDraftReplaceModalVisible] = useState(false);
+  const [existingDrafts, setExistingDrafts] = useState<any[]>([]);
+  const [pendingDraftStatus, setPendingDraftStatus] = useState<'active' | 'draft'>('draft');
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -1003,22 +1006,17 @@ export default function CreatePostScreen() {
       return;
     }
 
-    // Validate draft count BEFORE starting upload — do not upload if already at max drafts
     if (status === 'draft') {
       try {
         const draftRes = await postsApi.getDrafts(1, 10);
-        const count = (draftRes.data?.posts?.length) ?? 0;
-        if (count >= MAX_DRAFTS) {
-          Alert.alert(
-            'Maximum drafts reached',
-            'You have reached the maximum number of drafts. Publish or delete a draft to save another.',
-            [{ text: 'OK' }]
-          );
+        const drafts = draftRes.data?.posts ?? [];
+        if (drafts.length >= MAX_DRAFTS) {
+          setExistingDrafts(drafts);
+          setPendingDraftStatus('draft');
+          setDraftReplaceModalVisible(true);
           return;
         }
-      } catch (_) {
-        // If we can't fetch drafts, allow attempt (backend will reject if over limit)
-      }
+      } catch (_) {}
     }
 
     const isValid = await validate();
@@ -2265,6 +2263,60 @@ export default function CreatePostScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       )}
+
+      <Modal visible={draftReplaceModalVisible} transparent animationType="slide">
+        <TouchableOpacity
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}
+          activeOpacity={1}
+          onPress={() => setDraftReplaceModalVisible(false)}
+        >
+          <View style={{ backgroundColor: '#18181b', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 }}>
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 }}>
+              Maximum Drafts Reached
+            </Text>
+            <Text style={{ color: '#9ca3af', fontSize: 14, marginBottom: 16 }}>
+              You can only have {MAX_DRAFTS} drafts. Choose one to replace:
+            </Text>
+            {existingDrafts.map((draft: any) => (
+              <TouchableOpacity
+                key={draft.id}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', padding: 12,
+                  backgroundColor: '#232326', borderRadius: 12, marginBottom: 8,
+                }}
+                onPress={async () => {
+                  setDraftReplaceModalVisible(false);
+                  try {
+                    await postsApi.deletePost(draft.id);
+                    await handleCreatePost(pendingDraftStatus);
+                  } catch (e) {
+                    showToast('Failed to replace draft. Try again.');
+                  }
+                }}
+              >
+                <View style={{ width: 48, height: 48, borderRadius: 8, backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center', marginRight: 12 }}>
+                  <Feather name={draft.type === 'video' ? 'video' : 'image'} size={20} color="#60a5fa" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }} numberOfLines={1}>
+                    {draft.caption || draft.title || draft.description || 'Untitled draft'}
+                  </Text>
+                  <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 2 }}>
+                    {draft.createdAt ? new Date(draft.createdAt).toLocaleDateString() : 'Unknown date'}
+                  </Text>
+                </View>
+                <Feather name="trash-2" size={18} color="#ef4444" />
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity
+              style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+              onPress={() => setDraftReplaceModalVisible(false)}
+            >
+              <Text style={{ color: '#9ca3af', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {toastMessage && (
         <Animated.View

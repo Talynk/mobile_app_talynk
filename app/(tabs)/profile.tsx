@@ -13,6 +13,7 @@ import {
   Alert,
   RefreshControl,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
@@ -954,10 +955,39 @@ export default function ProfileScreen() {
     );
   };
 
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [shimmerAnim]);
+  const shimmerOpacity = shimmerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
+
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#60a5fa" />
+      <View style={[styles.container, { paddingTop: insets.top + 60 }]}>
+        <View style={{ alignItems: 'center', padding: 24 }}>
+          <Animated.View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: '#2a2a2a', opacity: shimmerOpacity, marginBottom: 16 }} />
+          <Animated.View style={{ width: 120, height: 18, borderRadius: 4, backgroundColor: '#2a2a2a', opacity: shimmerOpacity, marginBottom: 8 }} />
+          <Animated.View style={{ width: 200, height: 12, borderRadius: 4, backgroundColor: '#2a2a2a', opacity: shimmerOpacity, marginBottom: 20 }} />
+          <View style={{ flexDirection: 'row', gap: 40, marginBottom: 20 }}>
+            {[1, 2, 3, 4].map(i => (
+              <View key={i} style={{ alignItems: 'center' }}>
+                <Animated.View style={{ width: 36, height: 18, borderRadius: 4, backgroundColor: '#2a2a2a', opacity: shimmerOpacity, marginBottom: 6 }} />
+                <Animated.View style={{ width: 48, height: 12, borderRadius: 4, backgroundColor: '#2a2a2a', opacity: shimmerOpacity }} />
+              </View>
+            ))}
+          </View>
+          <Animated.View style={{ width: 140, height: 36, borderRadius: 18, backgroundColor: '#2a2a2a', opacity: shimmerOpacity }} />
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', padding: 2 }}>
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <Animated.View key={i} style={{ width: (screenWidth - 6) / 3, aspectRatio: 0.75, margin: 1, backgroundColor: '#2a2a2a', borderRadius: 2, opacity: shimmerOpacity }} />
+          ))}
+        </View>
       </View>
     );
   }

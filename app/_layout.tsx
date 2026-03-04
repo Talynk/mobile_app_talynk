@@ -1,13 +1,16 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useCallback, useState } from 'react';
 import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '@/lib/query-client';
 import { AuthProvider } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
 import { Provider } from 'react-redux';
@@ -88,12 +91,22 @@ export default function RootLayout() {
 }
 
 function RootLayoutNav() {
-  // Force dark theme
   const theme = DarkTheme;
+  const [onboardingChecked, setOnboardingChecked] = useState(false);
 
-  // Initialize Redux store from AsyncStorage (never crash app)
   useEffect(() => {
     initializeStore().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem('talynk_has_seen_onboarding')
+      .then((val) => {
+        if (val !== 'true') {
+          router.replace('/onboarding');
+        }
+      })
+      .catch(() => {})
+      .finally(() => setOnboardingChecked(true));
   }, []);
 
   // Initialize image cache (never crash app)
@@ -125,6 +138,7 @@ function RootLayoutNav() {
   }, []);
 
   return (
+    <QueryClientProvider client={queryClient}>
     <Provider store={store}>
       <CacheProvider>
         <MuteProvider>
@@ -138,6 +152,7 @@ function RootLayoutNav() {
                   animationDuration: 0, // Instant transitions
                 }}
               >
+                <Stack.Screen name="onboarding" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="auth" options={{ headerShown: false }} />
                 <Stack.Screen
@@ -167,5 +182,6 @@ function RootLayoutNav() {
         </MuteProvider>
       </CacheProvider>
     </Provider>
+    </QueryClientProvider>
   );
 }

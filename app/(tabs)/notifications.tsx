@@ -594,8 +594,15 @@ export default function NotificationsScreen() {
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#60a5fa" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
+          {[1, 2, 3, 4, 5].map((i) => (
+            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1a1a1a', marginRight: 14 }} />
+              <View style={{ flex: 1 }}>
+                <View style={{ width: '80%', height: 14, borderRadius: 4, backgroundColor: '#1a1a1a', marginBottom: 8 }} />
+                <View style={{ width: '40%', height: 10, borderRadius: 4, backgroundColor: '#1a1a1a' }} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : (
         <FlatList

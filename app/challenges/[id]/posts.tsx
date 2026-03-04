@@ -75,6 +75,20 @@ export default function ChallengePostsScreen() {
   const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
 
+  const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
+    if (!viewableItems || viewableItems.length === 0) return;
+    const mostVisible = viewableItems.reduce((best: any, item: any) =>
+      item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
+    , null as any);
+    const idx = mostVisible?.index ?? viewableItems[0]?.index;
+    if (idx !== undefined && idx !== null) setFullscreenIndex(idx);
+  }).current;
+
+  const fullscreenViewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 100,
+  }).current;
+
   const loadPosts = async (page = 1, refresh = false) => {
     if (!id) return;
 
@@ -381,8 +395,7 @@ export default function ChallengePostsScreen() {
             data={posts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -3 && distance <= 3;
+              const shouldPreload = !isActive && Math.abs(index - fullscreenIndex) === 1;
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -393,8 +406,8 @@ export default function ChallengePostsScreen() {
                   onReport={handleReport}
                   onFollow={handleFollow}
                   onUnfollow={handleUnfollow}
-                  isLiked={likedPosts.includes(item.id)}
-                  isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isLiked={item.is_liked ?? likedPosts.includes(item.id)}
+                  isFollowing={item.is_following_author ?? userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                   isActive={isActive}
                   shouldPreload={shouldPreload}
                   availableHeight={FULLSCREEN_AVAILABLE_HEIGHT}
@@ -408,12 +421,8 @@ export default function ChallengePostsScreen() {
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
-            onMomentumScrollEnd={(event) => {
-              const index = Math.round(
-                event.nativeEvent.contentOffset.y / FULLSCREEN_AVAILABLE_HEIGHT
-              );
-              setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
-            }}
+            onViewableItemsChanged={fullscreenViewableHandler}
+            viewabilityConfig={fullscreenViewabilityConfig}
             getItemLayout={(_, index) => ({
               length: FULLSCREEN_AVAILABLE_HEIGHT,
               offset: FULLSCREEN_AVAILABLE_HEIGHT * index,
