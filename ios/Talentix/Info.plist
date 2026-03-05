@@ -28,13 +28,13 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>talentix</string>
-          <string>com.ihirwe.talynksocial</string>
+          <string>com.ihirwe.talentix</string>
         </array>
       </dict>
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>exp+mobile-app-talynk</string>
+          <string>exp+talentix</string>
         </array>
       </dict>
     </array>
