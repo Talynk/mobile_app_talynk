@@ -4,8 +4,7 @@
     "slug": "talentix",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/mobile-app-logo.png",
-    "iconBackgroundColor": "#000000",
+    "icon": "./assets/images/app-icon-square.png",
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -20,7 +19,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/mobile-app-logo.png",
+        "foregroundImage": "./assets/images/app-icon-square.png",
         "backgroundColor": "#000000"
       },
       "package": "com.ihirwe.talentix",

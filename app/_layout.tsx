@@ -124,11 +124,9 @@ function RootLayoutNav() {
     } catch (_) {}
   }, []);
 
-  // Start video cache proxy server when native module is available (e.g. dev build)
+  // Start video cache: iOS uses expo-video-cache (startVideoCacheServer.ios.ts); Android no-op (startVideoCacheServer.android.ts). Android bundle never references expo-video-cache.
   useEffect(() => {
-    import('expo-video-cache')
-      .then((m) => m.startServer(9000, 1024 * 1024 * 1024, true).catch(() => {}))
-      .catch(() => {});
+    require('@/lib/utils/startVideoCacheServer').start();
   }, []);
 
   // Memory management: Clear caches when app goes to background
