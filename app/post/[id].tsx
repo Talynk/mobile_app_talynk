@@ -27,6 +27,7 @@ import { useCache } from '@/lib/cache-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ReportModal from '@/components/ReportModal';
 import { getPostMediaUrl, getProfilePictureUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
+import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 
@@ -274,11 +275,11 @@ export default function PostDetailScreen() {
   // HLS-ONLY: Get playback URL — returns .m3u8 only when processing is complete
   const playbackUrl = getPlaybackUrl(post);
   const hlsReady = !!playbackUrl;
-  const videoSourceUrl = isVideo && hlsReady ? playbackUrl : null;
+  const videoPlayerSource = isVideo && hlsReady && playbackUrl ? getVideoSource(playbackUrl) : null;
 
-  // expo-video player (HLS only)
+  // expo-video player (HLS only, with caching on Android and HLS proxy on iOS)
   const videoPlayer = useVideoPlayer(
-    videoSourceUrl,
+    videoPlayerSource,
     (player) => {
       if (player) {
         player.loop = false;

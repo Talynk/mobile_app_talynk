@@ -1,0 +1,61 @@
+{
+  "name": "expo-video-cache",
+  "version": "2.1.0",
+  "description": "High-performance video caching for expo-video, react-native-video and React Native. Features a local proxy for instant HLS (.m3u8), offline support, prefetching, and advanced cache management.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "scripts": {
+    "build": "expo-module build",
+    "clean": "expo-module clean",
+    "lint": "expo-module lint",
+    "test": "expo-module test",
+    "prepare": "expo-module prepare",
+    "prepublishOnly": "expo-module prepublishOnly",
+    "expo-module": "expo-module",
+    "open:ios": "xed example/ios",
+    "open:android": "open -a \"Android Studio\" example/android"
+  },
+  "keywords": [
+    "expo",
+    "react-native",
+    "expo-video",
+    "expo-av",
+    "expo-video-cache",
+    "video-cache",
+    "media-cache",
+    "caching",
+    "cache",
+    "proxy",
+    "local-server",
+    "offline-video",
+    "offline",
+    "hls",
+    "m3u8",
+    "mp4",
+    "streaming",
+    "prefetch",
+    "preload",
+    "performance",
+    "avplayer",
+    "react-native-video",
+    "expo-module"
+  ],
+  "repository": "https://github.com/Monisankarnath/expo-video-cache",
+  "bugs": {
+    "url": "https://github.com/Monisankarnath/expo-video-cache/issues"
+  },
+  "author": "Monisankar Nath <monisankar.nath161998@gmail.com> (https://github.com/Monisankarnath)",
+  "license": "MIT",
+  "homepage": "https://github.com/Monisankarnath/expo-video-cache#readme",
+  "devDependencies": {
+    "@types/react": "19.1.0",
+    "expo": "54.0.27",
+    "expo-module-scripts": "5.0.8",
+    "react-native": "0.81.5"
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

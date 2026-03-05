@@ -8,6 +8,7 @@ import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Sentry from '@sentry/react-native';
 
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
@@ -36,7 +37,13 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+// Initialize Sentry for error and performance monitoring
+Sentry.init({
+  dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
+  sendDefaultPii: true,
+});
+
+function RootLayoutInner() {
   useFrameworkReady();
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -179,3 +186,5 @@ function RootLayoutNav() {
     </QueryClientProvider>
   );
 }
+
+export default Sentry.wrap(RootLayoutInner);

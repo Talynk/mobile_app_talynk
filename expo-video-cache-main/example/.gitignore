@@ -2,7 +2,7 @@
 
 # dependencies
 node_modules/
-android/
+
 # Expo
 .expo/
 dist/
@@ -35,19 +35,7 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
-.env
-*.md
 
-md
-# Expo
-.expo
-dist/
-web-build/
-talynk_backend/
-Instagram-preloading-demo-video.mp4
-talynk_backend-prod/
-React-Native-Tiktok-Clone/
-talynk-video-processor-main/
-Talentix.postman_collection.json
-react-native-video-master/
-tiktok-clone-main/
+# generated native folders
+/ios
+/android
