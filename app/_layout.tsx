@@ -22,7 +22,6 @@ import { imageCache } from '@/lib/utils/image-cache';
 import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
 import NetworkBanner from '@/components/NetworkBanner';
-import * as VideoCache from 'expo-video-cache';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -125,9 +124,11 @@ function RootLayoutNav() {
     } catch (_) {}
   }, []);
 
-  // Start video cache proxy server (iOS only, no-op on Android/Web)
+  // Start video cache proxy server when native module is available (e.g. dev build)
   useEffect(() => {
-    VideoCache.startServer(9000, 1024 * 1024 * 1024, true).catch(() => {});
+    import('expo-video-cache')
+      .then((m) => m.startServer(9000, 1024 * 1024 * 1024, true).catch(() => {}))
+      .catch(() => {});
   }, []);
 
   // Memory management: Clear caches when app goes to background
