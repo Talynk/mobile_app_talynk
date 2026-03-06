@@ -13,6 +13,7 @@ import {
   FlatList,
   Share,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -34,8 +35,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 
 const POSTS_PER_PAGE = 20;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const FULLSCREEN_HEADER = 80;
-const FULLSCREEN_AVAILABLE_HEIGHT = SCREEN_HEIGHT - FULLSCREEN_HEADER;
+const FULLSCREEN_HEADER_PX = 64;
 
 const COLORS = {
   dark: {
@@ -54,6 +54,8 @@ export default function CategoryScreen() {
   const categoryName = Array.isArray(name) ? name[0] : (name as string);
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
 
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
@@ -369,13 +371,13 @@ export default function CategoryScreen() {
                   isFollowing={item.is_following_author ?? userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                   isActive={isActive}
                   shouldPreload={shouldPreload}
-                  availableHeight={FULLSCREEN_AVAILABLE_HEIGHT}
+                  availableHeight={fullscreenAvailableHeight}
                 />
               );
             }}
             keyExtractor={(item) => item.id}
             pagingEnabled
-            snapToInterval={FULLSCREEN_AVAILABLE_HEIGHT}
+            snapToInterval={fullscreenAvailableHeight}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
@@ -384,13 +386,13 @@ export default function CategoryScreen() {
             viewabilityConfig={fullscreenViewabilityConfig}
             onMomentumScrollEnd={(event) => {
               if (hasNextPage && !isFetchingNextPage) {
-                const idx = Math.round(event.nativeEvent.contentOffset.y / FULLSCREEN_AVAILABLE_HEIGHT);
+                const idx = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
                 if (posts.length - idx <= 3) fetchNextPage();
               }
             }}
             getItemLayout={(_, index) => ({
-              length: FULLSCREEN_AVAILABLE_HEIGHT,
-              offset: FULLSCREEN_AVAILABLE_HEIGHT * index,
+              length: fullscreenAvailableHeight,
+              offset: fullscreenAvailableHeight * index,
               index,
             })}
           />

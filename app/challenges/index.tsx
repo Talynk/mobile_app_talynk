@@ -45,11 +45,14 @@ const COLORS = {
   },
 };
 
-const TABS: Array<{ key: 'active' | 'upcoming' | 'ended' | 'my'; label: string }> = [
-  { key: 'active', label: 'Active' },
-  { key: 'upcoming', label: 'Upcoming' },
+const TABS_AUTH: Array<{ key: 'live_upcoming' | 'ended' | 'my'; label: string }> = [
+  { key: 'live_upcoming', label: 'Live & Upcoming' },
   { key: 'ended', label: 'Ended' },
   { key: 'my', label: 'Created by Me' },
+];
+const TABS_GUEST: Array<{ key: 'live_upcoming' | 'ended'; label: string }> = [
+  { key: 'live_upcoming', label: 'Live & Upcoming' },
+  { key: 'ended', label: 'Ended' },
 ];
 
 export default function ChallengesScreen() {
@@ -57,7 +60,7 @@ export default function ChallengesScreen() {
   const colorScheme = useColorScheme() || 'dark';
   const C = COLORS[colorScheme];
 
-  const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'ended' | 'my'>('active');
+  const [activeTab, setActiveTab] = useState<'live_upcoming' | 'ended' | 'my'>('live_upcoming');
   const [activeChallenges, setActiveChallenges] = useState<any[]>([]);
   const [upcomingChallenges, setUpcomingChallenges] = useState<any[]>([]);
   const [endedChallenges, setEndedChallenges] = useState<any[]>([]);
@@ -146,11 +149,22 @@ export default function ChallengesScreen() {
   );
 
   const visibleChallenges = useMemo(() => {
-    if (activeTab === 'active') return activeChallenges;
-    if (activeTab === 'upcoming') return upcomingChallenges;
+    if (activeTab === 'live_upcoming') {
+      const merged = [...activeChallenges, ...upcomingChallenges];
+      return merged.sort((a, b) => {
+        const aStart = new Date(a.start_date).getTime();
+        const bStart = new Date(b.start_date).getTime();
+        const now = Date.now();
+        const aActive = aStart <= now && new Date(a.end_date).getTime() >= now;
+        const bActive = bStart <= now && new Date(b.end_date).getTime() >= now;
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
+        return aStart - bStart;
+      });
+    }
     if (activeTab === 'ended') return endedChallenges;
     if (activeTab === 'my') return myChallenges;
-    return activeChallenges;
+    return [];
   }, [activeTab, activeChallenges, upcomingChallenges, endedChallenges, myChallenges]);
 
   const onRefresh = async () => {
@@ -403,28 +417,26 @@ export default function ChallengesScreen() {
         </View>
       )}
 
-      {/* Tabs - only for authenticated users */}
-      {isAuthenticated && (
-        <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-          {TABS.map((tab) => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[
-                styles.tabButton,
-                activeTab === tab.key && { borderBottomColor: C.primary, borderBottomWidth: 2 }
-              ]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <Text style={[
-                styles.tabLabel,
-                { color: activeTab === tab.key ? C.primary : C.textSecondary }
-              ]}>
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      {/* Tabs: 2 for guests (Live & Upcoming, Ended), 3 for authenticated (+ Created by Me) */}
+      <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
+        {(isAuthenticated ? TABS_AUTH : TABS_GUEST).map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[
+              styles.tabButton,
+              activeTab === tab.key && { borderBottomColor: C.primary, borderBottomWidth: 2 }
+            ]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text style={[
+              styles.tabLabel,
+              { color: activeTab === tab.key ? C.primary : C.textSecondary }
+            ]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* Content */}
       {loading ? (
@@ -458,16 +470,23 @@ export default function ChallengesScreen() {
             <View style={styles.emptyContainer}>
               <MaterialIcons name="emoji-events" size={64} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                {activeTab === 'active'
-                  ? "No active competitions right now"
-                  : activeTab === 'upcoming'
-                    ? "No upcoming competitions"
-                    : activeTab === 'ended'
-                      ? "No ended competitions"
-                      : activeTab === 'my'
-                        ? "You haven't created any competitions"
-                        : "No competitions available"}
+                {activeTab === 'live_upcoming'
+                  ? "No competitions right now"
+                  : activeTab === 'ended'
+                    ? "No ended competitions"
+                    : activeTab === 'my'
+                      ? "You haven't created any competitions"
+                      : "No competitions available"}
               </Text>
+              {!isAuthenticated && (activeTab === 'live_upcoming' || activeTab === 'ended') && (
+                <TouchableOpacity
+                  style={[styles.emptyCtaButton, { backgroundColor: C.primary }]}
+                  onPress={() => router.push('/auth/login' as any)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.emptyCtaButtonText}>Login to create your own competition</Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
         />
@@ -804,6 +823,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     textAlign: 'center',
+  },
+  emptyCtaButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  emptyCtaButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   modalContainer: {
     flex: 1,

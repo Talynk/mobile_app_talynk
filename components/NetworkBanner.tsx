@@ -131,7 +131,7 @@ export default function NetworkBanner() {
         styles.container,
         {
           paddingTop: topPadding,
-          backgroundColor: backOnline ? '#16a34a' : '#dc2626',
+          backgroundColor: backOnline ? '#16a34a' : '#b45309',
           transform: [{ translateY: slideAnim }],
           opacity: opacityAnim,
         },

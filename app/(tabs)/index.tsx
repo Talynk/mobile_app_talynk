@@ -408,6 +408,15 @@ export default function FeedScreen() {
                         ? 'Follow people to see their posts here'
                         : 'Pull down to refresh or check back later'}
                   </Text>
+                  {activeTab === 'following' && !user && (
+                    <TouchableOpacity
+                      style={styles.emptyLoginButton}
+                      onPress={() => router.push('/auth/login' as any)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.emptyLoginButtonText}>Log in / Sign up</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               }
             />
@@ -506,6 +515,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 40,
     lineHeight: 20,
+  },
+  emptyLoginButton: {
+    marginTop: 24,
+    backgroundColor: '#60a5fa',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+  },
+  emptyLoginButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   loadMoreContainer: {
     paddingVertical: 20,

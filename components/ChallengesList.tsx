@@ -43,7 +43,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
     const [challenges, setChallenges] = useState<Challenge[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [internalTab, setInternalTab] = useState<'active' | 'upcoming' | 'ended' | 'created'>('active');
+    const [internalTab, setInternalTab] = useState<'live_upcoming' | 'ended' | 'created'>('live_upcoming');
     const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
     const { user } = useAuth();
 
@@ -71,55 +71,62 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 setJoinedIds(userJoinedIds);
             }
 
-            // For unauthenticated users: fetch ALL challenges (active, upcoming, ended)
+            // For unauthenticated users: fetch ALL challenges then filter by tab
             if (!user) {
-                // getAll('active') returns 'active' + 'approved' statuses
-                // Since ended challenges are still 'approved', this returns EVERYTHING (Active, Upcoming, Ended)
                 const response = await challengesApi.getAll('active');
                 if (response.status === 'success') {
                     const data = response.data?.challenges || response.data || [];
                     const all = Array.isArray(data) ? data : [];
-                    // Show ALL challenges for unauthenticated users (no date filter)
-                    challengesToDisplay = all;
+                    if (internalTab === 'live_upcoming') {
+                        challengesToDisplay = all.filter((ch: any) => {
+                            const endDate = new Date(ch.end_date).getTime();
+                            return endDate >= now.getTime();
+                        });
+                        challengesToDisplay.sort((a: any, b: any) => {
+                            const aStart = new Date(a.start_date).getTime();
+                            const bStart = new Date(b.start_date).getTime();
+                            const aActive = aStart <= now.getTime() && new Date(a.end_date).getTime() >= now.getTime();
+                            const bActive = bStart <= now.getTime() && new Date(b.end_date).getTime() >= now.getTime();
+                            if (aActive && !bActive) return -1;
+                            if (!aActive && bActive) return 1;
+                            return aStart - bStart;
+                        });
+                    } else {
+                        challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) < now);
+                    }
                 }
-            } else if (internalTab === 'active') {
-                // Fetch 'active' from API AND 'my-challenges'
-                // We merge them to ensure:
-                // 1. Public active/upcoming challenges are shown
-                // 2. My own upcoming/pending challenges are shown (even if not in public list yet)
+            } else if (internalTab === 'live_upcoming') {
                 const [publicRes, myRes] = await Promise.all([
                     challengesApi.getAll('active'),
                     challengesApi.getMyChallenges()
                 ]);
-
-                let activeChallenges: Challenge[] = [];
-
-                // Process public challenges
+                let combined: Challenge[] = [];
                 if (publicRes.status === 'success') {
                     const data = publicRes.data?.challenges || publicRes.data || [];
-                    const all = Array.isArray(data) ? data : [];
-                    activeChallenges = all;
+                    combined = Array.isArray(data) ? data : [];
                 }
-
-                // Merge my challenges if they fit the criteria
-                if (myRes.status === 'success') {
+                if (myRes?.status === 'success') {
                     const data = myRes.data?.challenges || myRes.data || [];
                     const myAll = Array.isArray(data) ? data : [];
-
                     myAll.forEach((ch: any) => {
-                        if (!activeChallenges.some(a => a.id === ch.id)) {
-                            activeChallenges.push(ch);
-                        }
+                        if (!combined.some((a: any) => a.id === ch.id)) combined.push(ch);
                     });
                 }
-
-                // Filter: Active = started AND not ended
-                challengesToDisplay = activeChallenges.filter((ch: any) => {
+                const activeList = combined.filter((ch: any) => {
                     const startDate = new Date(ch.start_date);
                     const endDate = new Date(ch.end_date);
                     return startDate <= now && endDate >= now;
                 });
-
+                const upcomingList = combined.filter((ch: any) => new Date(ch.start_date) > now);
+                challengesToDisplay = [...activeList, ...upcomingList].sort((a: any, b: any) => {
+                    const aStart = new Date(a.start_date).getTime();
+                    const bStart = new Date(b.start_date).getTime();
+                    const aActive = new Date(a.start_date) <= now && new Date(a.end_date) >= now;
+                    const bActive = new Date(b.start_date) <= now && new Date(b.end_date) >= now;
+                    if (aActive && !bActive) return -1;
+                    if (!aActive && bActive) return 1;
+                    return aStart - bStart;
+                });
             } else if (internalTab === 'ended') {
                 // Fetch 'active' (which returns active + approved) because ended challenges still have 'approved' status
                 // We CANNOT rely on getAll('ended') as it returns empty
@@ -152,20 +159,6 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 }
 
                 challengesToDisplay = endedChallenges;
-
-            } else if (internalTab === 'upcoming') {
-                // Fetch approved challenges that haven't started yet
-                const response = await challengesApi.getAll('active');
-                let upcomingChallenges: Challenge[] = [];
-
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
-                    const all = Array.isArray(data) ? data : [];
-                    // Upcoming = approved/active status BUT start_date is in the future
-                    upcomingChallenges = all.filter((ch: any) => new Date(ch.start_date) > now);
-                }
-
-                challengesToDisplay = upcomingChallenges;
 
             } else if (internalTab === 'created') {
                 // Fetch user's CREATED challenges
@@ -236,9 +229,9 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
 
     // Switch tab when parent requests it (e.g., after creating a challenge)
     useEffect(() => {
-        if (defaultTab) {
-            setInternalTab(defaultTab);
-        }
+        if (defaultTab === 'active' || defaultTab === 'upcoming') setInternalTab('live_upcoming');
+        else if (defaultTab === 'ended') setInternalTab('ended');
+        else if (defaultTab === 'created') setInternalTab('created');
     }, [defaultTab]);
 
     const onRefresh = () => {
@@ -431,11 +424,14 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
         );
     };
 
-    const TABS = [
-        { key: 'active' as const, label: 'Active', icon: 'zap' as const },
-        { key: 'upcoming' as const, label: 'Upcoming', icon: 'clock' as const },
+    const TABS_AUTH = [
+        { key: 'live_upcoming' as const, label: 'Live & Upcoming', icon: 'zap' as const },
         { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
         { key: 'created' as const, label: 'Created by Me', icon: 'user' as const },
+    ];
+    const TABS_GUEST = [
+        { key: 'live_upcoming' as const, label: 'Live & Upcoming', icon: 'zap' as const },
+        { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
     ];
 
     return (
@@ -453,33 +449,31 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 </View>
             )}
 
-            {/* Tabs for authenticated users only */}
-            {user && (
-                <View style={styles.tabsContainer}>
-                    {TABS.map((tab) => (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={[
-                                styles.tabButton,
-                                internalTab === tab.key && styles.tabButtonActive
-                            ]}
-                            onPress={() => setInternalTab(tab.key)}
-                        >
-                            <Feather
-                                name={tab.icon}
-                                size={14}
-                                color={internalTab === tab.key ? '#fff' : '#888'}
-                            />
-                            <Text style={[
-                                styles.tabButtonText,
-                                internalTab === tab.key && styles.tabButtonTextActive
-                            ]}>
-                                {tab.label}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-            )}
+            {/* Tabs: 2 for guests, 3 for authenticated */}
+            <View style={styles.tabsContainer}>
+                {(user ? TABS_AUTH : TABS_GUEST).map((tab) => (
+                    <TouchableOpacity
+                        key={tab.key}
+                        style={[
+                            styles.tabButton,
+                            internalTab === tab.key && styles.tabButtonActive
+                        ]}
+                        onPress={() => setInternalTab(tab.key)}
+                    >
+                        <Feather
+                            name={tab.icon}
+                            size={14}
+                            color={internalTab === tab.key ? '#fff' : '#888'}
+                        />
+                        <Text style={[
+                            styles.tabButtonText,
+                            internalTab === tab.key && styles.tabButtonTextActive
+                        ]}>
+                            {tab.label}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
 
             {loading && challenges.length === 0 ? (
                 <View style={styles.loadingContainer}>
@@ -501,16 +495,23 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                                 {!user ? 'No competitions available' :
                                     internalTab === 'created' ? 'No competitions created yet' :
                                         internalTab === 'ended' ? 'No ended competitions' :
-                                            internalTab === 'upcoming' ? 'No upcoming competitions' :
-                                                'No active competitions'}
+                                            'No competitions right now'}
                             </Text>
                             <Text style={styles.emptySubtext}>
                                 {!user ? 'Check back later for new competitions!' :
                                     internalTab === 'created' ? 'Create one to get started!' :
                                         internalTab === 'ended' ? 'Completed competitions will appear here' :
-                                            internalTab === 'upcoming' ? 'Approved competitions that haven\'t started will appear here' :
-                                                'Check back later or create your own!'}
+                                            'Check back later or create your own!'}
                             </Text>
+                            {!user && (
+                                <TouchableOpacity
+                                    style={styles.emptyCtaButton}
+                                    onPress={() => router.push('/auth/login' as any)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.emptyCtaButtonText}>Login to create your own competition</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     }
                 />
@@ -754,5 +755,17 @@ const styles = StyleSheet.create({
     emptySubtext: {
         color: '#666',
         fontSize: 14,
+    },
+    emptyCtaButton: {
+        marginTop: 24,
+        backgroundColor: '#60a5fa',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 12,
+    },
+    emptyCtaButtonText: {
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: '600',
     },
 });

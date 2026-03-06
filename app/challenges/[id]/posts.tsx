@@ -13,6 +13,7 @@ import {
   FlatList,
   Share,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -35,8 +36,7 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const FULLSCREEN_HEADER = 80;
-const FULLSCREEN_AVAILABLE_HEIGHT = SCREEN_HEIGHT - FULLSCREEN_HEADER;
+const FULLSCREEN_HEADER_PX = 64;
 
 const COLORS = {
   dark: {
@@ -54,6 +54,8 @@ export default function ChallengePostsScreen() {
   const { id, open, openIndex } = useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -408,13 +410,13 @@ export default function ChallengePostsScreen() {
                   isFollowing={item.is_following_author ?? userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                   isActive={isActive}
                   shouldPreload={shouldPreload}
-                  availableHeight={FULLSCREEN_AVAILABLE_HEIGHT}
+                  availableHeight={fullscreenAvailableHeight}
                 />
               );
             }}
             keyExtractor={(item) => item.id}
             pagingEnabled
-            snapToInterval={FULLSCREEN_AVAILABLE_HEIGHT}
+            snapToInterval={fullscreenAvailableHeight}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
@@ -422,8 +424,8 @@ export default function ChallengePostsScreen() {
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
             getItemLayout={(_, index) => ({
-              length: FULLSCREEN_AVAILABLE_HEIGHT,
-              offset: FULLSCREEN_AVAILABLE_HEIGHT * index,
+              length: fullscreenAvailableHeight,
+              offset: fullscreenAvailableHeight * index,
               index,
             })}
           />
@@ -596,7 +598,7 @@ const styles = StyleSheet.create({
   },
   fullscreenPostContainer: {
     width: SCREEN_WIDTH,
-    height: Dimensions.get('window').height - 80, // Full height minus header
+    height: Dimensions.get('window').height - FULLSCREEN_HEADER_PX,
     backgroundColor: '#1a1a1a',
     flexDirection: 'column',
     justifyContent: 'center',

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  PanResponder,
+  useWindowDimensions,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -58,6 +60,7 @@ export default function PostDetailScreen() {
   const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
   const { isMuted, toggleMute } = useVideoMute();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
   const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const muteOpacity = useRef(new Animated.Value(0)).current;
@@ -359,6 +362,29 @@ export default function PostDetailScreen() {
     return () => clearInterval(interval);
   }, [videoPlayer]);
 
+  const handleProgressBarSeek = useCallback((locationX: number) => {
+    if (!videoPlayer) return;
+    const ratio = Math.max(0, Math.min(1, locationX / screenWidth));
+    try {
+      const dur = videoPlayer.duration || 0;
+      if (dur > 0) {
+        videoPlayer.currentTime = ratio * dur;
+        setVideoProgress(ratio);
+      }
+    } catch (_) {}
+  }, [videoPlayer, screenWidth]);
+
+  const seekRef = useRef((_x: number) => {});
+  seekRef.current = handleProgressBarSeek;
+  const progressBarPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => seekRef.current(e.nativeEvent.locationX),
+      onPanResponderMove: (e) => seekRef.current(e.nativeEvent.locationX),
+    })
+  ).current;
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -463,9 +489,14 @@ export default function PostDetailScreen() {
                   </TouchableOpacity>
                 </Pressable>
 
-                {/* Instagram-style thin progress bar — pushed UP above bottom edge */}
-                <View style={{ position: 'absolute', bottom: 10, left: 0, right: 0, height: 3, backgroundColor: 'rgba(255,255,255,0.3)', zIndex: 100 }} pointerEvents="none">
-                  <View style={{ height: '100%', backgroundColor: 'rgba(255,255,255,0.7)', width: `${Math.min(videoProgress * 100, 100)}%` }} />
+                {/* Instagram-style progress bar — tap/drag to seek */}
+                <View
+                  style={{ position: 'absolute', bottom: 10, left: 0, right: 0, height: 24, justifyContent: 'center', zIndex: 100 }}
+                  {...progressBarPan.panHandlers}
+                >
+                  <View style={{ height: 3, backgroundColor: 'rgba(255,255,255,0.3)' }}>
+                    <View style={{ height: '100%', backgroundColor: 'rgba(255,255,255,0.7)', width: `${Math.min(videoProgress * 100, 100)}%` }} />
+                  </View>
                 </View>
               </>
             ) : (

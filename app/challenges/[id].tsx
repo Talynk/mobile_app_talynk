@@ -11,7 +11,7 @@ import {
   Alert,
   Dimensions,
   Modal,
-
+  useWindowDimensions,
   StatusBar,
   Animated,
 } from 'react-native';
@@ -37,7 +37,7 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { Share } from 'react-native';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const FULLSCREEN_AVAILABLE_HEIGHT = screenHeight - 80;
+const FULLSCREEN_HEADER_PX = 64;
 const POST_ITEM_SIZE = (screenWidth - 4) / 3;
 
 const COLORS = {
@@ -74,6 +74,8 @@ export default function ChallengeDetailScreen() {
   const [participants, setParticipants] = useState<any[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
@@ -962,25 +964,25 @@ export default function ChallengeDetailScreen() {
                   isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                   isActive={isActive}
                   shouldPreload={shouldPreload}
-                  availableHeight={FULLSCREEN_AVAILABLE_HEIGHT}
+                  availableHeight={fullscreenAvailableHeight}
                 />
               );
             }}
             keyExtractor={(item) => item.id}
             pagingEnabled
-            snapToInterval={FULLSCREEN_AVAILABLE_HEIGHT}
+            snapToInterval={fullscreenAvailableHeight}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
             onMomentumScrollEnd={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.y / FULLSCREEN_AVAILABLE_HEIGHT);
+              const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
               setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
             }}
             initialScrollIndex={fullscreenIndex}
             getItemLayout={(_, index) => ({
-              length: FULLSCREEN_AVAILABLE_HEIGHT,
-              offset: FULLSCREEN_AVAILABLE_HEIGHT * index,
+              length: fullscreenAvailableHeight,
+              offset: fullscreenAvailableHeight * index,
               index,
             })}
           />

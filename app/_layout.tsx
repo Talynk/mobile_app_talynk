@@ -44,6 +44,11 @@ Sentry.init({
 
 function RootLayoutInner() {
   useFrameworkReady();
+  // --- SENTRY TEST (temporary): Uncomment below, run app once, check dashboard, then remove ---
+  // useEffect(() => {
+  //   Sentry.captureException(new Error('Sentry test event from Talynk app'));
+  //   Sentry.captureMessage('Sentry test message from Talynk app');
+  // }, []);
   const [loaded, error] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
     ...FontAwesome.font,

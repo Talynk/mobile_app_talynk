@@ -14,6 +14,7 @@ import {
   Animated,
   Alert,
   Platform,
+  PanResponder,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -309,6 +310,29 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (onComment && item.id) onComment(item.id);
   }, [onComment, item.id]);
 
+  const handleProgressBarSeek = useCallback((locationX: number) => {
+    if (!videoPlayer || !playerValidRef.current) return;
+    const ratio = Math.max(0, Math.min(1, locationX / screenWidth));
+    try {
+      const dur = videoPlayer.duration || 0;
+      if (dur > 0) {
+        videoPlayer.currentTime = ratio * dur;
+        setVideoProgress(ratio);
+      }
+    } catch (_) {}
+  }, [videoPlayer, screenWidth]);
+
+  const seekRef = useRef((_x: number) => {});
+  seekRef.current = handleProgressBarSeek;
+  const progressBarPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => seekRef.current(e.nativeEvent.locationX),
+      onPanResponderMove: (e) => seekRef.current(e.nativeEvent.locationX),
+    })
+  ).current;
+
   const handleUserPress = () => {
     if (item.user?.id) {
       router.push({ pathname: '/user/[id]' as any, params: { id: item.user.id } });
@@ -421,7 +445,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-            <Feather name="more-horizontal" size={24} color="#fff" />
+            <Feather name="flag" size={22} color="#fff" />
+            <Text style={styles.actionReportLabel}>Report</Text>
           </TouchableOpacity>
         </View>
 
@@ -455,7 +480,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         </View>
 
         {isVideo && isActive && (
-          <View style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 11 }]} pointerEvents="none">
+          <View
+            style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 11 }]}
+            {...progressBarPan.panHandlers}
+          >
             <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
           </View>
         )}
@@ -600,6 +628,15 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   actionCount: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 3,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  actionReportLabel: {
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',

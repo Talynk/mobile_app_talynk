@@ -152,10 +152,8 @@ function ProfileFeedContent({
   const likesManager = useLikesManager();
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
 
-  // Calculate available height for posts
-  const headerHeight = insets.top + 50;
-  const bottomNavHeight = 0; // No bottom nav in this screen
-  const availableHeight = screenHeight - headerHeight - bottomNavHeight;
+  // Full viewport height: one item = entire screen, only progress bar at bottom (no bottom tab here)
+  const availableHeight = screenHeight - insets.top;
 
   // CRITICAL FIX: Increased limit to fetch all posts from database
   const LIMIT = 100;
