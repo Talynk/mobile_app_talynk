@@ -1611,9 +1611,7 @@ export const followsApi = {
   unfollow: async (userId: string) => {
     try {
       // Backend route: DELETE /api/follows/:followingId
-      const response = await apiClient.delete(`/api/follows/${userId}`, {
-        data: { userId }
-      });
+      const response = await apiClient.delete(`/api/follows/${userId}`);
       return response.data;
     } catch (error: any) {
       console.warn('Unfollow API error:', error.response?.data || error.message);

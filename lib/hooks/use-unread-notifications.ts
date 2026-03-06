@@ -45,14 +45,18 @@ export const useUnreadNotifications = () => {
     fetchUnreadCount();
   }, [fetchUnreadCount]);
 
-  // Listen to real-time notifications
+  // Listen to real-time notifications — only count notifications destined for current user
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = onNewNotification((update) => {
+    const unsubscribe = onNewNotification((update: any) => {
       const notification = update.notification;
-      
-      // Only increment if notification is unread
+      if (!notification) return;
+
+      // Only increment if this notification is for the current user (backend may send recipientId / userId)
+      const recipientId = update.recipientId ?? update.userId ?? update.userID ?? notification.recipientId ?? notification.userId ?? notification.userID;
+      if (recipientId != null && recipientId !== user.id) return;
+
       if (!notification.isRead && !notification.is_read) {
         setUnreadCount(prev => prev + 1);
       }

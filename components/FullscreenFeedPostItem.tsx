@@ -28,6 +28,7 @@ import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
+import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
 
@@ -68,6 +69,8 @@ export interface FullscreenFeedPostItemProps {
   isActive: boolean;
   shouldPreload: boolean;
   availableHeight: number;
+  /** When false, Report button is hidden (e.g. on your own profile feed). Default true. */
+  showReportButton?: boolean;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -84,6 +87,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   isActive,
   shouldPreload,
   availableHeight,
+  showReportButton = true,
 }) => {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -116,6 +120,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
   const [retryCount, setRetryCount] = useState(0);
+  const [showUnfollowModal, setShowUnfollowModal] = useState(false);
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
   const [pausedByUser, setPausedByUser] = useState(false);
@@ -302,8 +307,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       router.push({ pathname: '/auth/login' as any });
       return;
     }
-    if (isFollowing) onUnfollow(item.user?.id || '');
+    if (isFollowing) setShowUnfollowModal(true);
     else onFollow(item.user?.id || '');
+  };
+
+  const handleUnfollowConfirm = () => {
+    onUnfollow(item.user?.id || '');
+    setShowUnfollowModal(false);
   };
 
   const handleComment = useCallback(() => {
@@ -444,10 +454,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             <Feather name="share-2" size={24} color="#fff" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-            <Feather name="flag" size={22} color="#fff" />
-            <Text style={styles.actionReportLabel}>Report</Text>
-          </TouchableOpacity>
+          {showReportButton && (
+            <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
+              <Feather name="flag" size={22} color="#fff" />
+              <Text style={styles.actionReportLabel}>Report</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={[styles.bottomInfo, { bottom: 60 + insets.bottom - 40 }]}>
@@ -488,6 +500,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
         )}
       </View>
+      <UnfollowConfirmModal
+        visible={showUnfollowModal}
+        username={item.user?.username || 'user'}
+        onConfirm={handleUnfollowConfirm}
+        onCancel={() => setShowUnfollowModal(false)}
+      />
     </View>
   );
 };
@@ -499,7 +517,8 @@ function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPo
     prev.shouldPreload === next.shouldPreload &&
     prev.isLiked === next.isLiked &&
     prev.isFollowing === next.isFollowing &&
-    prev.availableHeight === next.availableHeight
+    prev.availableHeight === next.availableHeight &&
+    (prev.showReportButton ?? true) === (next.showReportButton ?? true)
   );
 }
 

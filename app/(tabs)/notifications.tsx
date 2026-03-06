@@ -48,28 +48,16 @@ export default function NotificationsScreen() {
     }, [user, refreshCount])
   );
 
-  // Subscribe to real-time notifications
+  // Subscribe to real-time notifications — only add when notification is for current user
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = onNewNotification((update) => {
-      console.log('[Notifications] 🔔 Received real-time notification update:', {
-        updateKeys: Object.keys(update),
-        hasNotification: !!update.notification,
-        rawUpdate: update,
-      });
-
-      // Handle both "newNotification" and "notification" event types
-      // Per API docs: { userId, userID, notification: { id, type, message, isRead, createdAt, metadata } }
+    const unsubscribe = onNewNotification((update: any) => {
       const notificationData: any = update.notification || update;
+      if (!notificationData) return;
 
-      console.log('[Notifications] 📋 Processing notification data:', {
-        id: notificationData.id,
-        type: notificationData.type,
-        message: notificationData.message?.substring(0, 50),
-        hasMetadata: !!notificationData.metadata,
-        metadata: notificationData.metadata,
-      });
+      const recipientId = update.recipientId ?? update.userId ?? update.userID ?? notificationData.recipientId ?? notificationData.userId ?? notificationData.userID;
+      if (recipientId != null && recipientId !== user.id) return;
 
       const newNotification: Notification = {
         id: Number(notificationData.id || Date.now()),
@@ -79,27 +67,13 @@ export default function NotificationsScreen() {
         isRead: notificationData.isRead || notificationData.is_read || false,
         createdAt: notificationData.createdAt || notificationData.created_at || new Date().toISOString(),
         metadata: notificationData.metadata || {},
-        // Extract metadata fields to related_* for backward compatibility
         related_post_id: notificationData.metadata?.postId,
         related_user_id: notificationData.related_user_id,
       };
 
-      console.log('[Notifications] ✨ Created notification object:', {
-        id: newNotification.id,
-        type: newNotification.type,
-        isRead: newNotification.isRead,
-        hasMetadata: Object.keys(newNotification.metadata || {}).length > 0,
-        postId: newNotification.metadata?.postId || newNotification.related_post_id,
-      });
-
-      // Add to top of list, avoid duplicates
       setNotifications(prev => {
         const exists = prev.some(n => n.id === newNotification.id);
-        if (exists) {
-          console.log('[Notifications] ⚠️ Duplicate notification ignored:', newNotification.id);
-          return prev;
-        }
-        console.log('[Notifications] ➕ Adding new notification to list. Total count:', prev.length + 1);
+        if (exists) return prev;
         return [newNotification, ...prev];
       });
     });

@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { apiClient } from '../lib/api-client';
 import { userApi } from '../lib/api';
@@ -39,70 +41,42 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   user,
   onProfileUpdated,
 }) => {
-  const [formData, setFormData] = useState({
-    phone1: '',
-    phone2: '',
-    bio: '',
-  });
+  const BIO_MAX_LENGTH = 150;
+  const [bio, setBio] = useState('');
   const [loading, setLoading] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
 
   useEffect(() => {
     if (user && isVisible) {
-      setFormData({
-        phone1: user.phone1 || '',
-        phone2: user.phone2 || '',
-        bio: user.bio || '',
-      });
+      setBio(user.bio || '');
     }
   }, [user, isVisible]);
 
   const handleSave = async () => {
     setLoading(true);
     try {
-      // Prepare update data - only include fields that have values
       const updateData: any = {};
-      
-      if (formData.phone1.trim()) {
-        updateData.phone1 = formData.phone1.trim();
-      }
-      
-      if (formData.phone2.trim()) {
-        updateData.phone2 = formData.phone2.trim();
-      }
-
-      if (formData.bio.trim()) {
-        updateData.bio = formData.bio.trim();
-      }
-
-      console.log('Sending profile update with data:', updateData);
+      if (bio.trim()) updateData.bio = bio.trim().slice(0, BIO_MAX_LENGTH);
 
       const response = await userApi.updateProfile(updateData, profileImage || undefined);
-      
+
       if (response.status === 'success') {
         Alert.alert('Success', 'Profile updated successfully!');
         onProfileUpdated({
           ...user!,
-          ...formData,
-          ...(response.data && {
-            profile_picture: (response.data as any).profile_picture,
-            bio: (response.data as any).bio ?? formData.bio,
-          }),
+          bio: (response.data as any)?.bio ?? bio,
+          ...(response.data && { profile_picture: (response.data as any).profile_picture }),
         });
         onClose();
       } else {
         Alert.alert('Error', response.message || 'Failed to update profile');
       }
     } catch (error: any) {
-      console.error('Profile update error:', error);
-      
-      // Handle network errors specifically
       if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
         Alert.alert('Network Error', 'Please check your internet connection and try again.');
       } else {
-        const errorMessage = error.response?.data?.message || 'Failed to update profile';
-        Alert.alert('Error', errorMessage);
+        Alert.alert('Error', error.response?.data?.message || 'Failed to update profile');
       }
     } finally {
       setLoading(false);
@@ -143,86 +117,88 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
       onRequestClose={handleCancel}
     >
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={handleCancel} disabled={loading}>
-              <Text style={styles.cancelButton}>Cancel</Text>
-            </TouchableOpacity>
-            <Text style={styles.title}>Edit Profile</Text>
-            <TouchableOpacity onPress={handleSave} disabled={loading}>
-              {loading ? (
-                <ActivityIndicator size="small" color="#60a5fa" />
-              ) : (
-                <Text style={styles.saveButton}>Save</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            {/* Profile Picture Section */}
-            <View style={styles.profilePictureSection}>
-              <View style={styles.profilePictureContainer}>
-                <Image
-                  source={{ 
-                    uri: profileImage || user?.profile_picture || 'https://via.placeholder.com/100' 
-                  }}
-                  style={styles.profilePicture}
-                />
-                {uploadingImage && (
-                  <View style={styles.uploadingOverlay}>
-                    <ActivityIndicator size="small" color="#fff" />
-                  </View>
+        <KeyboardAvoidingView
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+            <View style={styles.header}>
+              <TouchableOpacity onPress={handleCancel} disabled={loading}>
+                <Text style={styles.cancelButton}>Cancel</Text>
+              </TouchableOpacity>
+              <Text style={styles.title}>Edit Profile</Text>
+              <TouchableOpacity onPress={handleSave} disabled={loading}>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#60a5fa" />
+                ) : (
+                  <Text style={styles.saveButton}>Save</Text>
                 )}
-              </View>
-              <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
-                <Text style={styles.changePhotoText}>Change Photo</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Form Fields */}
-            <View style={styles.formSection}>
-              {/* Primary Phone */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Primary Phone (Optional)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone1}
-                  onChangeText={(value) => setFormData(prev => ({ ...prev, phone1: value }))}
-                  placeholder="Enter primary phone number (optional)"
-                  placeholderTextColor="#666"
-                  keyboardType="phone-pad"
-                />
+            <ScrollView
+              style={styles.content}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 40 }}
+            >
+              <View style={styles.profilePictureSection}>
+                <View style={styles.profilePictureContainer}>
+                  <Image
+                    source={{
+                      uri: profileImage || user?.profile_picture || 'https://via.placeholder.com/100',
+                    }}
+                    style={styles.profilePicture}
+                  />
+                  {uploadingImage && (
+                    <View style={styles.uploadingOverlay}>
+                      <ActivityIndicator size="small" color="#fff" />
+                    </View>
+                  )}
+                </View>
+                <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
+                  <Text style={styles.changePhotoText}>Change Photo</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* Secondary Phone */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Secondary Phone (Optional)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone2}
-                  onChangeText={(value) => setFormData(prev => ({ ...prev, phone2: value }))}
-                  placeholder="Enter secondary phone number (optional)"
-                  placeholderTextColor="#666"
-                  keyboardType="phone-pad"
-                />
-              </View>
+              <View style={styles.formSection}>
+                {/* Phones: read-only display */}
+                {(user?.phone1 || user?.phone2) ? (
+                  <>
+                    {user.phone1 ? (
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Primary Phone</Text>
+                        <Text style={styles.readOnlyValue}>{user.phone1}</Text>
+                      </View>
+                    ) : null}
+                    {user.phone2 ? (
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.label}>Secondary Phone</Text>
+                        <Text style={styles.readOnlyValue}>{user.phone2}</Text>
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
 
-              {/* Bio */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>Bio</Text>
-                <TextInput
-                  style={[styles.input, styles.bioInput]}
-                  value={formData.bio}
-                  onChangeText={(value) => setFormData(prev => ({ ...prev, bio: value }))}
-                  placeholder="Tell others a bit about yourself..."
-                  placeholderTextColor="#666"
-                  multiline
-                />
+                {/* Bio: editable, 150 chars */}
+                <View style={styles.inputGroup}>
+                  <View style={styles.bioLabelRow}>
+                    <Text style={styles.label}>Bio</Text>
+                    <Text style={styles.charCount}>{bio.length}/{BIO_MAX_LENGTH}</Text>
+                  </View>
+                  <TextInput
+                    style={[styles.input, styles.bioInput]}
+                    value={bio}
+                    onChangeText={(value) => setBio(value.slice(0, BIO_MAX_LENGTH))}
+                    placeholder="Tell others a bit about yourself..."
+                    placeholderTextColor="#666"
+                    multiline
+                    maxLength={BIO_MAX_LENGTH}
+                  />
+                </View>
               </View>
-            </View>
-          </ScrollView>
-        </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -326,5 +302,25 @@ const styles = StyleSheet.create({
   bioInput: {
     minHeight: 100,
     textAlignVertical: 'top',
+  },
+  readOnlyValue: {
+    backgroundColor: '#232326',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#9ca3af',
+    fontSize: 16,
+  },
+  bioLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  charCount: {
+    color: '#6b7280',
+    fontSize: 13,
   },
 }); 

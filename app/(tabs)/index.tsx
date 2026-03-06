@@ -18,6 +18,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { likesApi, followsApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts, addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { Feather } from '@expo/vector-icons';
@@ -58,6 +59,7 @@ export default function FeedScreen() {
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const flatListRef = useRef<FlatList<Post>>(null);
   const { user } = useAuth();
+  const { followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
@@ -174,24 +176,34 @@ export default function FeedScreen() {
   const handleFollow = useCallback(async (userId: string) => {
     if (!user) return;
     updateFollowInCache(userId, true);
+    updateFollowedUsers(userId, true);
     try {
       const res = await followsApi.follow(userId);
-      if (res.status !== 'success') updateFollowInCache(userId, false);
+      if (res.status !== 'success') {
+        updateFollowInCache(userId, false);
+        updateFollowedUsers(userId, false);
+      }
     } catch {
       updateFollowInCache(userId, false);
+      updateFollowedUsers(userId, false);
     }
-  }, [user, updateFollowInCache]);
+  }, [user, updateFollowInCache, updateFollowedUsers]);
 
   const handleUnfollow = useCallback(async (userId: string) => {
     if (!user) return;
     updateFollowInCache(userId, false);
+    updateFollowedUsers(userId, false);
     try {
       const res = await followsApi.unfollow(userId);
-      if (res.status !== 'success') updateFollowInCache(userId, true);
+      if (res.status !== 'success') {
+        updateFollowInCache(userId, true);
+        updateFollowedUsers(userId, true);
+      }
     } catch {
       updateFollowInCache(userId, true);
+      updateFollowedUsers(userId, true);
     }
-  }, [user, updateFollowInCache]);
+  }, [user, updateFollowInCache, updateFollowedUsers]);
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
@@ -272,7 +284,7 @@ export default function FeedScreen() {
     const shouldPreload = !isActive && distance >= -1 && distance <= 3;
 
     const isLiked = item.is_liked ?? likedPosts.includes(item.id);
-    const isFollowing = item.is_following_author ?? false;
+    const isFollowing = item.is_following_author ?? followedUsers.has(item.user?.id || '');
 
     return (
       <FullscreenFeedPostItem
@@ -291,7 +303,7 @@ export default function FeedScreen() {
         availableHeight={availableHeight}
       />
     );
-  }, [isScreenFocused, currentIndex, likedPosts, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+  }, [isScreenFocused, currentIndex, likedPosts, followedUsers, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

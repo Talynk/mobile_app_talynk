@@ -152,6 +152,9 @@ function ProfileFeedContent({
   const likesManager = useLikesManager();
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
 
+  const isExplore = userId === 'explore';
+  const isOwnProfile = !isExplore && !!user && user.id === userId;
+
   // Full viewport height: one item = entire screen, only progress bar at bottom (no bottom tab here)
   const availableHeight = screenHeight - insets.top;
 
@@ -602,9 +605,6 @@ function ProfileFeedContent({
       if (response.status !== 'success') {
         updateFollowedUsers(targetUserId, false);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
-      } else {
-        const checkRes = await followsApi.checkFollowing(targetUserId);
-        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: !!checkRes.data?.isFollowing }));
       }
     } catch {
       updateFollowedUsers(targetUserId, false);
@@ -621,9 +621,6 @@ function ProfileFeedContent({
       if (response.status !== 'success') {
         updateFollowedUsers(targetUserId, true);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
-      } else {
-        const checkRes = await followsApi.checkFollowing(targetUserId);
-        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: !!checkRes.data?.isFollowing }));
       }
     } catch {
       updateFollowedUsers(targetUserId, true);
@@ -741,6 +738,7 @@ function ProfileFeedContent({
                 isActive={isActive}
                 shouldPreload={shouldPreload}
                 availableHeight={availableHeight}
+                showReportButton={!isOwnProfile}
               />
             );
           }}

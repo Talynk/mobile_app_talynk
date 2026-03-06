@@ -30,8 +30,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import DotsSpinner from '@/components/DotsSpinner';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
+import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
+import { useCache } from '@/lib/cache-context';
 
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -178,10 +180,12 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [isFollowing, setIsFollowing] = useState(false);
   const [followsMeBack, setFollowsMeBack] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [showUnfollowModal, setShowUnfollowModal] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { sendFollowAction, isConnected } = useRealtime();
+  const { updateFollowedUsers } = useCache();
   const C = COLORS.dark; // Force dark mode
   const navigation = useNavigation();
 
@@ -537,20 +541,20 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     if (!id || !currentUser) return;
 
     setFollowLoading(true);
+    updateFollowedUsers(id as string, true);
     try {
       const response = await followsApi.follow(id as string);
       if (response.status === 'success') {
         setIsFollowing(true);
-        // Update followers count immediately
         if (profile) {
           setProfile(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
         }
-        // Send real-time follow action
-        if (isConnected) {
-          sendFollowAction(id as string, true);
-        }
+        if (isConnected) sendFollowAction(id as string, true);
+      } else {
+        updateFollowedUsers(id as string, false);
       }
     } catch (error) {
+      updateFollowedUsers(id as string, false);
       Alert.alert('Error', 'Failed to follow user');
     } finally {
       setFollowLoading(false);
@@ -559,22 +563,23 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
 
   const handleUnfollow = async () => {
     if (!id || !currentUser) return;
+    setShowUnfollowModal(false);
 
     setFollowLoading(true);
+    updateFollowedUsers(id as string, false);
     try {
       const response = await followsApi.unfollow(id as string);
       if (response.status === 'success') {
         setIsFollowing(false);
-        // Update followers count immediately
         if (profile) {
           setProfile(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
         }
-        // Send real-time unfollow action
-        if (isConnected) {
-          sendFollowAction(id as string, false);
-        }
+        if (isConnected) sendFollowAction(id as string, false);
+      } else {
+        updateFollowedUsers(id as string, true);
       }
     } catch (error) {
+      updateFollowedUsers(id as string, true);
       Alert.alert('Error', 'Failed to unfollow user');
     } finally {
       setFollowLoading(false);
@@ -810,7 +815,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           {/* Follow Button */}
           {currentUser && currentUser.id !== id && (
             <TouchableOpacity
-              onPress={isFollowing ? handleUnfollow : handleFollow}
+              onPress={isFollowing ? () => setShowUnfollowModal(true) : handleFollow}
               disabled={followLoading}
               style={[
                 styles.followButton,
@@ -920,6 +925,12 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           </View>
         </View>
       </Modal>
+      <UnfollowConfirmModal
+        visible={showUnfollowModal}
+        username={profile?.username || 'user'}
+        onConfirm={handleUnfollow}
+        onCancel={() => setShowUnfollowModal(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -85,6 +85,10 @@ export default function ExploreScreen() {
           }
         }
         setCountriesList(list);
+        if (list.length > 0) {
+          const rwanda = list.find((c: Country) => c.name === 'Rwanda' || c.code === '+250');
+          if (rwanda) setSelectedCountryId(rwanda.id);
+        }
       } catch (_) {
         setCountriesList([]);
       } finally {

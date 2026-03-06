@@ -83,6 +83,8 @@ export default function RegisterScreen() {
   const [registerLoading, setRegisterLoading] = useState(false);
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const otpInputRefs = useRef<any[]>([]);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const formYRef = useRef(0);
 
   // Clear any persisted auth errors when component mounts (fixes "Invalid credentials" showing before user submits)
   useEffect(() => {
@@ -109,7 +111,8 @@ export default function RegisterScreen() {
         setCountries(list);
         setFilteredCountries(list);
         if (list.length > 0 && !selectedCountry) {
-          setSelectedCountry(list[0]);
+          const rwanda = list.find((c: Country) => c.name === 'Rwanda' || c.code === '+250');
+          setSelectedCountry(rwanda ?? list[0]);
         }
       } catch (_) {
         setCountries([]);
@@ -315,6 +318,11 @@ export default function RegisterScreen() {
     const trimmedUsername = username.trim();
     const trimmedEmail = email.trim();
 
+    const code = selectedCountry?.code?.replace('+', '') || '';
+    const digitsOnly = (v: string) => v.replace(/\D/g, '');
+    const fullPhone1 = phone1.trim() ? code + digitsOnly(phone1) : undefined;
+    const fullPhone2 = phone2.trim() ? code + digitsOnly(phone2) : undefined;
+
     const payload = {
       verificationToken,
       username: trimmedUsername,
@@ -323,8 +331,8 @@ export default function RegisterScreen() {
       country_id: selectedCountry.id,
       date_of_birth: '1990-01-01',
       email: trimmedEmail || undefined,
-      phone1: phone1.trim() || undefined,
-      phone2: phone2.trim() || undefined,
+      phone1: fullPhone1,
+      phone2: fullPhone2,
     };
 
     return payload;
@@ -376,11 +384,20 @@ export default function RegisterScreen() {
       errors.agreed = 'You must agree to the Terms and Conditions';
     }
 
+    const digitsOnly = (v: string) => v.replace(/\D/g, '');
+    if (phone1.trim() && digitsOnly(phone1).length !== 9) errors.phone1 = 'Enter 9 digits';
+    if (phone2.trim() && digitsOnly(phone2).length !== 9) errors.phone2 = 'Enter 9 digits';
+
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      // Also show first error as warning at top
-      const firstError = Object.values(errors)[0];
-      setWarning(firstError);
+      setWarning(null);
+      const hasStep3Error = errors.password || errors.confirmPassword || errors.agreed;
+      if (hasStep3Error && step !== 3) setStep(3);
+      setTimeout(() => {
+        if (scrollViewRef.current && formYRef.current >= 0) {
+          scrollViewRef.current.scrollTo({ y: Math.max(0, formYRef.current - 60), animated: true });
+        }
+      }, 300);
       return;
     }
 
@@ -433,8 +450,8 @@ export default function RegisterScreen() {
         return 'Username can only contain letters, numbers, and underscores';
       }
       const digitsOnly = (v: string) => v.replace(/\D/g, '');
-      if (phone1.trim() && digitsOnly(phone1).length < 7) return 'Enter a valid primary phone number';
-      if (phone2.trim() && digitsOnly(phone2).length < 7) return 'Enter a valid secondary phone number';
+      if (phone1.trim() && digitsOnly(phone1).length !== 9) return 'Primary phone must be exactly 9 digits';
+      if (phone2.trim() && digitsOnly(phone2).length !== 9) return 'Secondary phone must be exactly 9 digits';
       return null;
     }
     return null;
@@ -442,8 +459,28 @@ export default function RegisterScreen() {
 
   const handleNext = async () => {
     const err = validateStep(step);
-    if (err) { setWarning(err); return; }
+    if (err) {
+      setWarning(null);
+      if (step === 3) {
+        const step3Errors: Record<string, string> = {};
+        if (!password) step3Errors.password = 'Please enter a password';
+        else if (password.length < 8) step3Errors.password = 'Password must be at least 8 characters long';
+        if (!confirmPassword) step3Errors.confirmPassword = 'Please confirm your password';
+        else if (password !== confirmPassword) step3Errors.confirmPassword = 'Passwords do not match';
+        if (!agreed) step3Errors.agreed = 'You must agree to the Terms and Conditions';
+        setFieldErrors(step3Errors);
+        setTimeout(() => {
+          if (scrollViewRef.current && formYRef.current >= 0) {
+            scrollViewRef.current.scrollTo({ y: Math.max(0, formYRef.current - 60), animated: true });
+          }
+        }, 100);
+      } else {
+        setWarning(err);
+      }
+      return;
+    }
     setWarning(null);
+    setFieldErrors({});
 
     if (step === 1) {
       const ok = await handleRequestOtp();
@@ -469,9 +506,10 @@ export default function RegisterScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <StatusBar style="light" backgroundColor="#000000" />
-      <ScrollView 
-        style={{ backgroundColor: C.background }} 
-        contentContainerStyle={styles.scrollContainer} 
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ backgroundColor: C.background }}
+        contentContainerStyle={styles.scrollContainer}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         showsVerticalScrollIndicator={false}
@@ -537,7 +575,10 @@ export default function RegisterScreen() {
           </View>
         )}
 
-        <View style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}>
+        <View
+          style={[styles.form, { backgroundColor: C.card, borderColor: C.border }]}
+          onLayout={(e) => { formYRef.current = e.nativeEvent.layout.y; }}
+        >
           {/* Step 1: Email */}
           {step === 1 && (
             <View>
@@ -902,17 +943,24 @@ export default function RegisterScreen() {
                   <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
                 </View>
                 <TextInput
-                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="e.g. +1 234 567 890"
+                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone1 ? C.errorBorder : C.inputBorder, color: C.text }]}
+                  placeholder="9 digits"
                   value={phone1}
-                  onChangeText={setPhone1}
+                  onChangeText={(t) => {
+                  setPhone1(t.replace(/\D/g, '').slice(0, 9));
+                  if (fieldErrors.phone1) setFieldErrors((prev) => { const next = { ...prev }; delete next.phone1; return next; });
+                }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="phone-pad"
+                  maxLength={9}
                   placeholderTextColor={C.placeholder}
                   editable={!isFormBusy}
                 />
               </View>
+              {fieldErrors.phone1 ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.phone1}</Text>
+              ) : null}
 
               <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
                 <Text style={[styles.label, { color: C.text }]}>Secondary Phone (Optional)</Text>
@@ -922,19 +970,26 @@ export default function RegisterScreen() {
                   <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
                 </View>
                 <TextInput
-                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: C.inputBorder, color: C.text }]}
-                  placeholder="e.g. +1 234 567 890"
+                  style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone2 ? C.errorBorder : C.inputBorder, color: C.text }]}
+                  placeholder="9 digits"
                   value={phone2}
-                  onChangeText={setPhone2}
+                  onChangeText={(t) => {
+                  setPhone2(t.replace(/\D/g, '').slice(0, 9));
+                  if (fieldErrors.phone2) setFieldErrors((prev) => { const next = { ...prev }; delete next.phone2; return next; });
+                }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="phone-pad"
+                  maxLength={9}
                   placeholderTextColor={C.placeholder}
                   editable={!isFormBusy}
                 />
               </View>
+              {fieldErrors.phone2 ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.phone2}</Text>
+              ) : null}
               <Text style={[styles.helperText, { color: C.textSecondary }]}>
-                Include country code (e.g. +1 for US). Your country is saved with your profile.
+                Country code is set above. Enter only the remaining 9 digits (e.g. 788123456 for Rwanda).
               </Text>
 
               {Object.keys(fieldErrors).length > 0 && (
