@@ -12,7 +12,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     FlatList,
-    findNodeHandle,
+    type LayoutChangeEvent,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather } from '@expo/vector-icons';
@@ -121,25 +121,21 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
     const [countries, setCountries] = useState<Country[]>([]);
     const [countrySearchQuery, setCountrySearchQuery] = useState('');
     const scrollViewRef = useRef<ScrollView>(null);
-    const contentRef = useRef<View>(null);
-    const fieldRefs = useRef<Partial<Record<FieldErrorKey, View | null>>>({});
+    const fieldYOffsets = useRef<Partial<Record<FieldErrorKey, number>>>({});
 
     const isEditMode = !!editChallenge?.id;
 
     const scrollToFirstError = useCallback((firstKey: FieldErrorKey) => {
-        const ref = fieldRefs.current[firstKey];
-        const content = contentRef.current;
+        const y = fieldYOffsets.current[firstKey];
         const scroll = scrollViewRef.current;
-        if (ref && content && scroll) {
-            try {
-                const contentTag = findNodeHandle(content);
-                if (contentTag != null) {
-                    (ref as any).measureLayout(contentTag, (_x: number, y: number) => {
-                        scroll.scrollTo({ y: Math.max(0, y - 100), animated: true });
-                    });
-                }
-            } catch (_) {}
+        if (typeof y === 'number' && scroll) {
+            scroll.scrollTo({ y: Math.max(0, y - 100), animated: true });
         }
+    }, []);
+
+    const saveFieldLayout = useCallback((key: FieldErrorKey) => (e: LayoutChangeEvent) => {
+        const { layout } = e.nativeEvent;
+        fieldYOffsets.current[key] = layout.y;
     }, []);
 
     useEffect(() => {
@@ -336,7 +332,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 if (response.status === 'success') {
                     Alert.alert(
                         'Competition Submitted! 🎉',
-                        `Your competition has been created and submitted for review. An administrator will check and approve or reject it. If it gets approved it will appear in the "Created by Me" tab.\n\nPlease wait for approval before it becomes visible to others.\n\nFor follow-up on approval, contact: ${followUpEmail}`,
+                        `Your competition has been created and submitted for review. An administrator will check and approve or reject it and any decision will be notified to you immediately.\nWhat you can do now is just edit your competition details in created by me tab before it gets approved. Once it gets approved you won't be able to edit it anymore.\n\nFor follow-up on approval, contact: ${followUpEmail}`,
                         [{ text: 'OK' }]
                     );
                     onCreated();
@@ -380,7 +376,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         >
             <View style={[styles.container, { paddingTop: Platform.OS === 'android' ? insets.top : 0 }]}>
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>{isEditMode ? 'Edit Competition' : 'Create Competition'}</Text>
+                    <Text style={styles.headerTitle}>{isEditMode ? 'Edit Competition before approval' : 'Create Competition'}</Text>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                         <Feather name="x" size={24} color="#fff" />
                     </TouchableOpacity>
@@ -391,8 +387,8 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                     style={{ flex: 1 }}
                 >
                     <ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled">
-                        <View ref={contentRef} style={styles.form}>
-                        <View ref={(el) => { fieldRefs.current.name = el; }} style={styles.inputGroup}>
+                        <View style={styles.form}>
+                        <View onLayout={saveFieldLayout('name')} style={styles.inputGroup}>
                             <Text style={styles.label}>Competition Name *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.name && styles.inputError]}
@@ -404,7 +400,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.name ? <Text style={styles.errorText}>{fieldErrors.name}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.description = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('description')} style={styles.inputGroup}>
                             <Text style={styles.label}>Description *</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.description && styles.inputError]}
@@ -418,7 +414,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.description ? <Text style={styles.errorText}>{fieldErrors.description}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.organizer_name = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('organizer_name')} style={styles.inputGroup}>
                             <Text style={styles.label}>Organizer Name *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.organizer_name && styles.inputError]}
@@ -430,7 +426,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.organizer_contact = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('organizer_contact')} style={styles.inputGroup}>
                             <Text style={styles.label}>Contact phone *</Text>
                             <View style={styles.phoneRow}>
                                 <TouchableOpacity
@@ -456,7 +452,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.contact_email = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('contact_email')} style={styles.inputGroup}>
                             <Text style={styles.label}>Contact email *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.contact_email && styles.inputError]}
@@ -490,7 +486,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         </View>
 
                         {formData.has_rewards && (
-                            <View ref={(el) => { fieldRefs.current.rewards = el; }} style={styles.inputGroup}>
+                            <View onLayout={saveFieldLayout('rewards')} style={styles.inputGroup}>
                                 <Text style={styles.label}>Rewards Details *</Text>
                                 <TextInput
                                     style={[styles.input, fieldErrors.rewards && styles.inputError]}
@@ -504,7 +500,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         )}
 
                         <View style={styles.row}>
-                            <View ref={(el) => { fieldRefs.current.start_date = el; }} style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                            <View onLayout={saveFieldLayout('start_date')} style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
                                 <Text style={styles.label}>Start Date *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.start_date && styles.inputError]}
@@ -532,7 +528,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                     </View>
                                 )}
                             </View>
-                            <View ref={(el) => { fieldRefs.current.end_date = el; }} style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                            <View onLayout={saveFieldLayout('end_date')} style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
                                 <Text style={styles.label}>End Date *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.end_date && styles.inputError]}
@@ -562,7 +558,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             </View>
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.eligibility_criteria = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('eligibility_criteria')} style={styles.inputGroup}>
                             <Text style={styles.label}>Participant eligibility criteria</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.eligibility_criteria && styles.inputError]}
@@ -576,7 +572,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.eligibility_criteria ? <Text style={styles.errorText}>{fieldErrors.eligibility_criteria}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.what_you_do = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('what_you_do')} style={styles.inputGroup}>
                             <Text style={styles.label}>What you do (organizer)</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
@@ -590,7 +586,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.what_you_do ? <Text style={styles.errorText}>{fieldErrors.what_you_do}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.scoring_criteria = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('scoring_criteria')} style={styles.inputGroup}>
                             <Text style={styles.label}>Scoring Criteria</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.scoring_criteria && styles.inputError]}
@@ -604,7 +600,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.scoring_criteria ? <Text style={styles.errorText}>{fieldErrors.scoring_criteria}</Text> : null}
                         </View>
 
-                        <View ref={(el) => { fieldRefs.current.min_content_per_account = el; }} style={styles.inputGroup}>
+                        <View onLayout={saveFieldLayout('min_content_per_account')} style={styles.inputGroup}>
                             <Text style={styles.label}>Min content per account *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.min_content_per_account && styles.inputError]}

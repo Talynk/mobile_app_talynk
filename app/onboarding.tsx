@@ -74,7 +74,7 @@ const pages: OnboardingPage[] = [
     ),
     title: 'Showcase Your Talent',
     description:
-      "Record and share your unique talents with the world. Talynk is Rwanda's platform for creative expression.",
+      "Record and share your unique talents with the world. Talentix is a platform for creative expression all over the world.",
     color: '#60a5fa',
   },
   {

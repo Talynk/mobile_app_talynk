@@ -79,6 +79,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     const all = Array.isArray(data) ? data : [];
                     if (internalTab === 'live_upcoming') {
                         challengesToDisplay = all.filter((ch: any) => {
+                            if (ch.status !== 'approved' && ch.status !== 'active') return false;
                             const endDate = new Date(ch.end_date).getTime();
                             return endDate >= now.getTime();
                         });
@@ -96,21 +97,13 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     }
                 }
             } else if (internalTab === 'live_upcoming') {
-                const [publicRes, myRes] = await Promise.all([
-                    challengesApi.getAll('active'),
-                    challengesApi.getMyChallenges()
-                ]);
+                // Only show APPROVED/ACTIVE challenges in Live & Upcoming. Never show pending (pending only in Created by Me).
+                const publicRes = await challengesApi.getAll('active');
                 let combined: Challenge[] = [];
                 if (publicRes.status === 'success') {
                     const data = publicRes.data?.challenges || publicRes.data || [];
-                    combined = Array.isArray(data) ? data : [];
-                }
-                if (myRes?.status === 'success') {
-                    const data = myRes.data?.challenges || myRes.data || [];
-                    const myAll = Array.isArray(data) ? data : [];
-                    myAll.forEach((ch: any) => {
-                        if (!combined.some((a: any) => a.id === ch.id)) combined.push(ch);
-                    });
+                    const all = Array.isArray(data) ? data : [];
+                    combined = all.filter((ch: any) => ch.status === 'approved' || ch.status === 'active');
                 }
                 const activeList = combined.filter((ch: any) => {
                     const startDate = new Date(ch.start_date);
@@ -325,11 +318,14 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
         const isJoined = user ? joinedIds.has(item.id) : false;
         const isEnded = internalTab === 'ended' || status.label === 'Ended';
 
-        return (
+        // Organizer can always open their own challenge (e.g. from Created by Me) to see full details and edit if pending.
+                const isOrganizer = user && (item.organizer_id === user.id || (item as any).organizer?.id === user.id);
+                const blockNonOrganizerPending = item.status === 'pending' && !isOrganizer;
+                return (
             <TouchableOpacity
                 style={styles.card}
                 onPress={() => {
-                    if (item.status === 'pending') {
+                    if (blockNonOrganizerPending) {
                         Alert.alert(
                             'Pending Approval',
                             'This competition hasn\'t been approved yet. Please wait for administrators to approve it.'

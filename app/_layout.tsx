@@ -36,14 +36,22 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-// Initialize Sentry for error and performance monitoring
-Sentry.init({
-  dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
-  sendDefaultPii: true,
-});
+// Defer Sentry init to avoid creating React context before Expo Dev Launcher is ready (Android crash: "App react context shouldn't be created before").
+let sentryInitialized = false;
+function initSentryOnce() {
+  if (sentryInitialized) return;
+  sentryInitialized = true;
+  Sentry.init({
+    dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
+    sendDefaultPii: true,
+  });
+}
 
 function RootLayoutInner() {
   useFrameworkReady();
+  useEffect(() => {
+    initSentryOnce();
+  }, []);
   // --- SENTRY TEST (temporary): Uncomment below, run app once, check dashboard, then remove ---
   // useEffect(() => {
   //   Sentry.captureException(new Error('Sentry test event from Talynk app'));
@@ -191,4 +199,6 @@ function RootLayoutNav() {
   );
 }
 
-export default Sentry.wrap(RootLayoutInner);
+// In dev, skip Sentry.wrap to avoid "App react context shouldn't be created before" (Expo Dev Launcher Android).
+const RootLayout = __DEV__ ? RootLayoutInner : Sentry.wrap(RootLayoutInner);
+export default RootLayout;

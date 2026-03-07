@@ -285,6 +285,13 @@ export default function ChallengeDetailScreen() {
   const getChallengeStatus = () => {
     if (!challenge) return { label: 'Unknown', color: C.textSecondary };
 
+    if (challenge.status === 'pending' || challenge.status === 'draft') {
+      return { label: 'Pending Review', color: C.warning };
+    }
+    if (challenge.status === 'rejected') {
+      return { label: 'Rejected', color: C.error };
+    }
+
     if (challenge.is_currently_active !== undefined) {
       if (challenge.is_currently_active) {
         return { label: 'Active', color: C.success };
@@ -550,67 +557,73 @@ export default function ChallengeDetailScreen() {
             </View>
           </View>
 
-          <View style={[styles.statsRow, { marginTop: 20 }]}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{participantCount}</Text>
-              <Text style={styles.statLabel}>Participants</Text>
+          {challenge.status !== 'pending' && (
+            <View style={[styles.statsRow, { marginTop: 20 }]}>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{participantCount}</Text>
+                <Text style={styles.statLabel}>Participants</Text>
+              </View>
+              <View style={styles.statItem}>
+                <Text style={styles.statValue}>{postCount}</Text>
+                <Text style={styles.statLabel}>Posts</Text>
+              </View>
             </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{postCount}</Text>
-              <Text style={styles.statLabel}>Posts</Text>
-            </View>
-          </View>
+          )}
         </LinearGradient>
 
-        {/* Action Buttons - above details */}
+        {/* Action Buttons - above details. When pending, organizer only sees Edit (no View Participants / View Posts). */}
         {isOrganizer ? (
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             <View style={styles.organizerActions}>
               {challenge.status === 'pending' && (
                 <TouchableOpacity
-                  style={[styles.organizerActionButton, { backgroundColor: C.warning, marginBottom: 8 }]}
+                  style={[styles.organizerActionButton, { backgroundColor: C.warning }]}
                   onPress={() => setEditChallengeModalVisible(true)}
                 >
                   <MaterialIcons name="edit" size={20} color="#fff" />
-                  <Text style={styles.organizerActionText}>Edit Competition</Text>
+                  <Text style={styles.organizerActionText}>Edit Competition before approval</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity
-                style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
-                onPress={async () => {
-                  setParticipantsModalVisible(true);
-                  setLoadingParticipants(true);
-                  try {
-                    const response = await challengesApi.getParticipants(id as string);
-                    if (response?.status === 'success') {
-                      const participantsList = response.data?.participants || response.data || [];
-                      setParticipants(Array.isArray(participantsList) ? participantsList : []);
-                    } else {
-                      setParticipants([]);
-                    }
-                  } catch (error) {
-                    console.error('Error fetching participants:', error);
-                    setParticipants([]);
-                    Alert.alert('Error', 'Failed to load participants');
-                  } finally {
-                    setLoadingParticipants(false);
-                  }
-                }}
-              >
-                <MaterialIcons name="people" size={20} color="#fff" />
-                <Text style={styles.organizerActionText}>View Participants</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.organizerActionButton, { backgroundColor: C.success }]}
-                onPress={() => {
-                  Alert.alert('Competition Posts', `There are ${posts.length} posts in this competition`, [
-                    { text: 'OK' }
-                  ]);
-                }}
-              >
-                <MaterialIcons name="video-library" size={20} color="#fff" />
-                <Text style={styles.organizerActionText}>View Posts ({posts.length})</Text>
-              </TouchableOpacity>
+              {challenge.status !== 'pending' && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
+                    onPress={async () => {
+                      setParticipantsModalVisible(true);
+                      setLoadingParticipants(true);
+                      try {
+                        const response = await challengesApi.getParticipants(id as string);
+                        if (response?.status === 'success') {
+                          const participantsList = response.data?.participants || response.data || [];
+                          setParticipants(Array.isArray(participantsList) ? participantsList : []);
+                        } else {
+                          setParticipants([]);
+                        }
+                      } catch (error) {
+                        console.error('Error fetching participants:', error);
+                        setParticipants([]);
+                        Alert.alert('Error', 'Failed to load participants');
+                      } finally {
+                        setLoadingParticipants(false);
+                      }
+                    }}
+                  >
+                    <MaterialIcons name="people" size={20} color="#fff" />
+                    <Text style={styles.organizerActionText}>View Participants</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.organizerActionButton, { backgroundColor: C.success }]}
+                    onPress={() => {
+                      Alert.alert('Competition Posts', `There are ${posts.length} posts in this competition`, [
+                        { text: 'OK' }
+                      ]);
+                    }}
+                  >
+                    <MaterialIcons name="video-library" size={20} color="#fff" />
+                    <Text style={styles.organizerActionText}>View Posts ({posts.length})</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         ) : (
@@ -763,53 +776,54 @@ export default function ChallengeDetailScreen() {
           )}
         </View>
 
-        {/* Tabs */}
-        <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
-          <View style={styles.tabsContainer}>
-            <TouchableOpacity
-              style={[
-                styles.tab,
-                activeTab === 'posts' && styles.tabActive
-              ]}
-              onPress={() => setActiveTab('posts')}
-            >
-              <MaterialIcons
-                name="video-library"
-                size={18}
-                color={activeTab === 'posts' ? C.primary : C.textSecondary}
-              />
-              <Text style={[
-                styles.tabText,
-                { color: activeTab === 'posts' ? C.primary : C.textSecondary }
-              ]}>
-                Posts ({postCount})
-              </Text>
-            </TouchableOpacity>
-
-            {/* Only show Participants tab for authenticated users */}
-            {isAuthenticated && (
+        {/* Tabs - only when challenge is approved (not pending); pending organizer sees no Posts/Participants tabs */}
+        {challenge.status !== 'pending' && (
+          <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
+            <View style={styles.tabsContainer}>
               <TouchableOpacity
                 style={[
                   styles.tab,
-                  activeTab === 'participants' && styles.tabActive
+                  activeTab === 'posts' && styles.tabActive
                 ]}
-                onPress={() => setActiveTab('participants')}
+                onPress={() => setActiveTab('posts')}
               >
                 <MaterialIcons
-                  name="people"
+                  name="video-library"
                   size={18}
-                  color={activeTab === 'participants' ? C.primary : C.textSecondary}
+                  color={activeTab === 'posts' ? C.primary : C.textSecondary}
                 />
                 <Text style={[
                   styles.tabText,
-                  { color: activeTab === 'participants' ? C.primary : C.textSecondary }
+                  { color: activeTab === 'posts' ? C.primary : C.textSecondary }
                 ]}>
-                  Participants ({participantCount})
+                  Posts ({postCount})
                 </Text>
               </TouchableOpacity>
-            )}
+
+              {isAuthenticated && (
+                <TouchableOpacity
+                  style={[
+                    styles.tab,
+                    activeTab === 'participants' && styles.tabActive
+                  ]}
+                  onPress={() => setActiveTab('participants')}
+                >
+                  <MaterialIcons
+                    name="people"
+                    size={18}
+                    color={activeTab === 'participants' ? C.primary : C.textSecondary}
+                  />
+                  <Text style={[
+                    styles.tabText,
+                    { color: activeTab === 'participants' ? C.primary : C.textSecondary }
+                  ]}>
+                    Participants ({participantCount})
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Winners (Top 10) - only when ended and on posts tab, sorted by likes */}
         {activeTab === 'posts' && new Date() > new Date(challenge.end_date) && rawChallengePosts.length > 0 && (
@@ -958,8 +972,9 @@ export default function ChallengeDetailScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Main Content - Single FlatList */}
+      {/* Main Content - Single FlatList: flex: 1 so it fills space and scroll works; paddingBottom so all details are reachable */}
       <FlatList
+        style={styles.challengeDetailList}
         data={data}
         renderItem={renderItem}
         keyExtractor={(item, index) => {
@@ -995,13 +1010,10 @@ export default function ChallengeDetailScreen() {
             </View>
           )
         }
-        contentContainerStyle={
-          data.length === 0
-            ? { flex: 1 }
-            : activeTab === 'posts'
-              ? styles.postsGrid
-              : styles.participantsList
-        }
+        contentContainerStyle={[
+          data.length === 0 ? { flexGrow: 1 } : (activeTab === 'posts' ? styles.postsGrid : styles.participantsList),
+          styles.challengeDetailListContent,
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1010,7 +1022,8 @@ export default function ChallengeDetailScreen() {
             colors={[C.primary]}
           />
         }
-        ListFooterComponent={<View style={{ height: 200 }} />}
+        ListFooterComponent={<View style={styles.challengeDetailListFooter} />}
+        showsVerticalScrollIndicator={true}
       />
 
       {/* Fullscreen Post Viewer Modal */}
@@ -1195,6 +1208,15 @@ export default function ChallengeDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  challengeDetailList: {
+    flex: 1,
+  },
+  challengeDetailListContent: {
+    paddingBottom: 160,
+  },
+  challengeDetailListFooter: {
+    height: 80,
   },
   header: {
     flexDirection: 'row',
