@@ -241,6 +241,9 @@ export default function CreatePostScreen() {
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingSafetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stoppedDueToMaxDurationRef = useRef(false);
+  const [showPreRecordInfoModal, setShowPreRecordInfoModal] = useState(false);
+  const [showMaxDurationReachedModal, setShowMaxDurationReachedModal] = useState(false);
   const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
@@ -504,15 +507,21 @@ export default function CreatePostScreen() {
         console.error('Error setting audio mode:', audioError);
       }
 
-      setShowCamera(true);
-      setRecordingDuration(0);
+      // Show informative 2-min limit modal first (only for video); user taps "Proceed to record" to open camera
       setCameraMode('video');
+      setRecordingDuration(0);
+      setShowPreRecordInfoModal(true);
 
     } catch (error: any) {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
     }
   }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission, cameraMode]);
+
+  const proceedToRecord = () => {
+    setShowPreRecordInfoModal(false);
+    setShowCamera(true);
+  };
 
   // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
   useEffect(() => {
@@ -733,6 +742,7 @@ export default function CreatePostScreen() {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
           if (newDuration >= MAX_RECORDING_SECONDS) {
+            stoppedDueToMaxDurationRef.current = true;
             stopRecording();
             return MAX_RECORDING_SECONDS;
           }
@@ -769,7 +779,6 @@ export default function CreatePostScreen() {
         return;
       }
 
-      const MAX_RECORDING_SECONDS = 120;
       const recordingOptions: any = {
         maxDuration: MAX_RECORDING_SECONDS,
         mute: false,
@@ -851,6 +860,11 @@ export default function CreatePostScreen() {
               setCapturedImageUri(null);
               setShowCamera(false);
               setRecordingDuration(0);
+
+              if (stoppedDueToMaxDurationRef.current) {
+                stoppedDueToMaxDurationRef.current = false;
+                setShowMaxDurationReachedModal(true);
+              }
 
               // Generate thumbnail in background (non-blocking)
               generateThumbnail(video.uri)
@@ -1525,6 +1539,77 @@ export default function CreatePostScreen() {
     <View style={[styles.container, { backgroundColor: C.background }]}>
       <StatusBar style="light" backgroundColor="#000000" />
 
+      {/* Pre-record info modal: 2-min limit, only when opening camera for video */}
+      <Modal
+        visible={showPreRecordInfoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPreRecordInfoModal(false)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.preRecordOverlay}
+          onPress={() => setShowPreRecordInfoModal(false)}
+        >
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.preRecordCard}>
+            <View style={styles.preRecordIconWrap}>
+              <MaterialIcons name="videocam" size={48} color="#60a5fa" />
+              <View style={styles.preRecordBadge}>
+                <Text style={styles.preRecordBadgeText}>2 min max</Text>
+              </View>
+            </View>
+            <Text style={styles.preRecordTitle}>Video recording limit</Text>
+            <Text style={styles.preRecordMessage}>
+              You can record up to <Text style={styles.preRecordHighlight}>2 minutes</Text> maximum. Recording will stop automatically at 2 minutes and you’ll be taken to add captions.
+            </Text>
+            <Text style={styles.preRecordHint}>
+              This applies only when recording a video. You can stop earlier anytime. For best results on low-memory devices, close other apps.
+            </Text>
+            <TouchableOpacity
+              style={styles.preRecordProceedButton}
+              onPress={proceedToRecord}
+              activeOpacity={0.85}
+            >
+              <MaterialIcons name="fiber-manual-record" size={22} color="#fff" />
+              <Text style={styles.preRecordProceedText}>Proceed to record</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.preRecordCancelButton}
+              onPress={() => setShowPreRecordInfoModal(false)}
+            >
+              <Text style={styles.preRecordCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 2 minutes reached — notify then user continues to caption screen */}
+      <Modal
+        visible={showMaxDurationReachedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMaxDurationReachedModal(false)}
+      >
+        <View style={styles.maxDurationOverlay}>
+          <View style={styles.maxDurationCard}>
+            <View style={styles.maxDurationIconWrap}>
+              <MaterialIcons name="timer" size={44} color="#f59e0b" />
+            </View>
+            <Text style={styles.maxDurationTitle}>2 minutes max reached</Text>
+            <Text style={styles.maxDurationMessage}>
+              Maximum recording time reached. Taking you to add captions and publish.
+            </Text>
+            <TouchableOpacity
+              style={styles.maxDurationButton}
+              onPress={() => setShowMaxDurationReachedModal(false)}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.maxDurationButtonText}>Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Camera Modal */}
       {showCamera && (
         <View
@@ -1645,7 +1730,7 @@ export default function CreatePostScreen() {
           <View style={styles.studioHeader}>
             <Text style={[styles.studioTitle, { color: C.text }]}>Studio</Text>
             <Text style={[styles.studioSubtitle, { color: C.textSecondary }]}>
-              Record up to 2:30. Add details after recording.
+              Record a video up to 2 minutes maximum or take a picture. Add details after.
             </Text>
           </View>
 
@@ -2687,6 +2772,153 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  preRecordOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  preRecordCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 24,
+    padding: 28,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  preRecordIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    position: 'relative',
+  },
+  preRecordBadge: {
+    position: 'absolute',
+    bottom: -6,
+    backgroundColor: '#60a5fa',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  preRecordBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  preRecordTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  preRecordMessage: {
+    color: '#d1d5db',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 8,
+  },
+  preRecordHighlight: {
+    color: '#60a5fa',
+    fontWeight: '700',
+  },
+  preRecordHint: {
+    color: '#9ca3af',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 4,
+  },
+  preRecordProceedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#60a5fa',
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    borderRadius: 14,
+    width: '100%',
+    gap: 10,
+    marginBottom: 12,
+  },
+  preRecordProceedText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  preRecordCancelButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  preRecordCancelText: {
+    color: '#9ca3af',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  maxDurationOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  maxDurationCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 24,
+    padding: 28,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  maxDurationIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  maxDurationTitle: {
+    color: '#fff',
+    fontSize: 19,
+    fontWeight: '700',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  maxDurationMessage: {
+    color: '#d1d5db',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 8,
+  },
+  maxDurationButton: {
+    backgroundColor: '#f59e0b',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 14,
+    width: '100%',
+  },
+  maxDurationButtonText: {
+    color: '#000',
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   recordLimitHint: {
     fontSize: 12,
