@@ -1656,7 +1656,6 @@ export default function CreatePostScreen() {
             <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
               {cameraMode === 'video' && (
                 <Text style={styles.recordLimitHint}>
-                  Max 2 minutes. Recording stops automatically at 2 min. You can stop earlier. On low-memory devices, close other apps for best results.
                 </Text>
               )}
               <View style={styles.cameraBottomControls}>

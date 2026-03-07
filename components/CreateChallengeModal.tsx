@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     View,
     Text,
@@ -11,11 +11,14 @@ import {
     Alert,
     KeyboardAvoidingView,
     Platform,
+    FlatList,
+    findNodeHandle,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather } from '@expo/vector-icons';
-import { challengesApi } from '@/lib/api';
+import { challengesApi, countriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { Country } from '@/types';
 
 export interface ChallengeForEdit {
     id: string;
@@ -58,6 +61,11 @@ function parseDateInput(value: string): Date {
     return new Date(y, m - 1, d);
 }
 
+const tomorrow = new Date();
+tomorrow.setDate(tomorrow.getDate() + 1);
+const defaultStartDate = tomorrow.toISOString().split('T')[0];
+const defaultEndDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
 const defaultFormData = {
     name: '',
     description: '',
@@ -65,14 +73,26 @@ const defaultFormData = {
     rewards: '',
     organizer_name: '',
     organizer_contact: '',
+    contact_country_code: '+250',
+    contact_phone_digits: '',
     contact_email: '',
     eligibility_criteria: '',
     what_you_do: '',
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    start_date: defaultStartDate,
+    end_date: defaultEndDate,
     min_content_per_account: '1',
     scoring_criteria: '',
 };
+
+function parseOrganizerContact(full: string): { code: string; digits: string } {
+    if (!full || !full.trim()) return { code: '+250', digits: '' };
+    const s = full.trim();
+    const match = s.match(/^(\+\d{1,4})(\d+)$/);
+    if (match) return { code: match[1], digits: match[2].replace(/\D/g, '').slice(0, 9) };
+    const digitsOnly = s.replace(/\D/g, '').slice(0, 9);
+    if (s.startsWith('+')) return { code: '+250', digits: digitsOnly };
+    return { code: '+250', digits: digitsOnly };
+}
 
 export default function CreateChallengeModal({ visible, onClose, onCreated, editChallenge, onUpdated }: CreateChallengeModalProps) {
     const insets = useSafeAreaInsets();
@@ -88,20 +108,45 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         rewards: '',
         organizer_name: '',
         organizer_contact: '',
+        contact_country_code: '+250',
+        contact_phone_digits: '',
         contact_email: '',
         eligibility_criteria: '',
         what_you_do: '',
-        start_date: new Date().toISOString().split('T')[0],
-        end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        start_date: defaultStartDate,
+        end_date: defaultEndDate,
         ...defaultFormData,
     });
+    const [showCountryPicker, setShowCountryPicker] = useState(false);
+    const [countries, setCountries] = useState<Country[]>([]);
+    const [countrySearchQuery, setCountrySearchQuery] = useState('');
+    const scrollViewRef = useRef<ScrollView>(null);
+    const contentRef = useRef<View>(null);
+    const fieldRefs = useRef<Partial<Record<FieldErrorKey, View | null>>>({});
 
     const isEditMode = !!editChallenge?.id;
+
+    const scrollToFirstError = useCallback((firstKey: FieldErrorKey) => {
+        const ref = fieldRefs.current[firstKey];
+        const content = contentRef.current;
+        const scroll = scrollViewRef.current;
+        if (ref && content && scroll) {
+            try {
+                const contentTag = findNodeHandle(content);
+                if (contentTag != null) {
+                    (ref as any).measureLayout(contentTag, (_x: number, y: number) => {
+                        scroll.scrollTo({ y: Math.max(0, y - 100), animated: true });
+                    });
+                }
+            } catch (_) {}
+        }
+    }, []);
 
     useEffect(() => {
         if (visible && editChallenge?.id) {
             const start = editChallenge.start_date ? new Date(editChallenge.start_date).toISOString().split('T')[0] : defaultFormData.start_date;
             const end = editChallenge.end_date ? new Date(editChallenge.end_date).toISOString().split('T')[0] : defaultFormData.end_date;
+            const { code, digits } = parseOrganizerContact(editChallenge.organizer_contact ?? '');
             setFormData({
                 name: editChallenge.name ?? '',
                 description: editChallenge.description ?? '',
@@ -109,6 +154,8 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 rewards: editChallenge.rewards ?? '',
                 organizer_name: editChallenge.organizer_name ?? '',
                 organizer_contact: editChallenge.organizer_contact ?? '',
+                contact_country_code: code,
+                contact_phone_digits: digits,
                 contact_email: editChallenge.contact_email ?? '',
                 eligibility_criteria: editChallenge.eligibility_criteria ?? '',
                 what_you_do: editChallenge.what_you_do ?? '',
@@ -123,6 +170,30 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
             setFieldErrors({});
         }
     }, [visible, editChallenge?.id]);
+
+    useEffect(() => {
+        if (!showCountryPicker) return;
+        let cancelled = false;
+        countriesApi.getAll()
+            .then((res) => {
+                if (cancelled) return;
+                const list: Country[] = [];
+                const raw = (res.data as any)?.countries ?? (Array.isArray((res.data as any)?.data) ? (res.data as any).data : res.data);
+                if (Array.isArray(raw)) raw.forEach((c: any) => list.push({ id: c.id, name: c.name || c.country_name, code: c.code || c.dial_code || '', flag_emoji: c.flag_emoji }));
+                setCountries(list);
+            })
+            .catch(() => { if (!cancelled) setCountries([]); });
+        return () => { cancelled = true; };
+    }, [showCountryPicker]);
+
+    const filteredCountries = useMemo(() => {
+        if (!countrySearchQuery.trim()) return countries;
+        const q = countrySearchQuery.toLowerCase().trim();
+        return countries.filter((c) =>
+            (c.name || '').toLowerCase().includes(q) ||
+            (c.code || '').toLowerCase().includes(q)
+        );
+    }, [countries, countrySearchQuery]);
 
     const updateField = useCallback((key: string, value: string | boolean) => {
         setFormData(prev => ({ ...prev, [key]: value }));
@@ -153,6 +224,14 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         const organizer_name = (formData.organizer_name || '').trim();
         if (!organizer_name) {
             errors.organizer_name = 'Organizer name is required';
+        }
+
+        const contactCode = (formData.contact_country_code || '').trim();
+        const contactDigits = (formData.contact_phone_digits || '').replace(/\D/g, '');
+        if (!contactCode || !contactCode.startsWith('+')) {
+            errors.organizer_contact = 'Select country code';
+        } else if (contactDigits.length !== 9) {
+            errors.organizer_contact = 'Enter exactly 9 digits for phone number';
         }
 
         if (formData.has_rewards) {
@@ -206,14 +285,19 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
             errors.min_content_per_account = 'Minimum must be at least 1';
         }
 
+        const firstKey = (Object.keys(errors)[0] as FieldErrorKey) || null;
         setFieldErrors(errors);
-        return Object.keys(errors).length === 0;
+        return { valid: Object.keys(errors).length === 0, errors, firstKey };
     }, [formData, isEditMode]);
 
     const handleSubmit = async () => {
         setShowStartPicker(false);
         setShowEndPicker(false);
-        if (!validate()) {
+        const result = validate();
+        if (!result.valid) {
+            if (result.firstKey) {
+                setTimeout(() => scrollToFirstError(result.firstKey!), 100);
+            }
             return;
         }
 
@@ -226,7 +310,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 has_rewards: formData.has_rewards,
                 rewards: formData.has_rewards ? (formData.rewards || '').trim() || null : null,
                 organizer_name: (formData.organizer_name || '').trim(),
-                organizer_contact: (formData.organizer_contact || '').trim(),
+                organizer_contact: ((formData.contact_country_code || '').replace(/\s/g, '') + (formData.contact_phone_digits || '').replace(/\D/g, '')).trim() || (formData.organizer_contact || '').trim(),
                 contact_email: (formData.contact_email || '').trim(),
                 eligibility_criteria: (formData.eligibility_criteria || '').trim() || null,
                 what_you_do: (formData.what_you_do || '').trim() || null,
@@ -306,13 +390,14 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                     style={{ flex: 1 }}
                 >
-                    <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-                        <View style={styles.inputGroup}>
+                    <ScrollView ref={scrollViewRef} keyboardShouldPersistTaps="handled">
+                        <View ref={contentRef} style={styles.form}>
+                        <View ref={(el) => { fieldRefs.current.name = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Competition Name *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.name && styles.inputError]}
                                 placeholder="e.g. Summer Dance Off"
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 value={formData.name}
                                 onChangeText={(text) => updateField('name', text)}
                             />
@@ -324,7 +409,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.description && styles.inputError]}
                                 placeholder="Describe what participants need to do..."
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 multiline
                                 numberOfLines={4}
                                 value={formData.description}
@@ -333,29 +418,42 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.description ? <Text style={styles.errorText}>{fieldErrors.description}</Text> : null}
                         </View>
 
-                        <View style={styles.row}>
-                            <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                                <Text style={styles.label}>Organizer Name *</Text>
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Organizer Name *</Text>
+                            <TextInput
+                                style={[styles.input, fieldErrors.organizer_name && styles.inputError]}
+                                placeholder="e.g. John Doe"
+                                placeholderTextColor="#9ca3af"
+                                value={formData.organizer_name}
+                                onChangeText={(text) => updateField('organizer_name', text)}
+                            />
+                            {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Contact phone *</Text>
+                            <View style={styles.phoneRow}>
+                                <TouchableOpacity
+                                    style={[styles.phoneCodeBox, fieldErrors.organizer_contact && styles.inputError]}
+                                    onPress={() => setShowCountryPicker(true)}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.phoneCodeText} numberOfLines={1}>
+                                        {formData.contact_country_code || '+?'}
+                                    </Text>
+                                    <Feather name="chevron-down" size={16} color="#9ca3af" />
+                                </TouchableOpacity>
                                 <TextInput
-                                    style={[styles.input, fieldErrors.organizer_name && styles.inputError]}
-                                    placeholder="Your Name"
-                                    placeholderTextColor="#666"
-                                    value={formData.organizer_name}
-                                    onChangeText={(text) => updateField('organizer_name', text)}
+                                    style={[styles.input, styles.phoneDigitsInput, fieldErrors.organizer_contact && styles.inputError]}
+                                    placeholder="9 digits"
+                                    placeholderTextColor="#9ca3af"
+                                    value={formData.contact_phone_digits}
+                                    onChangeText={(text) => updateField('contact_phone_digits', text.replace(/\D/g, '').slice(0, 9))}
+                                    keyboardType="number-pad"
+                                    maxLength={9}
                                 />
-                                {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
                             </View>
-                            <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                                <Text style={styles.label}>Contact phone</Text>
-                                <TextInput
-                                    style={[styles.input, fieldErrors.organizer_contact && styles.inputError]}
-                                    placeholder="e.g. +250788123456"
-                                    placeholderTextColor="#666"
-                                    value={formData.organizer_contact}
-                                    onChangeText={(text) => updateField('organizer_contact', text)}
-                                />
-                                {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
-                            </View>
+                            {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
                         </View>
 
                         <View style={styles.inputGroup}>
@@ -363,7 +461,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <TextInput
                                 style={[styles.input, fieldErrors.contact_email && styles.inputError]}
                                 placeholder="e.g. you@example.com"
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 value={formData.contact_email}
                                 onChangeText={(text) => updateField('contact_email', text)}
                                 keyboardType="email-address"
@@ -397,7 +495,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                 <TextInput
                                     style={[styles.input, fieldErrors.rewards && styles.inputError]}
                                     placeholder="e.g. $500 Cash Prize"
-                                    placeholderTextColor="#666"
+                                    placeholderTextColor="#9ca3af"
                                     value={formData.rewards}
                                     onChangeText={(text) => updateField('rewards', text)}
                                 />
@@ -469,7 +567,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.eligibility_criteria && styles.inputError]}
                                 placeholder="Who can participate (e.g. age, location, skill level)"
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 multiline
                                 numberOfLines={2}
                                 value={formData.eligibility_criteria}
@@ -483,7 +581,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
                                 placeholder="Describe your products or services (for participants)"
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 multiline
                                 numberOfLines={3}
                                 value={formData.what_you_do}
@@ -497,7 +595,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.scoring_criteria && styles.inputError]}
                                 placeholder="How will winners be chosen?"
-                                placeholderTextColor="#666"
+                                placeholderTextColor="#9ca3af"
                                 multiline
                                 numberOfLines={3}
                                 value={formData.scoring_criteria}
@@ -510,8 +608,8 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             <Text style={styles.label}>Min content per account *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.min_content_per_account && styles.inputError]}
-                                placeholder="1"
-                                placeholderTextColor="#666"
+                                placeholder="e.g. 1"
+                                placeholderTextColor="#9ca3af"
                                 keyboardType="numeric"
                                 value={formData.min_content_per_account}
                                 onChangeText={(text) => updateField('min_content_per_account', text)}
@@ -539,6 +637,60 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                     </ScrollView>
                 </KeyboardAvoidingView>
             </View>
+
+            {/* Country code picker modal */}
+            <Modal
+                visible={showCountryPicker}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowCountryPicker(false)}
+            >
+                <View style={styles.countryPickerOverlay}>
+                    <View style={styles.countryPickerCard}>
+                        <View style={styles.countryPickerHeader}>
+                            <Text style={styles.countryPickerTitle}>Select country code</Text>
+                            <TouchableOpacity onPress={() => { setShowCountryPicker(false); setCountrySearchQuery(''); }}>
+                                <Feather name="x" size={24} color="#9ca3af" />
+                            </TouchableOpacity>
+                        </View>
+                        <TextInput
+                            style={styles.countrySearchInput}
+                            placeholder="Search country or code..."
+                            placeholderTextColor="#9ca3af"
+                            value={countrySearchQuery}
+                            onChangeText={setCountrySearchQuery}
+                        />
+                        <FlatList
+                            data={filteredCountries}
+                            keyExtractor={(item) => String(item.id)}
+                            style={styles.countryList}
+                            keyboardShouldPersistTaps="handled"
+                            renderItem={({ item }) => (
+                                <TouchableOpacity
+                                    style={styles.countryRow}
+                                    onPress={() => {
+                                        updateField('contact_country_code', item.code?.startsWith('+') ? item.code : `+${item.code}`);
+                                        setShowCountryPicker(false);
+                                        setCountrySearchQuery('');
+                                    }}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.countryRowFlag}>{item.flag_emoji ?? '🏳️'}</Text>
+                                    <Text style={styles.countryRowName} numberOfLines={1}>{item.name}</Text>
+                                    <Text style={styles.countryRowCode}>{item.code?.startsWith('+') ? item.code : `+${item.code || ''}`}</Text>
+                                </TouchableOpacity>
+                            )}
+                            ListEmptyComponent={
+                                <View style={styles.countryListEmpty}>
+                                    <Text style={styles.countryListEmptyText}>
+                                        {countries.length === 0 ? 'Loading...' : 'No country found'}
+                                    </Text>
+                                </View>
+                            }
+                        />
+                    </View>
+                </View>
+            </Modal>
         </Modal>
     );
 }
@@ -584,8 +736,128 @@ const styles = StyleSheet.create({
         borderColor: '#333',
         paddingHorizontal: 16,
         paddingVertical: 12,
+        minHeight: 48,
         color: '#fff',
         fontSize: 16,
+    },
+    inputSingleLine: {
+        minHeight: 48,
+    },
+    organizerContactRow: {
+        flexDirection: 'row',
+        marginBottom: 16,
+        gap: 12,
+        alignItems: 'flex-start',
+    },
+    organizerNameWrap: {
+        flex: 1,
+        minWidth: 140,
+    },
+    organizerNameInput: {
+        width: '100%',
+    },
+    contactPhoneWrap: {
+        flex: 1,
+        minWidth: 160,
+    },
+    phoneRow: {
+        flexDirection: 'row',
+        gap: 8,
+        alignItems: 'center',
+    },
+    phoneCodeBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#1a1a1a',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#333',
+        paddingHorizontal: 12,
+        minHeight: 48,
+        minWidth: 88,
+    },
+    phoneCodeText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    phoneDigitsInput: {
+        flex: 1,
+        minHeight: 48,
+    },
+    countryPickerOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'flex-end',
+    },
+    countryPickerCard: {
+        backgroundColor: '#1a1a1a',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        maxHeight: '70%',
+        paddingBottom: 24,
+    },
+    countryPickerHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#333',
+    },
+    countryPickerTitle: {
+        color: '#fff',
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    countrySearchInput: {
+        backgroundColor: '#232326',
+        borderRadius: 12,
+        marginHorizontal: 20,
+        marginTop: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        minHeight: 48,
+        color: '#fff',
+        fontSize: 16,
+        borderWidth: 1,
+        borderColor: '#333',
+    },
+    countryList: {
+        maxHeight: 360,
+        marginTop: 8,
+    },
+    countryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#2a2a2a',
+    },
+    countryRowFlag: {
+        fontSize: 22,
+        marginRight: 12,
+    },
+    countryRowName: {
+        flex: 1,
+        color: '#f3f4f6',
+        fontSize: 16,
+    },
+    countryRowCode: {
+        color: '#9ca3af',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    countryListEmpty: {
+        padding: 24,
+        alignItems: 'center',
+    },
+    countryListEmptyText: {
+        color: '#9ca3af',
+        fontSize: 15,
     },
     inputError: {
         borderColor: '#ef4444',
