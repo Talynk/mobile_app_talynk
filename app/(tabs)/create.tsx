@@ -240,6 +240,7 @@ export default function CreatePostScreen() {
   const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingSafetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const C = COLORS.dark;
   const [mainCategories, setMainCategories] = useState<{ id: number, name: string, children?: { id: number, name: string }[] }[]>([]);
   const [subcategories, setSubcategories] = useState<{ id: number, name: string }[]>([]);
@@ -727,16 +728,20 @@ export default function CreatePostScreen() {
       setIsRecording(true);
       setRecordingDuration(0);
 
+      const MAX_RECORDING_SECONDS = 120;
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
-          if (newDuration >= 300) {
+          if (newDuration >= MAX_RECORDING_SECONDS) {
             stopRecording();
-            return 300;
+            return MAX_RECORDING_SECONDS;
           }
           return newDuration;
         });
       }, 1000);
+      recordingSafetyTimeoutRef.current = setTimeout(() => {
+        stopRecording();
+      }, (MAX_RECORDING_SECONDS + 1) * 1000);
 
       try {
         await Audio.setAudioModeAsync({
@@ -764,8 +769,7 @@ export default function CreatePostScreen() {
         return;
       }
 
-      // Support longer videos across devices (e.g. 2m30s–5m). 300s = 5 min.
-      const MAX_RECORDING_SECONDS = 300;
+      const MAX_RECORDING_SECONDS = 120;
       const recordingOptions: any = {
         maxDuration: MAX_RECORDING_SECONDS,
         mute: false,
@@ -780,8 +784,7 @@ export default function CreatePostScreen() {
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
       } else {
-        // Android: allow large file so duration isn't capped too early (e.g. 200MB for ~5 min)
-        recordingOptions.maxFileSize = 200 * 1024 * 1024;
+        recordingOptions.maxFileSize = 80 * 1024 * 1024;
         recordingOptions.extension = '.mp4';
         recordingOptions.videoBitrate = 4000000;
         recordingOptions.audioBitrate = 256000;
@@ -828,10 +831,10 @@ export default function CreatePostScreen() {
               // Continue anyway - file might still be valid
             }
 
-            if (recordingDuration > 300) {
+            if (recordingDuration > 120) {
               Alert.alert(
                 'Video Too Long',
-                'Your recording is longer than 5 minutes. Please record a shorter video.'
+                'Your recording is longer than 2 minutes. Please record a shorter video.'
               );
               if (isMountedRef.current) {
                 setShowCamera(false);
@@ -1566,6 +1569,11 @@ export default function CreatePostScreen() {
             </View>
 
             <View style={[styles.cameraBottomBar, { paddingBottom: insets.bottom + 20 }]}>
+              {cameraMode === 'video' && (
+                <Text style={styles.recordLimitHint}>
+                  Max 2 minutes. Recording stops automatically at 2 min. You can stop earlier. On low-memory devices, close other apps for best results.
+                </Text>
+              )}
               <View style={styles.cameraBottomControls}>
                 <TouchableOpacity
                   style={styles.cameraModeButton}
@@ -2679,6 +2687,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  recordLimitHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 16,
   },
   cameraBottomControls: {
     flexDirection: 'row',

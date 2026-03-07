@@ -1529,18 +1529,19 @@ export const challengesApi = {
       const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
       const apiResponse = response.data;
 
-      // Backend returns: { status: 'success', data: [...], pagination: {...} }
+      // Backend returns: { status: 'success', data: [...], pagination: {...}, ordered_by?: string }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
-        const posts = Array.isArray(apiResponse.data) ? apiResponse.data : [];
-        // Extract post from challengePost wrapper if needed
-        const normalizedPosts = posts.map((item: any) => item.post || item);
+        const rawItems = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+        const normalizedPosts = rawItems.map((item: any) => item.post || item);
 
         return {
           status: 'success',
           message: apiResponse.message || 'Challenge posts fetched successfully',
           data: {
             posts: normalizedPosts,
-            pagination: apiResponse.pagination || {}
+            rawItems,
+            pagination: apiResponse.pagination || {},
+            ordered_by: apiResponse.ordered_by,
           }
         };
       }
@@ -1548,13 +1549,26 @@ export const challengesApi = {
       return {
         status: 'error',
         message: apiResponse?.message || 'Failed to fetch challenge posts',
-        data: { posts: [], pagination: {} },
+        data: { posts: [], rawItems: [], pagination: {}, ordered_by: undefined },
       };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch challenge posts',
-        data: { posts: [], pagination: {} },
+        data: { posts: [], rawItems: [], pagination: {}, ordered_by: undefined },
+      };
+    }
+  },
+
+  update: async (challengeId: string, data: Record<string, unknown>): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.put(`/api/challenges/${challengeId}`, data);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to update competition',
+        data: null,
       };
     }
   },

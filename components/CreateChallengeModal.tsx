@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -17,13 +17,33 @@ import { Feather } from '@expo/vector-icons';
 import { challengesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+export interface ChallengeForEdit {
+    id: string;
+    name?: string;
+    description?: string | null;
+    has_rewards?: boolean;
+    rewards?: string | null;
+    organizer_name?: string;
+    organizer_contact?: string;
+    contact_email?: string;
+    eligibility_criteria?: string | null;
+    what_you_do?: string | null;
+    start_date?: string;
+    end_date?: string;
+    min_content_per_account?: number;
+    scoring_criteria?: string | null;
+}
+
 interface CreateChallengeModalProps {
     visible: boolean;
     onClose: () => void;
     onCreated: () => void;
+    /** When provided, modal is in edit mode: form prefilled, submit calls PUT. Only for pending challenges. */
+    editChallenge?: ChallengeForEdit | null;
+    onUpdated?: () => void;
 }
 
-type FieldErrorKey = 'name' | 'description' | 'organizer_name' | 'organizer_contact' | 'rewards' | 'start_date' | 'end_date' | 'min_content_per_account' | 'scoring_criteria';
+type FieldErrorKey = 'name' | 'description' | 'organizer_name' | 'organizer_contact' | 'contact_email' | 'rewards' | 'start_date' | 'end_date' | 'min_content_per_account' | 'scoring_criteria' | 'eligibility_criteria' | 'what_you_do';
 
 function formatDateForInput(date: Date): string {
     const y = date.getFullYear();
@@ -38,7 +58,23 @@ function parseDateInput(value: string): Date {
     return new Date(y, m - 1, d);
 }
 
-export default function CreateChallengeModal({ visible, onClose, onCreated }: CreateChallengeModalProps) {
+const defaultFormData = {
+    name: '',
+    description: '',
+    has_rewards: false,
+    rewards: '',
+    organizer_name: '',
+    organizer_contact: '',
+    contact_email: '',
+    eligibility_criteria: '',
+    what_you_do: '',
+    start_date: new Date().toISOString().split('T')[0],
+    end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    min_content_per_account: '1',
+    scoring_criteria: '',
+};
+
+export default function CreateChallengeModal({ visible, onClose, onCreated, editChallenge, onUpdated }: CreateChallengeModalProps) {
     const insets = useSafeAreaInsets();
     const [loading, setLoading] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldErrorKey, string>>>({});
@@ -52,11 +88,41 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
         rewards: '',
         organizer_name: '',
         organizer_contact: '',
+        contact_email: '',
+        eligibility_criteria: '',
+        what_you_do: '',
         start_date: new Date().toISOString().split('T')[0],
         end_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        min_content_per_account: '1',
-        scoring_criteria: '',
+        ...defaultFormData,
     });
+
+    const isEditMode = !!editChallenge?.id;
+
+    useEffect(() => {
+        if (visible && editChallenge?.id) {
+            const start = editChallenge.start_date ? new Date(editChallenge.start_date).toISOString().split('T')[0] : defaultFormData.start_date;
+            const end = editChallenge.end_date ? new Date(editChallenge.end_date).toISOString().split('T')[0] : defaultFormData.end_date;
+            setFormData({
+                name: editChallenge.name ?? '',
+                description: editChallenge.description ?? '',
+                has_rewards: !!editChallenge.has_rewards,
+                rewards: editChallenge.rewards ?? '',
+                organizer_name: editChallenge.organizer_name ?? '',
+                organizer_contact: editChallenge.organizer_contact ?? '',
+                contact_email: editChallenge.contact_email ?? '',
+                eligibility_criteria: editChallenge.eligibility_criteria ?? '',
+                what_you_do: editChallenge.what_you_do ?? '',
+                start_date: start,
+                end_date: end,
+                min_content_per_account: String(editChallenge.min_content_per_account ?? 1),
+                scoring_criteria: editChallenge.scoring_criteria ?? '',
+            });
+            setFieldErrors({});
+        } else if (visible && !editChallenge) {
+            setFormData({ ...defaultFormData });
+            setFieldErrors({});
+        }
+    }, [visible, editChallenge?.id]);
 
     const updateField = useCallback((key: string, value: string | boolean) => {
         setFormData(prev => ({ ...prev, [key]: value }));
@@ -96,6 +162,13 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
             }
         }
 
+        const contact_email = (formData.contact_email || '').trim();
+        if (!contact_email) {
+            errors.contact_email = 'Contact email is required';
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact_email)) {
+            errors.contact_email = 'Please enter a valid email address';
+        }
+
         const startStr = (formData.start_date || '').trim();
         if (!startStr) {
             errors.start_date = 'Start date is required';
@@ -103,6 +176,12 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
             const startDate = parseDateInput(startStr);
             if (isNaN(startDate.getTime())) {
                 errors.start_date = 'Please enter a valid start date';
+            } else if (!isEditMode) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (startDate < today) {
+                    errors.start_date = 'Start date must be today or in the future';
+                }
             }
         }
 
@@ -129,7 +208,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
 
         setFieldErrors(errors);
         return Object.keys(errors).length === 0;
-    }, [formData]);
+    }, [formData, isEditMode]);
 
     const handleSubmit = async () => {
         setShowStartPicker(false);
@@ -141,29 +220,50 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
         setLoading(true);
         setFieldErrors({});
         try {
-            const payload = {
-                ...formData,
+            const payload: Record<string, unknown> = {
+                name: (formData.name || '').trim(),
+                description: (formData.description || '').trim() || null,
+                has_rewards: formData.has_rewards,
+                rewards: formData.has_rewards ? (formData.rewards || '').trim() || null : null,
+                organizer_name: (formData.organizer_name || '').trim(),
+                organizer_contact: (formData.organizer_contact || '').trim(),
+                contact_email: (formData.contact_email || '').trim(),
+                eligibility_criteria: (formData.eligibility_criteria || '').trim() || null,
+                what_you_do: (formData.what_you_do || '').trim() || null,
                 min_content_per_account: parseInt(formData.min_content_per_account, 10) || 1,
                 start_date: new Date(formData.start_date).toISOString(),
                 end_date: new Date(formData.end_date).toISOString(),
+                scoring_criteria: (formData.scoring_criteria || '').trim() || null,
             };
 
-            const response = await challengesApi.create(payload);
+            const followUpEmail = 'strongmind250@gmail.com';
 
-            if (response.status === 'success') {
-                Alert.alert(
-                    'Competition Submitted! 🎉',
-                    'Your competition has been created and submitted for review. An administrator will check and approve or reject it. If it gets approved it will appear in the "Created by Me" tab.\n\nPlease wait for approval before it becomes visible to others.',
-                    [{ text: 'OK' }]
-                );
-                onCreated();
-                onClose();
+            if (isEditMode && editChallenge?.id) {
+                const response = await challengesApi.update(editChallenge.id, payload);
+                if (response.status === 'success') {
+                    Alert.alert('Competition Updated', 'Your competition details have been updated successfully.', [{ text: 'OK' }]);
+                    onUpdated?.();
+                    onClose();
+                } else {
+                    Alert.alert('Error', response.message || 'Failed to update competition');
+                }
             } else {
-                Alert.alert('Error', response.message || 'Failed to create competition');
+                const response = await challengesApi.create(payload as any);
+                if (response.status === 'success') {
+                    Alert.alert(
+                        'Competition Submitted! 🎉',
+                        `Your competition has been created and submitted for review. An administrator will check and approve or reject it. If it gets approved it will appear in the "Created by Me" tab.\n\nPlease wait for approval before it becomes visible to others.\n\nFor follow-up on approval, contact: ${followUpEmail}`,
+                        [{ text: 'OK' }]
+                    );
+                    onCreated();
+                    onClose();
+                } else {
+                    Alert.alert('Error', response.message || 'Failed to create competition');
+                }
             }
         } catch (error) {
-            console.error('Create competition error:', error);
-            Alert.alert('Error', 'Failed to create competition');
+            console.error(isEditMode ? 'Update competition error' : 'Create competition error', error);
+            Alert.alert('Error', isEditMode ? 'Failed to update competition' : 'Failed to create competition');
         } finally {
             setLoading(false);
         }
@@ -196,7 +296,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
         >
             <View style={[styles.container, { paddingTop: Platform.OS === 'android' ? insets.top : 0 }]}>
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>Create Competition</Text>
+                    <Text style={styles.headerTitle}>{isEditMode ? 'Edit Competition' : 'Create Competition'}</Text>
                     <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                         <Feather name="x" size={24} color="#fff" />
                     </TouchableOpacity>
@@ -246,16 +346,31 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
                                 {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
                             </View>
                             <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                                <Text style={styles.label}>Contact (email or phone)</Text>
+                                <Text style={styles.label}>Contact phone</Text>
                                 <TextInput
                                     style={[styles.input, fieldErrors.organizer_contact && styles.inputError]}
-                                    placeholder="Email or phone"
+                                    placeholder="e.g. +250788123456"
                                     placeholderTextColor="#666"
                                     value={formData.organizer_contact}
                                     onChangeText={(text) => updateField('organizer_contact', text)}
                                 />
                                 {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
                             </View>
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Contact email *</Text>
+                            <TextInput
+                                style={[styles.input, fieldErrors.contact_email && styles.inputError]}
+                                placeholder="e.g. you@example.com"
+                                placeholderTextColor="#666"
+                                value={formData.contact_email}
+                                onChangeText={(text) => updateField('contact_email', text)}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                            />
+                            {fieldErrors.contact_email ? <Text style={styles.errorText}>{fieldErrors.contact_email}</Text> : null}
                         </View>
 
                         <View style={styles.switchContainer}>
@@ -350,6 +465,34 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
                         </View>
 
                         <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Participant eligibility criteria</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea, fieldErrors.eligibility_criteria && styles.inputError]}
+                                placeholder="Who can participate (e.g. age, location, skill level)"
+                                placeholderTextColor="#666"
+                                multiline
+                                numberOfLines={2}
+                                value={formData.eligibility_criteria}
+                                onChangeText={(text) => updateField('eligibility_criteria', text)}
+                            />
+                            {fieldErrors.eligibility_criteria ? <Text style={styles.errorText}>{fieldErrors.eligibility_criteria}</Text> : null}
+                        </View>
+
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>What you do (organizer)</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
+                                placeholder="Describe your products or services (for participants)"
+                                placeholderTextColor="#666"
+                                multiline
+                                numberOfLines={3}
+                                value={formData.what_you_do}
+                                onChangeText={(text) => updateField('what_you_do', text)}
+                            />
+                            {fieldErrors.what_you_do ? <Text style={styles.errorText}>{fieldErrors.what_you_do}</Text> : null}
+                        </View>
+
+                        <View style={styles.inputGroup}>
                             <Text style={styles.label}>Scoring Criteria</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.scoring_criteria && styles.inputError]}
@@ -384,9 +527,13 @@ export default function CreateChallengeModal({ visible, onClose, onCreated }: Cr
                             {loading ? (
                                 <ActivityIndicator color="#fff" />
                             ) : (
-                                <Text style={styles.submitButtonText}>Submit Competition</Text>
+                                <Text style={styles.submitButtonText}>{isEditMode ? 'Save Changes' : 'Submit Competition'}</Text>
                             )}
                         </TouchableOpacity>
+
+                        <View style={styles.followUpHint}>
+                            <Text style={styles.followUpHintText}>Follow-up email for approval: strongmind250@gmail.com</Text>
+                        </View>
 
                         <View style={{ height: 40 }} />
                     </ScrollView>
@@ -537,5 +684,18 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: '600',
+    },
+    followUpHint: {
+        marginTop: 16,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        backgroundColor: 'rgba(96, 165, 250, 0.12)',
+        borderRadius: 10,
+        borderLeftWidth: 4,
+        borderLeftColor: '#60a5fa',
+    },
+    followUpHintText: {
+        color: '#93c5fd',
+        fontSize: 14,
     },
 });

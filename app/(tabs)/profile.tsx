@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   FlatList,
   Modal,
+  SafeAreaView,
   Share,
   Alert,
   RefreshControl,
@@ -18,7 +19,7 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
-import { userApi, postsApi, likesApi } from '@/lib/api';
+import { userApi, postsApi, likesApi, challengesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,10 +45,11 @@ interface VideoThumbnailProps {
   onPress: () => void;
   onOptionsPress?: () => void;
   onPublishPress?: () => void;
+  onSubmitToCompetitionPress?: () => void;
   onViewsPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onViewsPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onViewsPress }: VideoThumbnailProps) => {
   const [imageError, setImageError] = useState(false);
 
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
@@ -152,6 +154,23 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
             <Text style={styles.publishDraftButtonText}>Publish</Text>
           </TouchableOpacity>
         )}
+      {/* Submit to competition for draft posts */}
+      {(() => {
+        const isDraft = post.status === 'draft' || post.status === 'Draft';
+        return isDraft && onSubmitToCompetitionPress;
+      })() && (
+          <TouchableOpacity
+            style={styles.submitToCompetitionDraftButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onSubmitToCompetitionPress?.();
+            }}
+            activeOpacity={0.8}
+          >
+            <Feather name="award" size={14} color="#fff" />
+            <Text style={styles.submitToCompetitionDraftButtonText}>To competition</Text>
+          </TouchableOpacity>
+        )}
     </TouchableOpacity>
   );
 };
@@ -229,6 +248,12 @@ export default function ProfileScreen() {
   const [postOptionsModalVisible, setPostOptionsModalVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [totalLikes, setTotalLikes] = useState(0);
+  // Publish draft & submit to competition flow
+  const [submitToChallengeModalVisible, setSubmitToChallengeModalVisible] = useState(false);
+  const [draftPostIdForSubmit, setDraftPostIdForSubmit] = useState<string | null>(null);
+  const [joinedChallengesForSubmit, setJoinedChallengesForSubmit] = useState<any[]>([]);
+  const [loadingJoinedChallenges, setLoadingJoinedChallenges] = useState(false);
+  const [submittingDraftToChallenge, setSubmittingDraftToChallenge] = useState(false);
 
 
   // Error and loading states
@@ -716,6 +741,73 @@ export default function ProfileScreen() {
 
 
 
+  const openSubmitDraftToCompetition = (postId: string) => {
+    setPostOptionsModalVisible(false);
+    setDraftPostIdForSubmit(postId);
+    setSubmitToChallengeModalVisible(true);
+  };
+
+  useEffect(() => {
+    if (!submitToChallengeModalVisible || !user) return;
+    let cancelled = false;
+    setLoadingJoinedChallenges(true);
+    challengesApi.getJoinedChallenges()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 'success' && res.data) {
+          const raw = res.data?.challenges ?? (Array.isArray(res.data) ? res.data : []);
+          const list = raw.map((item: any) => item.challenge || item).filter((c: any) => c?.id);
+          const now = new Date();
+          const active = list.filter((c: any) => {
+            const status = (c.status || '').toLowerCase();
+            if (status !== 'active' && status !== 'approved') return false;
+            if (c.start_date && new Date(c.start_date) > now) return false;
+            if (c.end_date && new Date(c.end_date) < now) return false;
+            return true;
+          });
+          setJoinedChallengesForSubmit(active);
+        } else {
+          setJoinedChallengesForSubmit([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setJoinedChallengesForSubmit([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingJoinedChallenges(false);
+      });
+    return () => { cancelled = true; };
+  }, [submitToChallengeModalVisible, user]);
+
+  const handlePublishDraftAndSubmitToCompetition = async (postId: string, challengeId: string) => {
+    setSubmittingDraftToChallenge(true);
+    try {
+      const publishRes = await postsApi.publishDraft(postId);
+      if (publishRes.status !== 'success') {
+        Alert.alert('Error', publishRes.message || 'Failed to publish draft.');
+        return;
+      }
+      const linkRes = await challengesApi.addPostToChallenge(challengeId, postId);
+      if (linkRes.status !== 'success') {
+        Alert.alert(
+          'Published',
+          'Your post was published, but it could not be added to the competition. You can try again from the post.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Success', 'Your draft has been published and submitted to the competition.', [{ text: 'OK' }]);
+      }
+      setSubmitToChallengeModalVisible(false);
+      setDraftPostIdForSubmit(null);
+      setPosts(prev => prev.filter(p => p.id !== postId));
+      await loadPosts(true);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Something went wrong. Please try again.');
+    } finally {
+      setSubmittingDraftToChallenge(false);
+    }
+  };
+
   const handlePublishDraft = async (postId: string) => {
     // Log the draft post being published
     const draftPost = posts.find(p => p.id === postId);
@@ -953,6 +1045,7 @@ export default function ProfileScreen() {
           // Publish draft directly from grid
           handlePublishDraft(item.id);
         }}
+        onSubmitToCompetitionPress={() => openSubmitDraftToCompetition(item.id)}
       />
     );
   };
@@ -1403,18 +1496,29 @@ export default function ProfileScreen() {
 
             {/* Publish Draft Button - Only show for draft posts */}
             {selectedPost?.status === 'draft' && (
-              <TouchableOpacity
-                style={[styles.menuItem, styles.menuItemPrimary]}
-                onPress={() => {
-                  setPostOptionsModalVisible(false);
-                  if (selectedPost) {
-                    handlePublishDraft(selectedPost.id);
-                  }
-                }}
-              >
-                <Feather name="send" size={20} color="#10b981" />
-                <Text style={[styles.menuItemText, { color: '#10b981' }]}>Publish Post</Text>
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={[styles.menuItem, styles.menuItemPrimary]}
+                  onPress={() => {
+                    setPostOptionsModalVisible(false);
+                    if (selectedPost) {
+                      handlePublishDraft(selectedPost.id);
+                    }
+                  }}
+                >
+                  <Feather name="send" size={20} color="#10b981" />
+                  <Text style={[styles.menuItemText, { color: '#10b981' }]}>Publish Post</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderBottomWidth: 0 }]}
+                  onPress={() => {
+                    if (selectedPost) openSubmitDraftToCompetition(selectedPost.id);
+                  }}
+                >
+                  <Feather name="award" size={20} color="#60a5fa" />
+                  <Text style={[styles.menuItemText, { color: '#60a5fa' }]}>Publish & submit to competition</Text>
+                </TouchableOpacity>
+              </>
             )}
 
             <TouchableOpacity
@@ -1459,6 +1563,85 @@ export default function ProfileScreen() {
               <Text style={styles.menuItemText}>Cancel</Text>
             </TouchableOpacity>
           </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Publish draft & submit to competition — pick a joined challenge */}
+      <Modal
+        visible={submitToChallengeModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!submittingDraftToChallenge) {
+            setSubmitToChallengeModalVisible(false);
+            setDraftPostIdForSubmit(null);
+          }
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.submitToChallengeOverlay}
+          onPress={() => {
+            if (!submittingDraftToChallenge) {
+              setSubmitToChallengeModalVisible(false);
+              setDraftPostIdForSubmit(null);
+            }
+          }}
+        >
+          <SafeAreaView style={styles.submitToChallengeModalContainer}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.submitToChallengeCard}>
+              <View style={styles.submitToChallengeHeader}>
+                <Text style={styles.submitToChallengeTitle}>Publish & submit to competition</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (!submittingDraftToChallenge) {
+                      setSubmitToChallengeModalVisible(false);
+                      setDraftPostIdForSubmit(null);
+                    }
+                  }}
+                  disabled={submittingDraftToChallenge}
+                >
+                  <Feather name="x" size={24} color="#9ca3af" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.submitToChallengeSubtitle}>
+                Choose a competition you've joined. The draft will be published and then added to that competition.
+              </Text>
+              {loadingJoinedChallenges ? (
+                <View style={styles.submitToChallengeLoading}>
+                  <ActivityIndicator size="small" color="#60a5fa" />
+                  <Text style={styles.submitToChallengeLoadingText}>Loading your competitions…</Text>
+                </View>
+              ) : joinedChallengesForSubmit.length === 0 ? (
+                <View style={styles.submitToChallengeEmpty}>
+                  <Feather name="award" size={40} color="#6b7280" />
+                  <Text style={styles.submitToChallengeEmptyText}>You haven't joined any competitions yet.</Text>
+                  <Text style={styles.submitToChallengeEmptyHint}>Join a competition from the Competitions tab, then you can submit this draft there.</Text>
+                </View>
+              ) : (
+                <ScrollView style={styles.submitToChallengeList} keyboardShouldPersistTaps="handled">
+                  {joinedChallengesForSubmit.map((challenge: any) => (
+                    <TouchableOpacity
+                      key={challenge.id}
+                      style={styles.submitToChallengeItem}
+                      onPress={() => draftPostIdForSubmit && handlePublishDraftAndSubmitToCompetition(draftPostIdForSubmit, challenge.id)}
+                      disabled={submittingDraftToChallenge}
+                    >
+                      <Feather name="zap" size={20} color="#60a5fa" />
+                      <Text style={styles.submitToChallengeItemName} numberOfLines={2}>{challenge.name}</Text>
+                      <Feather name="chevron-right" size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {submittingDraftToChallenge && (
+                <View style={styles.submitToChallengeSubmitting}>
+                  <ActivityIndicator size="small" color="#60a5fa" />
+                  <Text style={styles.submitToChallengeSubmittingText}>Publishing and submitting…</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </SafeAreaView>
         </TouchableOpacity>
       </Modal>
 
@@ -1705,6 +1888,117 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  submitToCompetitionDraftButton: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    backgroundColor: '#60a5fa',
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  submitToCompetitionDraftButtonText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  submitToChallengeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  submitToChallengeModalContainer: {
+    maxHeight: '70%',
+  },
+  submitToChallengeCard: {
+    backgroundColor: '#1a1a1a',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+    minHeight: 200,
+  },
+  submitToChallengeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  submitToChallengeTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    flex: 1,
+  },
+  submitToChallengeSubtitle: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  submitToChallengeLoading: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 12,
+  },
+  submitToChallengeLoadingText: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  submitToChallengeEmpty: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  submitToChallengeEmptyText: {
+    color: '#d1d5db',
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  submitToChallengeEmptyHint: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  submitToChallengeList: {
+    maxHeight: 280,
+  },
+  submitToChallengeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#232326',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    marginBottom: 8,
+    gap: 12,
+  },
+  submitToChallengeItemName: {
+    flex: 1,
+    color: '#f3f4f6',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  submitToChallengeSubmitting: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingTop: 16,
+  },
+  submitToChallengeSubmittingText: {
+    color: '#60a5fa',
+    fontSize: 14,
   },
   processingBadge: {
     position: 'absolute',

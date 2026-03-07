@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,7 @@ import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
+import CreateChallengeModal from '@/components/CreateChallengeModal';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
@@ -91,6 +92,8 @@ export default function ChallengeDetailScreen() {
   const [activeTab, setActiveTab] = useState<'posts' | 'participants'>('posts');
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
+  const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
+  const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
 
   useRefetchOnReconnect(() => fetchChallenge());
 
@@ -124,9 +127,11 @@ export default function ChallengeDetailScreen() {
       const response = await challengesApi.getPosts(id as string, 1, 20);
 
       if (response?.status === 'success') {
+        const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
-        const normalizedPosts = filterHlsReady(postsList.map((item: any) => item.post || item));
+        const normalizedPosts = filterHlsReady(Array.isArray(postsList) ? postsList : []);
         setPosts(normalizedPosts);
+        setRawChallengePosts(Array.isArray(rawItems) ? rawItems : []);
       }
     } catch (err: any) {
       console.warn('Error fetching challenge posts:', err?.message);
@@ -366,6 +371,21 @@ export default function ChallengeDetailScreen() {
     }
   };
 
+  const isChallengeEnded = challenge && new Date() > new Date(challenge.end_date);
+  const likesDuringChallengeMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    rawChallengePosts.forEach((cp: any) => {
+      const postId = cp.post?.id ?? cp.post_id;
+      if (postId) map[postId] = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+    });
+    return map;
+  }, [rawChallengePosts]);
+
+  const sortedPosts = useMemo(() => {
+    if (!isChallengeEnded || !rawChallengePosts.length) return posts;
+    return [...posts].sort((a, b) => (likesDuringChallengeMap[b.id] ?? 0) - (likesDuringChallengeMap[a.id] ?? 0));
+  }, [posts, rawChallengePosts, isChallengeEnded, likesDuringChallengeMap]);
+
   const isOrganizer = challenge?.organizer_id === user?.id;
 
   const handleLike = async (postId: string) => {
@@ -542,79 +562,19 @@ export default function ChallengeDetailScreen() {
           </View>
         </LinearGradient>
 
-        {/* Challenge Details */}
-        <View style={[styles.detailsSection, { backgroundColor: C.card }]}>
-          {challenge.description && (
-            <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Description</Text>
-              <Text style={[styles.detailText, { color: C.text }]}>{challenge.description}</Text>
-            </View>
-          )}
-
-          <View style={styles.detailBlock}>
-            <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Duration</Text>
-            <Text style={[styles.detailText, { color: C.text }]}>
-              {(() => {
-                const dateInfo = getDateInfo();
-                if (!dateInfo) return null;
-                return (
-                  <>
-                    <Text>{dateInfo.label} {formatDate(dateInfo.date.toISOString())}</Text>
-                    {dateInfo.showEndDate && (
-                      <Text> • Ends {formatDate(dateInfo.endDate.toISOString())}</Text>
-                    )}
-                  </>
-                );
-              })()}
-            </Text>
-          </View>
-
-          {challenge.has_rewards && challenge.rewards && (
-            <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Rewards</Text>
-              <Text style={[styles.detailText, { color: C.text }]}>{challenge.rewards}</Text>
-            </View>
-          )}
-
-          {challenge.scoring_criteria && (
-            <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Scoring Criteria</Text>
-              <Text style={[styles.detailText, { color: C.text }]}>{challenge.scoring_criteria}</Text>
-            </View>
-          )}
-
-          {challenge.organizer && (
-            <View style={styles.organizerSection}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Organizer</Text>
-              <TouchableOpacity
-                style={styles.organizerInfo}
-                onPress={() => router.push({
-                  pathname: '/user/[id]',
-                  params: { id: challenge.organizer.id }
-                })}
-              >
-                <Avatar
-                  user={challenge.organizer}
-                  size={40}
-                  style={styles.organizerAvatar}
-                />
-                <View>
-                  <Text style={[styles.organizerName, { color: C.text }]}>
-                    {challenge.organizer.display_name || challenge.organizer.username}
-                  </Text>
-                  <Text style={[styles.organizerUsername, { color: C.textSecondary }]}>
-                    @{challenge.organizer.username}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        {/* Action Buttons */}
+        {/* Action Buttons - above details */}
         {isOrganizer ? (
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             <View style={styles.organizerActions}>
+              {challenge.status === 'pending' && (
+                <TouchableOpacity
+                  style={[styles.organizerActionButton, { backgroundColor: C.warning, marginBottom: 8 }]}
+                  onPress={() => setEditChallengeModalVisible(true)}
+                >
+                  <MaterialIcons name="edit" size={20} color="#fff" />
+                  <Text style={styles.organizerActionText}>Edit Competition</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
                 style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
                 onPress={async () => {
@@ -657,7 +617,6 @@ export default function ChallengeDetailScreen() {
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
               <>
-                {/* Only show Join button if not ended */}
                 {new Date() <= new Date(challenge.end_date) ? (
                   <TouchableOpacity
                     style={[
@@ -714,6 +673,96 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
+        {/* Challenge Details */}
+        <View style={[styles.detailsSection, { backgroundColor: C.card }]}>
+          {challenge.description && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Description</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.description}</Text>
+            </View>
+          )}
+
+          <View style={styles.detailBlock}>
+            <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Duration</Text>
+            <Text style={[styles.detailText, { color: C.text }]}>
+              {(() => {
+                const dateInfo = getDateInfo();
+                if (!dateInfo) return null;
+                return (
+                  <>
+                    <Text>{dateInfo.label} {formatDate(dateInfo.date.toISOString())}</Text>
+                    {dateInfo.showEndDate && (
+                      <Text> • Ends {formatDate(dateInfo.endDate.toISOString())}</Text>
+                    )}
+                  </>
+                );
+              })()}
+            </Text>
+          </View>
+
+          {challenge.has_rewards && challenge.rewards && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Rewards</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.rewards}</Text>
+            </View>
+          )}
+
+          {challenge.scoring_criteria && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Scoring Criteria</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.scoring_criteria}</Text>
+            </View>
+          )}
+
+          {(challenge.contact_email || (challenge as any).contact_email) && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Contact email</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.contact_email || (challenge as any).contact_email}</Text>
+            </View>
+          )}
+
+          {(challenge.eligibility_criteria || (challenge as any).eligibility_criteria) && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Participant eligibility</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.eligibility_criteria || (challenge as any).eligibility_criteria}</Text>
+            </View>
+          )}
+
+          {(challenge.what_you_do || (challenge as any).what_you_do) && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>What you do (organizer)</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>{challenge.what_you_do || (challenge as any).what_you_do}</Text>
+            </View>
+          )}
+
+          {challenge.organizer && (
+            <View style={styles.organizerSection}>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Organizer</Text>
+              <TouchableOpacity
+                style={styles.organizerInfo}
+                onPress={() => router.push({
+                  pathname: '/user/[id]',
+                  params: { id: challenge.organizer.id }
+                })}
+              >
+                <Avatar
+                  user={challenge.organizer}
+                  size={40}
+                  style={styles.organizerAvatar}
+                />
+                <View>
+                  <Text style={[styles.organizerName, { color: C.text }]}>
+                    {challenge.organizer.display_name || challenge.organizer.username}
+                  </Text>
+                  <Text style={[styles.organizerUsername, { color: C.textSecondary }]}>
+                    @{challenge.organizer.username}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         {/* Tabs */}
         <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
           <View style={styles.tabsContainer}>
@@ -761,6 +810,48 @@ export default function ChallengeDetailScreen() {
             )}
           </View>
         </View>
+
+        {/* Winners (Top 10) - only when ended and on posts tab, sorted by likes */}
+        {activeTab === 'posts' && new Date() > new Date(challenge.end_date) && rawChallengePosts.length > 0 && (
+          <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
+            <Text style={[styles.winnersTitle, { color: C.text }]}>Winners (Top 10)</Text>
+            <View style={styles.winnersGrid}>
+              {[...rawChallengePosts]
+                .sort((a, b) => (b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0) - (a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0))
+                .slice(0, 10)
+                .map((cp: any, idx: number) => {
+                const post = cp.post || cp;
+                const likesDuring = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+                const thumbUrl = getThumbnailUrl(post) || getPostMediaUrl(post) || '';
+                return (
+                  <TouchableOpacity
+                    key={post?.id || idx}
+                    style={styles.winnerCard}
+                    onPress={() => {
+                      const openIndex = sortedPosts.findIndex((p: any) => p.id === post?.id);
+                      router.push({
+                        pathname: '/challenges/[id]/posts',
+                        params: { id: challenge.id, open: '1', openIndex: String(openIndex >= 0 ? openIndex : 0) }
+                      });
+                    }}
+                  >
+                    <View style={styles.winnerRank}>
+                      <Text style={styles.winnerRankText}>#{idx + 1}</Text>
+                    </View>
+                    {thumbUrl ? (
+                      <Image source={{ uri: thumbUrl }} style={styles.winnerThumb} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.winnerThumb, styles.winnerThumbPlaceholder]}>
+                        <MaterialIcons name="video-library" size={20} color={C.textSecondary} />
+                      </View>
+                    )}
+                    <Text style={[styles.winnerLikes, { color: C.textSecondary }]}>{likesDuring} likes</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
       </>
     );
   };
@@ -850,8 +941,8 @@ export default function ChallengeDetailScreen() {
     );
   }
 
-  // Determine data source based on active tab
-  const data = activeTab === 'posts' ? posts : allParticipants;
+  // Determine data source based on active tab (posts sorted by likes when challenge ended)
+  const data = activeTab === 'posts' ? sortedPosts : allParticipants;
   const isLoading = activeTab === 'posts' ? postsLoading : loadingAllParticipants;
 
   return (
@@ -939,13 +1030,13 @@ export default function ChallengeDetailScreen() {
               <Feather name="x" size={28} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.positionText}>
-              {fullscreenIndex + 1} / {posts.length}
+              {fullscreenIndex + 1} / {sortedPosts.length}
             </Text>
           </View>
 
           <FlatList
             ref={fullscreenListRef}
-            data={posts}
+            data={sortedPosts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
@@ -965,6 +1056,9 @@ export default function ChallengeDetailScreen() {
                   isActive={isActive}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
+                  likesDuringChallenge={likesDuringChallengeMap[item.id]}
+                  isChallengeEnded={isChallengeEnded}
+                  challengeName={challenge?.name}
                 />
               );
             }}
@@ -977,7 +1071,7 @@ export default function ChallengeDetailScreen() {
             showsVerticalScrollIndicator={false}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
-              setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
+              setFullscreenIndex(Math.max(0, Math.min(index, sortedPosts.length - 1)));
             }}
             initialScrollIndex={fullscreenIndex}
             getItemLayout={(_, index) => ({
@@ -1067,6 +1161,33 @@ export default function ChallengeDetailScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Edit Competition Modal - only for pending challenges; reuses CreateChallengeModal with PUT */}
+      <CreateChallengeModal
+        visible={editChallengeModalVisible}
+        onClose={() => setEditChallengeModalVisible(false)}
+        onCreated={() => {}}
+        editChallenge={challenge?.status === 'pending' ? {
+          id: challenge.id,
+          name: challenge.name,
+          description: challenge.description ?? undefined,
+          has_rewards: challenge.has_rewards,
+          rewards: challenge.rewards ?? undefined,
+          organizer_name: challenge.organizer_name,
+          organizer_contact: challenge.organizer_contact ?? undefined,
+          contact_email: (challenge as any).contact_email ?? undefined,
+          eligibility_criteria: (challenge as any).eligibility_criteria ?? undefined,
+          what_you_do: (challenge as any).what_you_do ?? undefined,
+          start_date: challenge.start_date,
+          end_date: challenge.end_date,
+          min_content_per_account: (challenge as any).min_content_per_account ?? 1,
+          scoring_criteria: (challenge as any).scoring_criteria ?? undefined,
+        } : null}
+        onUpdated={() => {
+          setEditChallengeModalVisible(false);
+          fetchChallenge();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1301,6 +1422,87 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 15,
+    fontWeight: '600',
+  },
+  winnersSection: {
+    padding: 16,
+    borderTopWidth: 1,
+  },
+  winnersTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  winnersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'flex-start',
+  },
+  winnerCard: {
+    width: (screenWidth - 32 - 24) / 5,
+    alignItems: 'center',
+  },
+  winnerRank: {
+    position: 'absolute',
+    top: 2,
+    left: 2,
+    zIndex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  winnerRankText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  winnerThumb: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 8,
+    backgroundColor: '#222',
+  },
+  winnerThumbPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  winnerLikes: {
+    fontSize: 10,
+    marginTop: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  editModalContent: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 24,
+  },
+  editModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  editModalHint: {
+    fontSize: 14,
+    marginBottom: 20,
+  },
+  editModalButton: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  editModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
     fontWeight: '600',
   },
   postsGrid: {

@@ -73,6 +73,8 @@ export default function ChallengePostsScreen() {
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
+  const [likesDuringChallengeMap, setLikesDuringChallengeMap] = useState<Record<string, number>>({});
+  const [isChallengeEnded, setIsChallengeEnded] = useState(false);
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
@@ -114,8 +116,25 @@ export default function ChallengePostsScreen() {
       const response = await challengesApi.getPosts(id as string, page, limit);
 
       if (response.status === 'success') {
-        // API client already normalizes posts (extracts item.post)
-        const postsList = filterHlsReady(response.data?.posts || []) as Post[];
+        let postsList = filterHlsReady(response.data?.posts || []) as Post[];
+        const rawItems = response.data?.rawItems || [];
+        const orderedBy = response.data?.ordered_by;
+        const ended = orderedBy === 'likes_at_challenge_end';
+
+        const map: Record<string, number> = {};
+        rawItems.forEach((cp: any) => {
+          const postId = cp.post?.id || cp.post_id;
+          const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+          if (postId) map[postId] = likes;
+        });
+
+        if (!ended && page === 1) {
+          postsList = [...postsList].sort((a, b) => {
+            const la = (a as any).likes ?? (a as any).like_count ?? 0;
+            const lb = (b as any).likes ?? (b as any).like_count ?? 0;
+            return Number(lb) - Number(la);
+          });
+        }
 
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsList.length === limit;
@@ -123,8 +142,11 @@ export default function ChallengePostsScreen() {
 
         if (page === 1 || refresh) {
           setPosts(postsList);
+          setLikesDuringChallengeMap(map);
+          setIsChallengeEnded(ended);
         } else {
           setPosts(prev => [...prev, ...postsList]);
+          setLikesDuringChallengeMap(prev => ({ ...prev, ...map }));
         }
       } else {
         if (page === 1) {
@@ -411,6 +433,8 @@ export default function ChallengePostsScreen() {
                   isActive={isActive}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
+                  likesDuringChallenge={likesDuringChallengeMap[item.id]}
+                  isChallengeEnded={isChallengeEnded}
                 />
               );
             }}

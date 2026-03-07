@@ -420,6 +420,10 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                         </Text>
                     )}
                 </View>
+                <View style={styles.tapForDetailsRow}>
+                    <Text style={styles.tapForDetailsText}>Click here for more details</Text>
+                    <Feather name="chevron-right" size={14} color="#60a5fa" />
+                </View>
             </TouchableOpacity>
         );
     };
@@ -739,6 +743,20 @@ const styles = StyleSheet.create({
     dateText: {
         color: '#666',
         fontSize: 12,
+    },
+    tapForDetailsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 10,
+        paddingTop: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#2a2a2a',
+    },
+    tapForDetailsText: {
+        color: '#60a5fa',
+        fontSize: 13,
+        fontWeight: '600',
     },
     emptyContainer: {
         alignItems: 'center',

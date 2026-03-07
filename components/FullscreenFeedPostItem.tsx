@@ -15,6 +15,7 @@ import {
   Alert,
   Platform,
   PanResponder,
+  Modal,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -71,6 +72,10 @@ export interface FullscreenFeedPostItemProps {
   availableHeight: number;
   /** When false, Report button is hidden (e.g. on your own profile feed). Default true. */
   showReportButton?: boolean;
+  /** Challenge context: show "Best" (likes during competition) button and popup. */
+  likesDuringChallenge?: number;
+  isChallengeEnded?: boolean;
+  challengeName?: string;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -88,7 +93,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   shouldPreload,
   availableHeight,
   showReportButton = true,
+  likesDuringChallenge,
+  isChallengeEnded,
+  challengeName,
 }) => {
+  const [showBestModal, setShowBestModal] = useState(false);
+  const showBestButton = likesDuringChallenge !== undefined && likesDuringChallenge !== null;
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -434,6 +444,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             )}
           </TouchableOpacity>
 
+          {showBestButton && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => setShowBestModal(true)}
+            >
+              <Feather name="award" size={22} color="#fbbf24" />
+              <Text style={styles.actionCount}>{formatNumber(likesDuringChallenge ?? 0)}</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
               <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
@@ -506,6 +526,26 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         onConfirm={handleUnfollowConfirm}
         onCancel={() => setShowUnfollowModal(false)}
       />
+
+      <Modal visible={showBestModal} transparent animationType="fade">
+        <Pressable style={styles.bestModalOverlay} onPress={() => setShowBestModal(false)}>
+          <View style={styles.bestModalContent}>
+            <View style={styles.bestModalIconWrap}>
+              <Feather name="award" size={32} color="#fbbf24" />
+            </View>
+            <Text style={styles.bestModalTitle}>Likes during competition</Text>
+            <Text style={styles.bestModalMessage}>
+              This is the number of likes this post received during the competition before it ended: {formatNumber(likesDuringChallenge ?? 0)}.
+            </Text>
+            {isChallengeEnded && (
+              <Text style={styles.bestModalEnded}>The competition has ended; this count no longer changes.</Text>
+            )}
+            <TouchableOpacity style={styles.bestModalButton} onPress={() => setShowBestModal(false)}>
+              <Text style={styles.bestModalButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -518,7 +558,9 @@ function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPo
     prev.isLiked === next.isLiked &&
     prev.isFollowing === next.isFollowing &&
     prev.availableHeight === next.availableHeight &&
-    (prev.showReportButton ?? true) === (next.showReportButton ?? true)
+    (prev.showReportButton ?? true) === (next.showReportButton ?? true) &&
+    (prev.likesDuringChallenge ?? -1) === (next.likesDuringChallenge ?? -1) &&
+    prev.isChallengeEnded === next.isChallengeEnded
   );
 }
 
@@ -663,6 +705,57 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  bestModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  bestModalContent: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 24,
+    alignItems: 'center',
+  },
+  bestModalIconWrap: {
+    marginBottom: 12,
+  },
+  bestModalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  bestModalMessage: {
+    color: '#d1d5db',
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 8,
+    lineHeight: 22,
+  },
+  bestModalEnded: {
+    color: '#9ca3af',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  bestModalButton: {
+    backgroundColor: '#60a5fa',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 10,
+  },
+  bestModalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   likeAnimationOverlay: {
     position: 'absolute',
