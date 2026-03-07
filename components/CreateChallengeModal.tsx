@@ -404,7 +404,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.name ? <Text style={styles.errorText}>{fieldErrors.name}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.description = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Description *</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.description && styles.inputError]}
@@ -418,7 +418,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.description ? <Text style={styles.errorText}>{fieldErrors.description}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.organizer_name = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Organizer Name *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.organizer_name && styles.inputError]}
@@ -430,7 +430,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.organizer_contact = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Contact phone *</Text>
                             <View style={styles.phoneRow}>
                                 <TouchableOpacity
@@ -456,7 +456,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.contact_email = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Contact email *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.contact_email && styles.inputError]}
@@ -490,7 +490,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         </View>
 
                         {formData.has_rewards && (
-                            <View style={styles.inputGroup}>
+                            <View ref={(el) => { fieldRefs.current.rewards = el; }} style={styles.inputGroup}>
                                 <Text style={styles.label}>Rewards Details *</Text>
                                 <TextInput
                                     style={[styles.input, fieldErrors.rewards && styles.inputError]}
@@ -504,7 +504,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         )}
 
                         <View style={styles.row}>
-                            <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                            <View ref={(el) => { fieldRefs.current.start_date = el; }} style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
                                 <Text style={styles.label}>Start Date *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.start_date && styles.inputError]}
@@ -532,7 +532,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                     </View>
                                 )}
                             </View>
-                            <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                            <View ref={(el) => { fieldRefs.current.end_date = el; }} style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
                                 <Text style={styles.label}>End Date *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.end_date && styles.inputError]}
@@ -562,7 +562,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             </View>
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.eligibility_criteria = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Participant eligibility criteria</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.eligibility_criteria && styles.inputError]}
@@ -576,7 +576,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.eligibility_criteria ? <Text style={styles.errorText}>{fieldErrors.eligibility_criteria}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.what_you_do = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>What you do (organizer)</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
@@ -590,7 +590,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.what_you_do ? <Text style={styles.errorText}>{fieldErrors.what_you_do}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.scoring_criteria = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Scoring Criteria</Text>
                             <TextInput
                                 style={[styles.input, styles.textArea, fieldErrors.scoring_criteria && styles.inputError]}
@@ -604,7 +604,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.scoring_criteria ? <Text style={styles.errorText}>{fieldErrors.scoring_criteria}</Text> : null}
                         </View>
 
-                        <View style={styles.inputGroup}>
+                        <View ref={(el) => { fieldRefs.current.min_content_per_account = el; }} style={styles.inputGroup}>
                             <Text style={styles.label}>Min content per account *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.min_content_per_account && styles.inputError]}
@@ -634,6 +634,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         </View>
 
                         <View style={{ height: 40 }} />
+                        </View>
                     </ScrollView>
                 </KeyboardAvoidingView>
             </View>
