@@ -1328,8 +1328,8 @@ export default function CreatePostScreen() {
             }
           );
           const result = await uploadTask.uploadAsync();
-          if (result.status < 200 || result.status >= 300) {
-            throw new Error(`R2 upload failed with status ${result.status}`);
+          if (!result || result.status < 200 || result.status >= 300) {
+            throw new Error(result ? `R2 upload failed with status ${result.status}` : 'R2 upload failed');
           }
           console.log('[Upload] R2 upload complete (streamed from file)');
         } catch (uploadError: any) {
