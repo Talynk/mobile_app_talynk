@@ -17,7 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, challengesApi } from '@/lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -25,6 +25,7 @@ import { uploadNotificationService } from '@/lib/notification-service';
 import { categoriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/lib/auth-context';
+import { useCreateFocus } from '@/lib/create-focus-context';
 import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
@@ -276,6 +277,15 @@ export default function CreatePostScreen() {
       isMountedRef.current = false;
     };
   }, []);
+
+  // Signal Create tab focus so feed screens can reduce video preload (avoid OOM during record/upload)
+  const { setCreateFocused } = useCreateFocus();
+  useFocusEffect(
+    useCallback(() => {
+      setCreateFocused(true);
+      return () => setCreateFocused(false);
+    }, [setCreateFocused])
+  );
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
@@ -793,9 +803,10 @@ export default function CreatePostScreen() {
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
       } else {
-        recordingOptions.maxFileSize = 80 * 1024 * 1024;
+        // Conservative Android profile to avoid OOM on low-RAM devices (TECNO, Redmi, etc.)
+        recordingOptions.maxFileSize = 50 * 1024 * 1024; // 50 MB cap
         recordingOptions.extension = '.mp4';
-        recordingOptions.videoBitrate = 4000000;
+        recordingOptions.videoBitrate = 2500000; // 2.5 Mbps (was 4 Mbps)
         recordingOptions.audioBitrate = 256000;
         recordingOptions.audioSampleRate = 48000;
         recordingOptions.audioChannels = 2;
@@ -1294,52 +1305,33 @@ export default function CreatePostScreen() {
         const { postId, uploadUrl } = createRes.data;
         console.log('[Upload] Got signed URL for post:', postId);
 
-        // Step 2: Upload video directly to R2 via signed URL
+        // Step 2: Upload video directly to R2 via signed URL (stream from file — no full-file blob to avoid OOM on low-RAM devices)
         setUploadProgress(5);
         await uploadNotificationService.showUploadProgress(5, fileName);
 
         try {
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('PUT', uploadUrl);
-            xhr.setRequestHeader('Content-Type', 'video/mp4');
-
-            let lastLoggedPercent = -10;
-            xhr.upload.onprogress = async (event) => {
-              if (event.lengthComputable) {
-                // Map upload progress to 5-85% range
-                const rawPercent = Math.round((event.loaded / event.total) * 100);
+          const uploadTask = FileSystem.createUploadTask(
+            uploadUrl,
+            mediaUri,
+            {
+              httpMethod: 'PUT',
+              uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+              headers: { 'Content-Type': 'video/mp4' },
+            },
+            ({ totalBytesSent, totalBytesExpectedToSend }) => {
+              if (totalBytesExpectedToSend > 0) {
+                const rawPercent = Math.round((totalBytesSent / totalBytesExpectedToSend) * 100);
                 const scaledPercent = 5 + Math.round(rawPercent * 0.80);
                 setUploadProgress(Math.min(scaledPercent, 85));
-                await uploadNotificationService.showUploadProgress(Math.min(scaledPercent, 85), fileName);
-
-                if (rawPercent - lastLoggedPercent >= 10 || rawPercent === 100) {
-                  console.log(`[Upload] R2 upload: ${rawPercent}% (display: ${scaledPercent}%)`);
-                  lastLoggedPercent = rawPercent;
-                }
+                uploadNotificationService.showUploadProgress(Math.min(scaledPercent, 85), fileName);
               }
-            };
-
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-              } else {
-                reject(new Error(`R2 upload failed with status ${xhr.status}`));
-              }
-            };
-            xhr.onerror = () => reject(new Error('R2 upload network error'));
-            xhr.ontimeout = () => reject(new Error('R2 upload timeout'));
-
-            // CRITICAL FIX: In React Native, we can't create Blobs from ArrayBuffer.
-            // Instead, use fetch() on the local file URI to get a blob — RN's fetch supports file:// URIs.
-            fetch(mediaUri)
-              .then(response => response.blob())
-              .then(blob => {
-                console.log(`[Upload] Sending blob to R2, size: ${blob.size} bytes`);
-                xhr.send(blob);
-              })
-              .catch(reject);
-          });
+            }
+          );
+          const result = await uploadTask.uploadAsync();
+          if (result.status < 200 || result.status >= 300) {
+            throw new Error(`R2 upload failed with status ${result.status}`);
+          }
+          console.log('[Upload] R2 upload complete (streamed from file)');
         } catch (uploadError: any) {
           console.error('[Upload] R2 upload failed:', uploadError.message);
           setUploading(false);
@@ -1929,6 +1921,8 @@ export default function CreatePostScreen() {
                     autoCorrect
                     returnKeyType="default"
                     blurOnSubmit={false}
+                    autoComplete="off"
+                    importantForAutofill="noExcludeDescendants"
                   />
                   {caption.length > 0 && (
                     <View style={styles.captionFooter}>

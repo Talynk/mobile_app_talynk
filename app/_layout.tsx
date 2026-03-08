@@ -21,6 +21,7 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { imageCache } from '@/lib/utils/image-cache';
 import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
+import { CreateFocusProvider } from '@/lib/create-focus-context';
 import NetworkBanner from '@/components/NetworkBanner';
 
 export {
@@ -44,6 +45,19 @@ function initSentryOnce() {
   Sentry.init({
     dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
     sendDefaultPii: true,
+    beforeSend(event, hint) {
+      const ex = hint?.originalException as Error | undefined;
+      const msg = (event.message || ex?.message || '').toString();
+      if (/ExpoAsset\.downloadAsync|Unable to download asset from url|Metro|8081\/assets/.test(msg)) return null;
+      if (/App react context shouldn't be created before|DevLauncherAppLoader/.test(msg)) return null;
+      if (event.environment === 'development' && /ExpoAsset|MaterialIcons\.ttf|Ionicons\.ttf/.test(msg)) return null;
+      return event;
+    },
+    ignoreErrors: [
+      'ExpoAsset.downloadAsync',
+      'Unable to download asset from url',
+      'App react context shouldn\'t be created before',
+    ],
   });
 }
 
@@ -169,6 +183,7 @@ function RootLayoutNav() {
       <CacheProvider>
         <MuteProvider>
           <AuthProvider>
+            <CreateFocusProvider>
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
                 <Stack
@@ -191,6 +206,7 @@ function RootLayoutNav() {
               </View>
               <StatusBar style="light" />
             </ThemeProvider>
+            </CreateFocusProvider>
           </AuthProvider>
         </MuteProvider>
       </CacheProvider>

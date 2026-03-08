@@ -32,6 +32,7 @@ import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { useCreateFocus } from '@/lib/create-focus-context';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -277,6 +278,7 @@ export default function ChallengePostsScreen() {
   };
 
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const { isCreateFocused } = useCreateFocus();
 
   // PostCard component for grid display — STATIC ONLY, no video playback
   const PostCard = ({ item, index }: { item: Post; index: number }) => {
@@ -417,7 +419,7 @@ export default function ChallengePostsScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -1 && distance <= 3;
+              const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 2;
               return (
                 <FullscreenFeedPostItem
                   item={item}

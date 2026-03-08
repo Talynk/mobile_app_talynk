@@ -32,6 +32,7 @@ import CreateChallengeModal from '@/components/CreateChallengeModal';
 
 import { getPostMediaUrl } from '@/lib/utils/file-url';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
+import { useCreateFocus } from '@/lib/create-focus-context';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -59,6 +60,7 @@ export default function FeedScreen() {
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const flatListRef = useRef<FlatList<Post>>(null);
   const { user } = useAuth();
+  const { isCreateFocused } = useCreateFocus();
   const { followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
@@ -281,7 +283,7 @@ export default function FeedScreen() {
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
     const distance = index - currentIndex;
-    const shouldPreload = !isActive && distance >= -1 && distance <= 3;
+    const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 2;
 
     const isLiked = item.is_liked ?? likedPosts.includes(item.id);
     const isFollowing = item.is_following_author ?? followedUsers.has(item.user?.id || '');
@@ -303,7 +305,7 @@ export default function FeedScreen() {
         availableHeight={availableHeight}
       />
     );
-  }, [isScreenFocused, currentIndex, likedPosts, followedUsers, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+  }, [isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

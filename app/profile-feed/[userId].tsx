@@ -39,6 +39,7 @@ import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
+import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -148,6 +149,7 @@ function ProfileFeedContent({
   const { syncLikedPostsFromServer, followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const { isCreateFocused } = useCreateFocus();
   const insets = useSafeAreaInsets();
   const likesManager = useLikesManager();
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
@@ -722,7 +724,7 @@ function ProfileFeedContent({
           renderItem={({ item, index }) => {
             const isActive = isScreenFocused && currentIndex === index;
             const distanceFromActive = index - currentIndex;
-            const shouldPreload = !isActive && distanceFromActive >= -5 && distanceFromActive <= 3;
+            const shouldPreload = !isCreateFocused && !isActive && distanceFromActive >= -1 && distanceFromActive <= 2;
             return (
               <FullscreenFeedPostItem
                 item={item}

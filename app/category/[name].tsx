@@ -31,6 +31,7 @@ import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
+import { useCreateFocus } from '@/lib/create-focus-context';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 
 const POSTS_PER_PAGE = 20;
@@ -71,6 +72,7 @@ export default function CategoryScreen() {
   const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
+  const { isCreateFocused } = useCreateFocus();
   const queryClient = useQueryClient();
 
   const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
@@ -356,7 +358,7 @@ export default function CategoryScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -1 && distance <= 3;
+              const shouldPreload = !isActive && distance >= -1 && distance <= 2;
               return (
                 <FullscreenFeedPostItem
                   item={item}
