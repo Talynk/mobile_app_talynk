@@ -426,6 +426,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 12,
+    backgroundColor: '#000000',
   },
   backButton: {
     width: 40,

@@ -372,6 +372,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 12,
+    backgroundColor: '#000000',
   },
   backButton: {
     padding: 8,

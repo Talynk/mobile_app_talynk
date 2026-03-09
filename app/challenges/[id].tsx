@@ -48,6 +48,7 @@ const COLORS = {
     text: '#f3f4f6',
     textSecondary: '#9ca3af',
     primary: '#60a5fa',
+    detailLabel: '#7DD3FC', // light blue for section labels (Description, Duration, etc.)
     success: '#34d399',
     warning: '#fbbf24',
     error: '#f87171',
@@ -701,13 +702,13 @@ export default function ChallengeDetailScreen() {
         <View style={[styles.detailsSection, { backgroundColor: C.card }]}>
           {challenge.description && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Description</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Description</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.description}</Text>
             </View>
           )}
 
           <View style={styles.detailBlock}>
-            <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Duration</Text>
+            <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Duration</Text>
             <Text style={[styles.detailText, { color: C.text }]}>
               {(() => {
                 const dateInfo = getDateInfo();
@@ -726,42 +727,42 @@ export default function ChallengeDetailScreen() {
 
           {challenge.has_rewards && challenge.rewards && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Rewards</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Rewards</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.rewards}</Text>
             </View>
           )}
 
           {challenge.scoring_criteria && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Scoring Criteria</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Scoring Criteria</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.scoring_criteria}</Text>
             </View>
           )}
 
           {(challenge.contact_email || (challenge as any).contact_email) && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Contact email</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Contact email</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.contact_email || (challenge as any).contact_email}</Text>
             </View>
           )}
 
           {(challenge.eligibility_criteria || (challenge as any).eligibility_criteria) && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Participant eligibility</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Participant eligibility</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.eligibility_criteria || (challenge as any).eligibility_criteria}</Text>
             </View>
           )}
 
           {(challenge.what_you_do || (challenge as any).what_you_do) && (
             <View style={styles.detailBlock}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>What you do (organizer)</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>About the organizer</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.what_you_do || (challenge as any).what_you_do}</Text>
             </View>
           )}
 
           {challenge.organizer && (
             <View style={styles.organizerSection}>
-              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Organizer</Text>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Organizer</Text>
               <TouchableOpacity
                 style={styles.organizerInfo}
                 onPress={() => router.push({

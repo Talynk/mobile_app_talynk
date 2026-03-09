@@ -1698,15 +1698,18 @@ export default function CreatePostScreen() {
         </View>
       )}
 
-      {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS */}
+      {/* STAGE 1: FULL STUDIO (CAMERA) – NO FORMS - fixed header so content stays below status bar */}
       {!currentVideoUri && !capturedImageUri && (
-        <View style={[styles.studioContainer, { paddingTop: insets.top + 16 }]}>
-          <View style={styles.studioHeader}>
-            <Text style={[styles.studioTitle, { color: C.text }]}>Studio</Text>
-            <Text style={[styles.studioSubtitle, { color: C.textSecondary }]}>
-              Record a video up to 2 minutes maximum or take a picture. Add details after.
-            </Text>
+        <View style={{ flex: 1, backgroundColor: C.background }}>
+          <View style={[styles.createFixedHeader, { paddingTop: insets.top + 8, paddingBottom: 12, borderBottomColor: C.border, backgroundColor: C.background }]}>
+            <Text style={[styles.createFixedHeaderTitle, { color: C.text }]}>Studio</Text>
           </View>
+          <View style={[styles.studioContainer, { flex: 1 }]}>
+            <View style={styles.studioHeader}>
+              <Text style={[styles.studioSubtitle, { color: C.textSecondary }]}>
+                Record a video up to 2 minutes maximum or take a picture. Add details after.
+              </Text>
+            </View>
 
           <View style={styles.studioBody}>
             <MaterialIcons name="videocam" size={72} color={C.primary} />
@@ -1739,25 +1742,30 @@ export default function CreatePostScreen() {
               Authentic content only
             </Text>
           </View>
+          </View>
         </View>
       )}
 
-      {/* STAGE 2: DETAILS FORM (AFTER MEDIA CONFIRMED) */}
+      {/* STAGE 2: DETAILS FORM (AFTER MEDIA CONFIRMED) - fixed header so content scrolls under it */}
       {currentMediaUri && (
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 20 : 0}
-        >
-          <ScrollView
-            style={[styles.scrollView, { backgroundColor: C.background }]}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            nestedScrollEnabled={true}
+        <View style={{ flex: 1, backgroundColor: C.background }}>
+          <View style={[styles.createFixedHeader, { paddingTop: insets.top + 8, paddingBottom: 12, borderBottomColor: C.border, backgroundColor: C.background }]}>
+            <Text style={[styles.createFixedHeaderTitle, { color: C.text }]}>New Post</Text>
+          </View>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
-            <View style={[styles.videoPreviewSection, { paddingTop: insets.top + 8 }]}>
+            <ScrollView
+              style={[styles.scrollView, { backgroundColor: C.background }]}
+              contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              nestedScrollEnabled={true}
+            >
+              <View style={styles.videoPreviewSection}>
               <View style={styles.videoPreviewContainer}>
                 {currentVideoUri ? (
                   <>
@@ -2330,7 +2338,8 @@ export default function CreatePostScreen() {
               <View style={{ height: insets.bottom + 20 }} />
             </View>
           </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       )}
 
       <Modal visible={draftReplaceModalVisible} transparent animationType="slide">
@@ -2424,6 +2433,15 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
     flexGrow: 1,
+  },
+  createFixedHeader: {
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
+    borderBottomWidth: 1,
+  },
+  createFixedHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   studioContainer: {
     flex: 1,

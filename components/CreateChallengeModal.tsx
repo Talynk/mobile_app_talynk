@@ -426,6 +426,20 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.organizer_name ? <Text style={styles.errorText}>{fieldErrors.organizer_name}</Text> : null}
                         </View>
 
+                        <View onLayout={saveFieldLayout('what_you_do')} style={styles.inputGroup}>
+                            <Text style={styles.label}>About the organizer</Text>
+                            <TextInput
+                                style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
+                                placeholder="Describe your products or services"
+                                placeholderTextColor="#9ca3af"
+                                multiline
+                                numberOfLines={3}
+                                value={formData.what_you_do}
+                                onChangeText={(text) => updateField('what_you_do', text)}
+                            />
+                            {fieldErrors.what_you_do ? <Text style={styles.errorText}>{fieldErrors.what_you_do}</Text> : null}
+                        </View>
+
                         <View onLayout={saveFieldLayout('organizer_contact')} style={styles.inputGroup}>
                             <Text style={styles.label}>Contact phone *</Text>
                             <View style={styles.phoneRow}>
@@ -570,20 +584,6 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                 onChangeText={(text) => updateField('eligibility_criteria', text)}
                             />
                             {fieldErrors.eligibility_criteria ? <Text style={styles.errorText}>{fieldErrors.eligibility_criteria}</Text> : null}
-                        </View>
-
-                        <View onLayout={saveFieldLayout('what_you_do')} style={styles.inputGroup}>
-                            <Text style={styles.label}>What you do (organizer)</Text>
-                            <TextInput
-                                style={[styles.input, styles.textArea, fieldErrors.what_you_do && styles.inputError]}
-                                placeholder="Describe your products or services (for participants)"
-                                placeholderTextColor="#9ca3af"
-                                multiline
-                                numberOfLines={3}
-                                value={formData.what_you_do}
-                                onChangeText={(text) => updateField('what_you_do', text)}
-                            />
-                            {fieldErrors.what_you_do ? <Text style={styles.errorText}>{fieldErrors.what_you_do}</Text> : null}
                         </View>
 
                         <View onLayout={saveFieldLayout('scoring_criteria')} style={styles.inputGroup}>

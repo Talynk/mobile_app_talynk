@@ -756,6 +756,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 12,
+    backgroundColor: '#000000',
   },
   headerRow: {
     flexDirection: 'row',
