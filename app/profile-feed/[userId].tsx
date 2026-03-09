@@ -55,11 +55,12 @@ export default function ProfileFeedScreen() {
     countryId?: string;
     postsData?: string;
   }>();
+  const resolvedUserId = typeof params.userId === 'string' ? params.userId : '';
 
   return (
     <RealtimeProvider>
       <ProfileFeedContent
-        userId={(params.userId ?? params[0]) as string}
+        userId={resolvedUserId}
         initialPostId={params.initialPostId as string}
         status={params.status as string}
         initialPostData={params.initialPostData as string}
@@ -724,7 +725,7 @@ function ProfileFeedContent({
           renderItem={({ item, index }) => {
             const isActive = isScreenFocused && currentIndex === index;
             const distanceFromActive = index - currentIndex;
-            const shouldPreload = !isCreateFocused && !isActive && distanceFromActive >= -1 && distanceFromActive <= 2;
+            const shouldPreload = !isCreateFocused && !isActive && distanceFromActive >= -1 && distanceFromActive <= 1;
             return (
               <FullscreenFeedPostItem
                 item={item}
@@ -1110,4 +1111,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

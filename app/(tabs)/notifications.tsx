@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { Notification } from '@/types';
 import { useNotificationBadge } from '@/lib/notification-badge-context';
+import { frontendNotifications } from '@/lib/frontend-notifications';
+import { localNotificationEvents } from '@/lib/local-notification-events';
 
 const NOTIFICATION_TABS = [
   { key: 'all', label: 'All' },
@@ -81,6 +83,14 @@ export default function NotificationsScreen() {
     return unsubscribe;
   }, [onNewNotification, user]);
 
+  useEffect(() => {
+    if (!user) return;
+    return localNotificationEvents.onChanged(() => {
+      loadNotifications();
+      refreshCount();
+    });
+  }, [user, refreshCount]);
+
   useRefetchOnReconnect(() => loadNotifications());
 
   const loadNotifications = async () => {
@@ -89,7 +99,10 @@ export default function NotificationsScreen() {
     try {
       console.log('[Notifications] 📥 Loading notifications for user:', user.username);
       setLoading(true);
-      const response = await notificationsApi.getAll();
+      const [response, localItems] = await Promise.all([
+        notificationsApi.getAll(),
+        frontendNotifications.getAll(user.id),
+      ]);
 
       console.log('[Notifications] 📦 API Response:', {
         status: response.status,
@@ -118,9 +131,13 @@ export default function NotificationsScreen() {
           types: normalized.map(n => n.type),
         });
 
-        setNotifications(normalized);
+        setNotifications(
+          [...normalized, ...localItems].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+        );
       } else {
-        console.warn('[Notifications] ⚠️ Unexpected response format:', response);
+        setNotifications(localItems);
       }
     } catch (error) {
       console.error('[Notifications] ❌ Error loading notifications:', error);
@@ -158,11 +175,20 @@ export default function NotificationsScreen() {
           console.log('[Notifications] ✅ Marked all as read. Updated count:', updated.length);
           return updated;
         });
+        await frontendNotifications.markAllAsRead(user.id);
         // Refresh badge count
         refreshCount();
       }
+      if (notifications.some((notification) => notification.type === 'video_ready')) {
+        await frontendNotifications.markAllAsRead(user.id);
+      }
     } catch (error) {
       console.error('[Notifications] ❌ Error marking all notifications as read:', error);
+      if (notifications.some((notification) => notification.type === 'video_ready')) {
+        await frontendNotifications.markAllAsRead(user.id);
+        setNotifications(prev => prev.map(notification => ({ ...notification, isRead: true })));
+        refreshCount();
+      }
     }
   };
 
@@ -171,7 +197,16 @@ export default function NotificationsScreen() {
 
     try {
       console.log('[Notifications] 🗑️ Deleting notification:', notificationId);
-      const response = await notificationsApi.delete(notificationId);
+      const localNotification = notifications.find(
+        (notification) =>
+          notification.id.toString() === notificationId && notification.type === 'video_ready'
+      );
+      const response = localNotification
+        ? { status: 'success' as const }
+        : await notificationsApi.delete(notificationId);
+      if (localNotification) {
+        await frontendNotifications.delete(user.id, notificationId);
+      }
       console.log('[Notifications] 🗑️ Delete response:', response.status);
 
       if (response.status === 'success') {
@@ -208,11 +243,20 @@ export default function NotificationsScreen() {
       if (response.status === 'success') {
         setNotifications([]);
         console.log('[Notifications] ✅ All notifications deleted');
+        await frontendNotifications.deleteAll(user.id);
         // Refresh badge count
         refreshCount();
       }
+      if (notifications.some((notification) => notification.type === 'video_ready')) {
+        await frontendNotifications.deleteAll(user.id);
+      }
     } catch (error) {
       console.error('[Notifications] ❌ Error deleting all notifications:', error);
+      if (notifications.some((notification) => notification.type === 'video_ready')) {
+        await frontendNotifications.deleteAll(user.id);
+        setNotifications([]);
+        refreshCount();
+      }
     }
   };
 
@@ -264,6 +308,8 @@ export default function NotificationsScreen() {
       // View milestone notification
       case 'view_milestone':
         return { name: 'trending-up', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.15)' };
+      case 'video_ready':
+        return { name: 'play-circle-filled', color: '#60a5fa', bg: 'rgba(96, 165, 250, 0.15)' };
 
       // Comment report (admin only)
       case 'comment_report':
@@ -318,13 +364,19 @@ export default function NotificationsScreen() {
     // Mark as read when pressed
     if (!item.isRead) {
       console.log('[Notifications] 📝 Marking notification as read:', item.id);
-      notificationsApi.markAsRead(item.id.toString())
-        .then((response) => {
-          console.log('[Notifications] 📝 Mark as read response:', response.status);
-        })
-        .catch((error) => {
-          console.error('[Notifications] ❌ Error marking as read:', error);
+      if (item.type === 'video_ready') {
+        frontendNotifications.markAsRead(user!.id, item.id).catch((error) => {
+          console.error('[Notifications] ❌ Error marking local notification as read:', error);
         });
+      } else {
+        notificationsApi.markAsRead(item.id.toString())
+          .then((response) => {
+            console.log('[Notifications] 📝 Mark as read response:', response.status);
+          })
+          .catch((error) => {
+            console.error('[Notifications] ❌ Error marking as read:', error);
+          });
+      }
       setNotifications(prev =>
         prev.map(n => n.id === item.id ? { ...n, isRead: true } : n)
       );
@@ -352,6 +404,7 @@ export default function NotificationsScreen() {
       case 'post_status_update':
       case 'post_review':
       case 'view_milestone':
+      case 'video_ready':
         if (postId) {
           router.push({
             pathname: '/post/[id]',

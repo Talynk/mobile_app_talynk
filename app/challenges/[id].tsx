@@ -25,7 +25,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
-import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
@@ -58,6 +57,25 @@ const COLORS = {
     buttonText: '#fff',
   },
 };
+
+const getChallengeSortTimestamp = (post: any) =>
+  new Date(post?.createdAt || post?.uploadDate || post?.created_at || 0).getTime();
+
+const sortChallengePosts = (posts: any[], likesMap: Record<string, number>, useChallengeLikes: boolean) =>
+  [...posts].sort((a, b) => {
+    const likesA = useChallengeLikes
+      ? likesMap[a.id] ?? 0
+      : Number(a.likes ?? a.like_count ?? 0);
+    const likesB = useChallengeLikes
+      ? likesMap[b.id] ?? 0
+      : Number(b.likes ?? b.like_count ?? 0);
+
+    if (likesB !== likesA) {
+      return likesB - likesA;
+    }
+
+    return getChallengeSortTimestamp(b) - getChallengeSortTimestamp(a);
+  });
 
 export default function ChallengeDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -390,7 +408,7 @@ export default function ChallengeDetailScreen() {
 
   const sortedPosts = useMemo(() => {
     if (!isChallengeEnded || !rawChallengePosts.length) return posts;
-    return [...posts].sort((a, b) => (likesDuringChallengeMap[b.id] ?? 0) - (likesDuringChallengeMap[a.id] ?? 0));
+    return sortChallengePosts(posts, likesDuringChallengeMap, true);
   }, [posts, rawChallengePosts, isChallengeEnded, likesDuringChallengeMap]);
 
   const isOrganizer = challenge?.organizer_id === user?.id;
@@ -479,16 +497,9 @@ export default function ChallengeDetailScreen() {
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
 
-    // Use raw video_url (MP4) for thumbnail generation
-    const rawVideoUrl2 = getFileUrl(item.video_url) || '';
-    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      (isVideo && !serverThumbnail && rawVideoUrl2) ? rawVideoUrl2 : null,
-      fallbackImageUrl || '',
-      1000
-    );
-    // PRIORITY: Server thumbnail > generated thumbnail > fallback
+    // HLS-only: never fetch raw MP4 just to synthesize thumbnails in the challenge grid.
     const staticThumbnailUrl = isVideo
-      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
+      ? (serverThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
 
     return (
@@ -831,7 +842,12 @@ export default function ChallengeDetailScreen() {
             <Text style={[styles.winnersTitle, { color: C.text }]}>Winners (Top 10)</Text>
             <View style={styles.winnersGrid}>
               {[...rawChallengePosts]
-                .sort((a, b) => (b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0) - (a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0))
+                .sort((a, b) => {
+                  const likesA = a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0;
+                  const likesB = b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0;
+                  if (likesB !== likesA) return likesB - likesA;
+                  return getChallengeSortTimestamp(b.post || b) - getChallengeSortTimestamp(a.post || a);
+                })
                 .slice(0, 10)
                 .map((cp: any, idx: number) => {
                 const post = cp.post || cp;
@@ -1053,7 +1069,7 @@ export default function ChallengeDetailScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -3 && distance <= 3;
+              const shouldPreload = !isActive && distance >= -1 && distance <= 1;
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -1494,7 +1510,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 4,
   },
-  modalOverlay: {
+  editModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',

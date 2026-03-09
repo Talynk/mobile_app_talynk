@@ -32,6 +32,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getFileUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { filterHlsReady } from '@/lib/utils/post-filter';
+import { getChallengePostMeta } from '@/lib/utils/challenge-post';
+import { localNotificationEvents } from '@/lib/local-notification-events';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -53,6 +55,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
   const [imageError, setImageError] = useState(false);
 
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
+  const challengeMeta = getChallengePostMeta(post);
 
   // THUMBNAIL: video = server thumbnail_url or generated; image post = image URL (no HLS so use image directly)
   const serverThumbnail = getThumbnailUrl(post);
@@ -123,6 +126,21 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           </View>
         )}
 
+      {challengeMeta.isChallengePost && (
+        <LinearGradient
+          colors={['rgba(14, 116, 144, 0.95)', 'rgba(37, 99, 235, 0.95)']}
+          style={styles.challengePostBadge}
+        >
+          <Feather name="award" size={12} color="#fff" />
+          <View style={styles.challengePostBadgeTextWrap}>
+            <Text style={styles.challengePostBadgeLabel}>Competition</Text>
+            <Text style={styles.challengePostBadgeName} numberOfLines={1}>
+              {challengeMeta.challengeName || 'Challenge post'}
+            </Text>
+          </View>
+        </LinearGradient>
+      )}
+
       {/* Options button (3 dots) */}
       {onOptionsPress && (
         <TouchableOpacity
@@ -185,6 +203,33 @@ const formatNumber = (num: number): string => {
   }
   return num.toString();
 };
+
+const getPostTimestamp = (post: Post) =>
+  new Date(post.createdAt || post.uploadDate || (post as any).created_at || 0).getTime();
+
+const normalizeProfilePost = (post: any): Post => {
+  const videoUrl = post.video_url || post.videoUrl || '';
+  const fullUrl = post.fullUrl || post.hls_url || post.hlsUrl || videoUrl || post.mediaUrl || '';
+
+  return {
+    ...post,
+    video_url: videoUrl,
+    videoUrl: post.videoUrl || videoUrl,
+    fullUrl,
+    type: post.type || post.mediaType || (videoUrl ? 'video' : 'image'),
+    processing_status: post.processing_status || post.processingStatus,
+    processingStatus: post.processingStatus || post.processing_status,
+    hlsReady: post.hlsReady || false,
+    thumbnail_url: post.thumbnail_url || post.thumbnailUrl || '',
+    thumbnailUrl: post.thumbnailUrl || post.thumbnail_url || '',
+    thumbnail: post.thumbnail || post.thumbnail_url || post.thumbnailUrl || '',
+    likes: post.likes ?? post.likesCount ?? post.like_count ?? 0,
+    comments_count: post.comments_count ?? post.commentsCount ?? post.comment_count ?? 0,
+    createdAt: post.createdAt || post.created_at || post.uploadDate,
+  };
+};
+
+const sortPostsNewestFirst = (items: Post[]) => [...items].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
 
 const getStatusColor = (status: string) => {
   switch (status) {
@@ -331,6 +376,56 @@ export default function ProfileScreen() {
 
   useRefetchOnReconnect(() => { loadProfile(); loadPosts(); });
 
+  useEffect(() => {
+    if (!user?.id) return;
+    return localNotificationEvents.onVideoReady((payload) => {
+      if (payload.userId !== user.id) return;
+      loadPosts(false);
+      loadProfile(false);
+    });
+  }, [user?.id, activeTab]);
+
+  const enrichPostsWithPlaybackData = useCallback(async (items: Post[]) => {
+    const postsNeedingEnrichment = items.filter(
+      (post: any) => post.type === 'video' && post.hlsReady && !post.hls_url && !post.fullUrl?.includes('.m3u8')
+    );
+
+    if (!postsNeedingEnrichment.length) {
+      return items;
+    }
+
+    const enrichResults = await Promise.allSettled(
+      postsNeedingEnrichment.map((post) => postsApi.getById(post.id))
+    );
+
+    const enrichMap = new Map<string, any>();
+    enrichResults.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
+        enrichMap.set(postsNeedingEnrichment[index].id, result.value.data);
+      }
+    });
+
+    return items.map((post: any) => {
+      const enriched = enrichMap.get(post.id);
+      if (!enriched) return post;
+      return normalizeProfilePost({
+        ...post,
+        ...enriched,
+        user: enriched.user || post.user,
+      });
+    });
+  }, []);
+
+  const prepareVisiblePosts = useCallback(async (rawPosts: any[]) => {
+    const normalized = rawPosts.map(normalizeProfilePost);
+    const enriched = await enrichPostsWithPlaybackData(normalized);
+    const withoutProcessing = enriched.filter((post: any) => {
+      const processingStatus = post.processing_status ?? post.processingStatus ?? '';
+      return processingStatus !== 'uploading' && processingStatus !== 'pending' && processingStatus !== 'processing';
+    });
+    return sortPostsNewestFirst(filterHlsReady(withoutProcessing));
+  }, [enrichPostsWithPlaybackData]);
+
   const loadProfile = async (showLoading = false) => {
     try {
       setError(null);
@@ -419,10 +514,12 @@ export default function ProfileScreen() {
           });
         }
         if (response.status === 'success' && response.data?.posts) {
-          const draftList = response.data.posts;
+          const draftList = await prepareVisiblePosts(
+            response.data.posts.filter((post: any) => post.status === 'draft' || post.status === 'Draft')
+          );
           const draftById = new Map<string, any>();
           draftList.forEach((p: any) => { if (p?.id) draftById.set(p.id, p); });
-          setPosts(Array.from(draftById.values()));
+          setPosts(sortPostsNewestFirst(Array.from(draftById.values())));
           setTotalLikes(0);
           return;
         }
@@ -478,12 +575,7 @@ export default function ProfileScreen() {
             );
         }
 
-        // Production: do NOT show "Uploading..." / "Processing..." cards on profile. Only show completed posts.
-        const isStillProcessing = (p: any) => {
-          const status = p.processing_status ?? p.processingStatus ?? '';
-          return status === 'uploading' || status === 'pending' || status === 'processing';
-        };
-        filteredPosts = filteredPosts.filter((p: any) => !isStillProcessing(p));
+        filteredPosts = await prepareVisiblePosts(filteredPosts);
 
         // Deduplicate by post id (one card per post)
         const byId = new Map<string, any>();
@@ -506,12 +598,12 @@ export default function ProfileScreen() {
 
         // Override posts_count with PUBLISHED-ONLY count (exclude drafts/suspended)
         // so the profile stat shows only published posts, not total in DB
-        const publishedOnly = response.data.posts.filter((p: any) => {
-          const status = p.status;
-          const isPublished = status === 'active' || status === 'approved' || !status;
-          const isStillProcessing = (p.processing_status ?? p.processingStatus ?? '') === 'uploading' || (p.processing_status ?? p.processingStatus ?? '') === 'pending' || (p.processing_status ?? p.processingStatus ?? '') === 'processing';
-          return isPublished && !isStillProcessing;
-        });
+        const publishedOnly = await prepareVisiblePosts(
+          response.data.posts.filter((p: any) => {
+            const status = p.status;
+            return status === 'active' || status === 'approved' || !status;
+          })
+        );
         const publishedById = new Map<string, any>();
         publishedOnly.forEach((p: any) => { if (p?.id) publishedById.set(p.id, p); });
         const publishedCount = publishedById.size;
@@ -2016,6 +2108,34 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: 4,
+  },
+  challengePostBadge: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 42,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  challengePostBadgeTextWrap: {
+    flex: 1,
+  },
+  challengePostBadgeLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  challengePostBadgeName: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 1,
   },
   teaserVideo: {
     position: 'absolute',

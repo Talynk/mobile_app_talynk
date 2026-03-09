@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { createVideoThumbnail } from 'react-native-compressor';
 
 /**
  * Generate thumbnail from video URI
@@ -7,19 +8,20 @@ import * as FileSystem from 'expo-file-system/legacy';
  */
 export const generateThumbnail = async (videoUri: string): Promise<string | null> => {
   try {
-    // Check if video exists
     const fileInfo = await FileSystem.getInfoAsync(videoUri);
     if (!fileInfo.exists) {
       console.warn('Video file does not exist:', videoUri);
       return null;
     }
 
-    // Return video URI - backend will generate the actual thumbnail
-    // This approach is Expo Go compatible and follows KISS principle
-    return videoUri;
+    const thumbnail = await createVideoThumbnail(videoUri);
+    if (thumbnail?.path) {
+      return thumbnail.path.startsWith('file://') ? thumbnail.path : `file://${thumbnail.path}`;
+    }
+
+    return null;
   } catch (error) {
     console.warn('Error checking video file:', error);
-    // Return video URI as fallback - backend can handle thumbnail generation
-    return videoUri;
+    return null;
   }
 };

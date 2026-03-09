@@ -23,6 +23,7 @@ import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
 import { CreateFocusProvider } from '@/lib/create-focus-context';
 import NetworkBanner from '@/components/NetworkBanner';
+import { VideoReadyWatcher } from '@/components/VideoReadyWatcher';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -186,6 +187,7 @@ function RootLayoutNav() {
             <CreateFocusProvider>
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
+                <VideoReadyWatcher />
                 <Stack
                   screenOptions={{
                     headerShown: false,

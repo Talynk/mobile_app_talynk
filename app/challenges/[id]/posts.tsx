@@ -51,6 +51,25 @@ const COLORS = {
   },
 };
 
+const getChallengePostTimestamp = (post: any) =>
+  new Date(post?.createdAt || post?.uploadDate || post?.created_at || 0).getTime();
+
+const sortChallengePosts = (posts: Post[], likesDuringChallengeMap: Record<string, number>, ended: boolean) =>
+  [...posts].sort((a, b) => {
+    const likesA = ended
+      ? likesDuringChallengeMap[a.id] ?? 0
+      : Number((a as any).likes ?? (a as any).like_count ?? 0);
+    const likesB = ended
+      ? likesDuringChallengeMap[b.id] ?? 0
+      : Number((b as any).likes ?? (b as any).like_count ?? 0);
+
+    if (likesB !== likesA) {
+      return likesB - likesA;
+    }
+
+    return getChallengePostTimestamp(b) - getChallengePostTimestamp(a);
+  });
+
 export default function ChallengePostsScreen() {
   const { id, open, openIndex } = useLocalSearchParams();
   const C = COLORS.dark;
@@ -129,13 +148,7 @@ export default function ChallengePostsScreen() {
           if (postId) map[postId] = likes;
         });
 
-        if (!ended && page === 1) {
-          postsList = [...postsList].sort((a, b) => {
-            const la = (a as any).likes ?? (a as any).like_count ?? 0;
-            const lb = (b as any).likes ?? (b as any).like_count ?? 0;
-            return Number(lb) - Number(la);
-          });
-        }
+        postsList = sortChallengePosts(postsList, map, ended);
 
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsList.length === limit;
@@ -419,7 +432,7 @@ export default function ChallengePostsScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
-              const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 2;
+              const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 1;
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -466,7 +479,7 @@ export default function ChallengePostsScreen() {
       />
       <CommentsModal
         visible={commentsModalVisible}
-        postId={commentsPostId}
+        postId={commentsPostId || ''}
         onClose={() => { setCommentsModalVisible(false); setCommentsPostId(null); }}
       />
     </SafeAreaView>

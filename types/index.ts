@@ -124,6 +124,14 @@ export interface Post {
   };
   category_id?: number;
   categoryName?: string;
+  challenge_id?: string;
+  challengeId?: string;
+  challenge_name?: string;
+  challengeName?: string;
+  challenge?: {
+    id?: string;
+    name?: string;
+  };
 }
 
 export interface Comment {

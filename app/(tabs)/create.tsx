@@ -35,6 +35,13 @@ import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Constants from 'expo-constants';
+import { videoReadyTracker } from '@/lib/video-ready-tracker';
+import {
+  cleanupPreparedVideo,
+  prepareVideoForUpload,
+  PreparedVideoAsset,
+  uploadPreparedVideo,
+} from '@/lib/utils/video-upload';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -792,24 +799,10 @@ export default function CreatePostScreen() {
       const recordingOptions: any = {
         maxDuration: MAX_RECORDING_SECONDS,
         mute: false,
-        quality: 'high',
       };
 
       if (Platform.OS === 'ios') {
         recordingOptions.codec = 'h264';
-        recordingOptions.extension = '.mov';
-        recordingOptions.videoBitrate = 5000000;
-        recordingOptions.audioBitrate = 192000;
-        recordingOptions.audioSampleRate = 48000;
-        recordingOptions.audioChannels = 2;
-      } else {
-        // Conservative Android profile to avoid OOM on low-RAM devices (TECNO, Redmi, etc.)
-        recordingOptions.maxFileSize = 50 * 1024 * 1024; // 50 MB cap
-        recordingOptions.extension = '.mp4';
-        recordingOptions.videoBitrate = 2500000; // 2.5 Mbps (was 4 Mbps)
-        recordingOptions.audioBitrate = 256000;
-        recordingOptions.audioSampleRate = 48000;
-        recordingOptions.audioChannels = 2;
       }
 
       console.log('Starting recording with options:', recordingOptions);
@@ -1014,6 +1007,21 @@ export default function CreatePostScreen() {
 
   const MAX_DRAFTS = 3;
 
+  const resetComposerState = useCallback(() => {
+    setServerMediaUrl(null);
+    setCapturedImageUri(null);
+    setCaption('');
+    setSelectedGroup('');
+    setSelectedCategoryId('');
+    setSelectedChallengeId(null);
+    setRecordedVideoUri(null);
+    setEditedVideoUri(null);
+    setThumbnailUri(null);
+    setIsVideoPlaying(false);
+    setUploading(false);
+    setUploadProgress(0);
+  }, []);
+
   // --- SUBMIT ---
   const handleCreatePost = async (status: 'active' | 'draft' = 'active') => {
     if (!isAuthenticated || !user) {
@@ -1066,7 +1074,19 @@ export default function CreatePostScreen() {
     setUploading(true);
     setUploadProgress(0);
 
+    let preparedVideo: PreparedVideoAsset | null = null;
+
     try {
+      let lastReportedProgress = -1;
+      const updateProgress = (nextProgress: number) => {
+        const clamped = Math.max(0, Math.min(100, Math.round(nextProgress)));
+        setUploadProgress(clamped);
+        if (clamped === 100 || clamped <= 5 || clamped - lastReportedProgress >= 3 || clamped < lastReportedProgress) {
+          lastReportedProgress = clamped;
+          void uploadNotificationService.showUploadProgress(clamped, 'video');
+        }
+      };
+
       const categoryName = getSelectedCategoryName();
       if (!categoryName || categoryName.trim() === '') {
         setUploading(false);
@@ -1075,9 +1095,23 @@ export default function CreatePostScreen() {
         return;
       }
 
-      const mediaUri = imageUri || rawVideoUri;
+      let mediaUri = imageUri || rawVideoUri;
       if (!mediaUri) {
         throw new Error('No media file to upload');
+      }
+
+      const isVideo = !!rawVideoUri;
+
+      if (isVideo && rawVideoUri) {
+        updateProgress(4);
+        preparedVideo = await prepareVideoForUpload(rawVideoUri, (progress) => {
+          updateProgress(4 + progress * 16);
+        });
+        mediaUri = preparedVideo.uploadUri;
+
+        if (preparedVideo.thumbnailUri) {
+          setThumbnailUri(preparedVideo.thumbnailUri);
+        }
       }
 
       const fileInfo = await FileSystem.getInfoAsync(mediaUri);
@@ -1085,9 +1119,8 @@ export default function CreatePostScreen() {
         throw new Error('Media file not found');
       }
 
-      const isVideo = !!rawVideoUri;
-      const fileName = mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
-      const fileType = isVideo ? 'video/mp4' : 'image/jpeg';
+      const fileName = preparedVideo?.fileName || mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
+      const fileType = preparedVideo?.mimeType || 'image/jpeg';
 
       const mediaInfo = await FileSystem.getInfoAsync(mediaUri);
       if (!mediaInfo.exists) {
@@ -1098,7 +1131,9 @@ export default function CreatePostScreen() {
         exists: mediaInfo.exists,
         size: mediaInfo.size,
         fileName,
-        fileType
+        fileType,
+        preparedFrom: preparedVideo?.originalUri,
+        preparedSize: preparedVideo?.uploadSizeBytes,
       });
 
       let fileData: any = {
@@ -1106,6 +1141,8 @@ export default function CreatePostScreen() {
         name: fileName,
         type: fileType,
       };
+      const selectedChallenge = joinedChallenges.find((challenge: any) => challenge.id === selectedChallengeId);
+      const selectedChallengeName = selectedChallenge?.name as string | undefined;
 
       // Note: For React Native, FormData.append(name, file) expects:
       // - file as a Blob/File object with uri property (which RN handles)
@@ -1113,7 +1150,7 @@ export default function CreatePostScreen() {
       // We don't convert to base64 for FormData as it expects the native file object
       // FormData will read the file from the URI automatically
 
-      if (selectedChallengeId) {
+      if (selectedChallengeId && !isVideo) {
         const formData = new FormData();
         formData.append('title', caption.trim().substring(0, 50) || 'My Post');
         formData.append('caption', caption);
@@ -1278,8 +1315,7 @@ export default function CreatePostScreen() {
         console.log('[Upload] Using signed URL flow for video');
 
         // Step 1: Get signed upload URL from backend
-        setUploadProgress(2);
-        await uploadNotificationService.showUploadProgress(2, fileName);
+        updateProgress(22);
 
         const createRes = await postsApi.createUpload({
           title: autoTitle,
@@ -1289,49 +1325,27 @@ export default function CreatePostScreen() {
         });
 
         if (createRes.status !== 'success' || !createRes.data?.uploadUrl) {
-          // Signed URL not available (R2/Redis down) — fall back to legacy multipart
-          console.warn('[Upload] Signed URL unavailable, falling back to legacy multipart:', createRes.message);
-          await _legacyMultipartUpload(
-            mediaUri, fileName, fileType, autoTitle, categoryName, status,
-            fileData, getSelectedCategoryId(), uploadNotificationService,
-            setUploading, setUploadProgress, setServerMediaUrl,
-            setCaption, setSelectedGroup, setSelectedCategoryId as any,
-            setRecordedVideoUri, setEditedVideoUri, setThumbnailUri, setIsVideoPlaying,
-            setCapturedImageUri,
-          );
-          return;
+          throw new Error(createRes.message || 'Upload service is currently unavailable');
         }
 
         const { postId, uploadUrl } = createRes.data;
         console.log('[Upload] Got signed URL for post:', postId);
 
-        // Step 2: Upload video directly to R2 via signed URL (stream from file — no full-file blob to avoid OOM on low-RAM devices)
-        setUploadProgress(5);
-        await uploadNotificationService.showUploadProgress(5, fileName);
+        // Step 2: Upload video directly to R2 via signed URL
+        updateProgress(28);
 
         try {
-          const uploadTask = FileSystem.createUploadTask(
+          await uploadPreparedVideo(
             uploadUrl,
             mediaUri,
-            {
-              httpMethod: 'PUT',
-              uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-              headers: { 'Content-Type': 'video/mp4' },
-            },
-            ({ totalBytesSent, totalBytesExpectedToSend }) => {
+            (totalBytesSent, totalBytesExpectedToSend) => {
               if (totalBytesExpectedToSend > 0) {
-                const rawPercent = Math.round((totalBytesSent / totalBytesExpectedToSend) * 100);
-                const scaledPercent = 5 + Math.round(rawPercent * 0.80);
-                setUploadProgress(Math.min(scaledPercent, 85));
-                uploadNotificationService.showUploadProgress(Math.min(scaledPercent, 85), fileName);
+                const rawPercent = totalBytesSent / totalBytesExpectedToSend;
+                updateProgress(28 + rawPercent * 60);
               }
             }
           );
-          const result = await uploadTask.uploadAsync();
-          if (!result || result.status < 200 || result.status >= 300) {
-            throw new Error(result ? `R2 upload failed with status ${result.status}` : 'R2 upload failed');
-          }
-          console.log('[Upload] R2 upload complete (streamed from file)');
+          console.log('[Upload] R2 upload complete (compressed/native upload)');
         } catch (uploadError: any) {
           console.error('[Upload] R2 upload failed:', uploadError.message);
           setUploading(false);
@@ -1342,8 +1356,7 @@ export default function CreatePostScreen() {
         }
 
         // Step 3: Notify backend upload is complete → queues HLS processing
-        setUploadProgress(90);
-        await uploadNotificationService.showUploadProgress(90, fileName);
+        updateProgress(92);
         console.log('[Upload] Notifying backend upload complete for post:', postId);
 
         const completeRes = await postsApi.completeUpload(postId);
@@ -1352,84 +1365,54 @@ export default function CreatePostScreen() {
           console.error('[Upload] Complete upload failed:', completeRes.message);
           setUploading(false);
           setUploadProgress(0);
-          await uploadNotificationService.showUploadError('Failed to finalize upload: ' + completeRes.message, fileName);
-          Alert.alert('Error', 'Video uploaded but processing failed to start. Please try again.');
+          await uploadNotificationService.showUploadError('Failed to finish the upload.', fileName);
+          Alert.alert('Error', 'Video upload finished, but the app could not finalize it. Please try again.');
           return;
         }
 
-        // Step 4: Poll HLS processing until complete
-        // Progress bar shows 90-99% during HLS transcoding
-        console.log('[Upload] Starting HLS processing poll for post:', postId);
-        let hlsReady = false;
-        let pollProgress = 90;
-        const MAX_POLL_ATTEMPTS = 40; // 40 × 3s = 2 minutes max
-
-        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt++) {
-          await new Promise(res => setTimeout(res, 3000)); // Wait 3s between polls
-
-          try {
-            const statusRes = await postsApi.getProcessingStatus(postId);
-            const processing = statusRes.data?.processing;
-
-            console.log(`[Upload] HLS poll #${attempt + 1}: status=${processing?.status}, hlsReady=${processing?.hlsReady}`);
-
-            if (processing?.hlsReady || processing?.status === 'completed') {
-              hlsReady = true;
-              break;
-            }
-
-            if (processing?.status === 'failed') {
-              console.error('[Upload] HLS processing failed:', processing?.error);
-              // Still show success for the upload, but warn about processing
-              break;
-            }
-
-            // Increment progress slowly from 90 to 99
-            pollProgress = Math.min(99, 90 + Math.floor((attempt / MAX_POLL_ATTEMPTS) * 9));
-            setUploadProgress(pollProgress);
-            await uploadNotificationService.showUploadProgress(pollProgress, fileName);
-          } catch (pollError) {
-            console.warn('[Upload] Poll error (will retry):', pollError);
+        let challengeLinkFailed = false;
+        if (selectedChallengeId && status !== 'draft') {
+          const linkRes = await challengesApi.addPostToChallenge(selectedChallengeId, postId);
+          if (linkRes.status !== 'success') {
+            challengeLinkFailed = true;
+            console.warn('[Upload] Failed to link uploaded post to challenge:', linkRes.message);
           }
         }
 
-        setUploadProgress(100);
-        await uploadNotificationService.showUploadComplete(fileName);
+        await videoReadyTracker.track(user.id, {
+          postId,
+          destination: status === 'draft' ? 'draft' : (selectedChallengeId ? 'challenge' : 'post'),
+          challengeId: selectedChallengeId || undefined,
+          challengeName: selectedChallengeName,
+        });
 
-        const successMessage = hlsReady
-          ? (status === 'draft'
-            ? 'Draft saved! Your video is ready for streaming.'
-            : 'Post published! Your video is live and ready to watch.')
-          : (status === 'draft'
-            ? 'Draft saved! Video is still being processed — it will be ready shortly.'
-            : 'Post published! Video processing is finishing up — it will appear in the feed shortly.');
-
-        console.log(`[Upload] Complete! hlsReady=${hlsReady}`);
-
-        Alert.alert(
-          hlsReady ? '✅ Success' : '⏳ Almost Done',
-          successMessage,
-          [
-            {
-              text: 'View Profile',
-              onPress: () => {
-                setServerMediaUrl(null);
-                setCapturedImageUri(null);
-                router.replace('/(tabs)/profile');
-              }
-            }
-          ]
+        updateProgress(100);
+        await uploadNotificationService.showUploadQueued(
+          status === 'draft' ? 'draft' : (selectedChallengeId ? 'challenge' : 'post'),
+          selectedChallengeName
         );
 
-        setUploading(false);
-        setUploadProgress(0);
-        setCaption('');
-        setSelectedGroup('');
-        setSelectedCategoryId('');
-        setRecordedVideoUri(null);
-        setEditedVideoUri(null);
-        setThumbnailUri(null);
-        setIsVideoPlaying(false);
+        const successMessage = status === 'draft'
+          ? 'Draft uploaded. You will be notified when it is ready.'
+          : selectedChallengeId
+            ? challengeLinkFailed
+              ? 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
+              : 'Video uploaded. You will be notified when the competition post is ready.'
+            : 'Video uploaded. You will be notified when it is ready.';
+
+        Alert.alert('Upload complete', successMessage, [
+          {
+            text: 'View profile',
+            onPress: () => {
+              void cleanupPreparedVideo(preparedVideo);
+              resetComposerState();
+              router.replace('/(tabs)/profile');
+            }
+          }
+        ]);
+
+        await cleanupPreparedVideo(preparedVideo);
+        resetComposerState();
         return;
       }
 
@@ -1446,6 +1429,7 @@ export default function CreatePostScreen() {
         setCapturedImageUri,
       );
     } catch (error: any) {
+      await cleanupPreparedVideo(preparedVideo);
       setUploading(false);
       setUploadProgress(0);
       await uploadNotificationService.showUploadError(error.message || 'Failed to create post', 'video.mp4');
@@ -1554,9 +1538,7 @@ export default function CreatePostScreen() {
             <Text style={styles.preRecordMessage}>
               You can record up to <Text style={styles.preRecordHighlight}>2 minutes</Text> maximum. Recording will stop automatically at 2 minutes and you’ll be taken to add captions.
             </Text>
-            <Text style={styles.preRecordHint}>
-              This applies only when recording a video. You can stop earlier anytime. For best results on low-memory devices, close other apps.
-            </Text>
+            <Text style={styles.preRecordHint}>You can stop earlier anytime.</Text>
             <TouchableOpacity
               style={styles.preRecordProceedButton}
               onPress={proceedToRecord}
@@ -1616,7 +1598,8 @@ export default function CreatePostScreen() {
             zoom={0}
             enableTorch={false}
             flash={cameraMode === 'picture' ? 'on' : 'off'}
-            videoQuality="1080p"
+            videoQuality="720p"
+            videoBitrate={1_800_000}
             onCameraReady={() => {
               console.log('[Camera] Camera is ready');
               setIsCameraReady(true);

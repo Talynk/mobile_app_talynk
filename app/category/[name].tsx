@@ -358,7 +358,7 @@ export default function CategoryScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -1 && distance <= 2;
+              const shouldPreload = !isActive && distance >= -1 && distance <= 1;
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -409,7 +409,7 @@ export default function CategoryScreen() {
       />
       <CommentsModal
         visible={commentsModalVisible}
-        postId={commentsPostId}
+        postId={commentsPostId || ''}
         onClose={() => { setCommentsModalVisible(false); setCommentsPostId(null); }}
       />
     </SafeAreaView>

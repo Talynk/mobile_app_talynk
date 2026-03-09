@@ -283,7 +283,7 @@ export default function FeedScreen() {
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
     const distance = index - currentIndex;
-    const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 2;
+    const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 1;
 
     const isLiked = item.is_liked ?? likedPosts.includes(item.id);
     const isFollowing = item.is_following_author ?? followedUsers.has(item.user?.id || '');

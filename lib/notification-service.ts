@@ -57,7 +57,7 @@ export class UploadNotificationService {
       // Cap progress at 100%
       const cappedProgress = Math.min(Math.max(progress, 0), 100);
       
-      const title = 'Uploading Video';
+      const title = 'Uploading';
       const body = filename 
         ? `Uploading ${filename}... ${cappedProgress}%`
         : `Uploading... ${cappedProgress}%`;
@@ -123,6 +123,63 @@ export class UploadNotificationService {
   async showUploadSuccess(message: string, filename?: string): Promise<void> {
     // Alias for showUploadComplete to maintain backward compatibility
     await this.showUploadComplete(filename);
+  }
+
+  async showUploadQueued(destination: 'post' | 'draft' | 'challenge', challengeName?: string): Promise<void> {
+    if (isExpoGo) {
+      console.log(`Upload queued for readiness notification: ${destination}`);
+      return;
+    }
+
+    const body =
+      destination === 'draft'
+        ? 'Draft uploaded. You will be notified when it is ready.'
+        : challengeName
+          ? `Competition upload complete. ${challengeName} will appear when your video is ready.`
+          : 'Upload complete. You will be notified when your video is ready.';
+
+    try {
+      if (this.notificationId) {
+        await Notifications.scheduleNotificationAsync({
+          identifier: this.notificationId,
+          content: {
+            title: 'Upload Complete',
+            body,
+            data: { type: 'upload-queued' },
+          },
+          trigger: null,
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to show queued notification:', error);
+    }
+  }
+
+  async showVideoReady(destination: 'post' | 'draft' | 'challenge', challengeName?: string): Promise<void> {
+    if (isExpoGo) {
+      console.log(`Video ready: ${destination}`);
+      return;
+    }
+
+    const body =
+      destination === 'draft'
+        ? 'Your draft video is ready.'
+        : challengeName
+          ? `Your competition post in ${challengeName} is ready.`
+          : 'Your video is ready.';
+
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Video Ready',
+          body,
+          data: { type: 'video-ready' },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      console.warn('Failed to show video ready notification:', error);
+    }
   }
 
   async showUploadError(error: string, filename?: string): Promise<void> {

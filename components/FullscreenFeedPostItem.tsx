@@ -32,6 +32,7 @@ import { Avatar } from '@/components/Avatar';
 import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
+import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -141,6 +142,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
+  const challengeMeta = getChallengePostMeta(item);
+  const activeChallengeName = challengeName || challengeMeta.challengeName;
+  const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
   const playbackUrl = item.playback_url || getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
   const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload) && !videoError;
@@ -487,6 +491,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
+            {isCompetitionPost && (
+              <View style={styles.challengeTag}>
+                <Feather name="award" size={12} color="#fbbf24" />
+                <Text style={styles.challengeTagText}>
+                  Competition{activeChallengeName ? `: ${activeChallengeName}` : ''}
+                </Text>
+              </View>
+            )}
             {(item.caption || item.description || item.title) && (
               <ExpandableCaption text={item.caption || item.description || item.title || ''} maxLines={2} />
             )}
@@ -786,6 +798,24 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3,
+  },
+  challengeTag: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.72)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.3)',
+  },
+  challengeTagText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   caption: {
     color: '#fff',

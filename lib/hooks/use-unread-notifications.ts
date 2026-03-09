@@ -3,6 +3,8 @@ import { useAuth } from '../auth-context';
 import { useRealtime } from '../realtime-context';
 import { notificationsApi } from '../api';
 import { Notification } from '@/types';
+import { frontendNotifications } from '../frontend-notifications';
+import { localNotificationEvents } from '../local-notification-events';
 
 /**
  * Hook to track unread notification count
@@ -23,14 +25,16 @@ export const useUnreadNotifications = () => {
     }
 
     try {
-      const response = await notificationsApi.getAll();
+      const [response, localUnread] = await Promise.all([
+        notificationsApi.getAll(),
+        frontendNotifications.getUnreadCount(user.id),
+      ]);
       if (response.status === 'success' && response.data?.notifications) {
         const notifications = response.data.notifications as Notification[];
         const unread = notifications.filter(n => !n.isRead).length;
-        setUnreadCount(unread);
+        setUnreadCount(unread + localUnread);
       } else {
-        // If error or no notifications, set to 0
-        setUnreadCount(0);
+        setUnreadCount(localUnread);
       }
     } catch (error) {
       // Silently handle errors - don't log 401 errors (expected when not authenticated)
@@ -65,6 +69,13 @@ export const useUnreadNotifications = () => {
     return unsubscribe;
   }, [onNewNotification, user]);
 
+  useEffect(() => {
+    if (!user) return;
+    return localNotificationEvents.onChanged(() => {
+      fetchUnreadCount();
+    });
+  }, [fetchUnreadCount, user]);
+
   // Function to manually refresh count (useful when marking as read)
   const refreshCount = useCallback(() => {
     fetchUnreadCount();
@@ -76,5 +87,4 @@ export const useUnreadNotifications = () => {
     refreshCount,
   };
 };
-
 

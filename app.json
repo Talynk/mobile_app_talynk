@@ -8,7 +8,7 @@
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": { 
+    "splash": {
       "image": "./assets/images/mobile-app-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
@@ -78,7 +78,8 @@
             "deploymentTarget": "15.1"
           }
         }
-      ]
+      ],
+      "react-native-compressor"
     ],
     "experiments": {
       "typedRoutes": true
@@ -88,11 +89,8 @@
         "origin": false
       },
       "eas": {
-        "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"        
+        "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"
       }
     }
   }
 }
-
-
-

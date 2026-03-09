@@ -34,6 +34,7 @@ import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { useCache } from '@/lib/cache-context';
+import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -52,6 +53,7 @@ interface VideoThumbnailCardProps {
 
 const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
+  const challengeMeta = getChallengePostMeta(post);
 
   // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
   const serverThumbnail = (post as any).thumbnail_url || '';
@@ -83,6 +85,21 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
           <View style={styles.playIconOverlay}>
             <MaterialIcons name="play-circle-outline" size={40} color="#fff" />
           </View>
+        )}
+
+        {challengeMeta.isChallengePost && (
+          <LinearGradient
+            colors={['rgba(14, 116, 144, 0.95)', 'rgba(37, 99, 235, 0.95)']}
+            style={styles.challengeBadge}
+          >
+            <Feather name="award" size={11} color="#fff" />
+            <View style={styles.challengeBadgeTextWrap}>
+              <Text style={styles.challengeBadgeLabel}>Competition</Text>
+              <Text style={styles.challengeBadgeName} numberOfLines={1}>
+                {challengeMeta.challengeName || 'Challenge post'}
+              </Text>
+            </View>
+          </LinearGradient>
         )}
       </View>
 
@@ -525,7 +542,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 },
               };
             });
-            setApprovedPosts(normalized);
+            setApprovedPosts(filterHlsReady(normalized));
           }
         }
       } catch (err: any) {
@@ -1095,6 +1112,34 @@ const styles = StyleSheet.create({
     top: '50%',
     left: '50%',
     transform: [{ translateX: -24 }, { translateY: -24 }],
+  },
+  challengeBadge: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  challengeBadgeTextWrap: {
+    flex: 1,
+  },
+  challengeBadgeLabel: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  challengeBadgeName: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 1,
   },
   postFooter: {
     padding: 12,
