@@ -385,8 +385,8 @@ export default function RegisterScreen() {
     }
 
     const digitsOnly = (v: string) => v.replace(/\D/g, '');
-    if (phone1.trim() && digitsOnly(phone1).length !== 9) errors.phone1 = 'Enter 9 digits';
-    if (phone2.trim() && digitsOnly(phone2).length !== 9) errors.phone2 = 'Enter 9 digits';
+    if (phone1.trim() && digitsOnly(phone1).length < 6) errors.phone1 = 'Enter a valid phone number (at least 6 digits)';
+    if (phone2.trim() && digitsOnly(phone2).length < 6) errors.phone2 = 'Enter a valid phone number (at least 6 digits)';
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
@@ -450,8 +450,8 @@ export default function RegisterScreen() {
         return 'Username can only contain letters, numbers, and underscores';
       }
       const digitsOnly = (v: string) => v.replace(/\D/g, '');
-      if (phone1.trim() && digitsOnly(phone1).length !== 9) return 'Primary phone must be exactly 9 digits';
-      if (phone2.trim() && digitsOnly(phone2).length !== 9) return 'Secondary phone must be exactly 9 digits';
+      if (phone1.trim() && digitsOnly(phone1).length < 6) return 'Primary phone must be at least 6 digits';
+      if (phone2.trim() && digitsOnly(phone2).length < 6) return 'Secondary phone must be at least 6 digits';
       return null;
     }
     return null;
@@ -944,16 +944,16 @@ export default function RegisterScreen() {
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone1 ? C.errorBorder : C.inputBorder, color: C.text }]}
-                  placeholder="9 digits"
+                  placeholder="Write your number excluding country code"
                   value={phone1}
                   onChangeText={(t) => {
-                  setPhone1(t.replace(/\D/g, '').slice(0, 9));
+                  setPhone1(t.replace(/\D/g, '').slice(0, 15));
                   if (fieldErrors.phone1) setFieldErrors((prev) => { const next = { ...prev }; delete next.phone1; return next; });
                 }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="phone-pad"
-                  maxLength={9}
+                  maxLength={15}
                   placeholderTextColor={C.placeholder}
                   editable={!isFormBusy}
                 />
@@ -971,16 +971,16 @@ export default function RegisterScreen() {
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone2 ? C.errorBorder : C.inputBorder, color: C.text }]}
-                  placeholder="9 digits"
+                  placeholder="Write your number excluding country code"
                   value={phone2}
                   onChangeText={(t) => {
-                  setPhone2(t.replace(/\D/g, '').slice(0, 9));
+                  setPhone2(t.replace(/\D/g, '').slice(0, 15));
                   if (fieldErrors.phone2) setFieldErrors((prev) => { const next = { ...prev }; delete next.phone2; return next; });
                 }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="phone-pad"
-                  maxLength={9}
+                  maxLength={15}
                   placeholderTextColor={C.placeholder}
                   editable={!isFormBusy}
                 />
@@ -989,7 +989,7 @@ export default function RegisterScreen() {
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.phone2}</Text>
               ) : null}
               <Text style={[styles.helperText, { color: C.textSecondary }]}>
-                Country code is set above. Enter only the remaining 9 digits (e.g. 788123456 for Rwanda).
+                Country code is set above. Enter your number excluding country code (length varies by country).
               </Text>
 
               {Object.keys(fieldErrors).length > 0 && (

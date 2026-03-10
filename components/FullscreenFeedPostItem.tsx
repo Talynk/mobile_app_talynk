@@ -109,7 +109,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const isPostLiked = likedPosts.includes(item.id) || isLiked;
   const cachedLikeCount = postLikeCounts[item.id];
-  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
+  const serverLikeCount = item.like_count ?? item.likes ?? 0;
+  const initialLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : serverLikeCount;
 
   const { comments } = useRealtimePost({
     postId: item.id,

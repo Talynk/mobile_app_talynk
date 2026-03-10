@@ -431,7 +431,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             thumbnailUrl: p.thumbnailUrl || p.thumbnail_url || '',
             thumbnail: p.thumbnail || p.thumbnail_url || p.thumbnailUrl || '',
             comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
-            likes: p.likes ?? p.likesCount ?? 0,
+            likes: p.like_count ?? p.likes ?? p.likesCount ?? 0,
             // CRITICAL: Always attach profile user data so profile-feed shows correct username
             user: userFromPost || {
               id: (profile as any)?.id || p.user_id || p.userId,
@@ -534,7 +534,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 processingStatus: p.processingStatus || p.processing_status,
                 hlsReady: p.hlsReady || false,
                 comments_count: p.comment_count ?? p.commentsCount ?? p.comments_count ?? 0,
-                likes: p.likes ?? p.likesCount ?? 0,
+                likes: p.like_count ?? p.likes ?? p.likesCount ?? 0,
                 user: userFromPost || {
                   id: (profileResponse.data as any)?.id || p.user_id || p.userId,
                   username: authorName,

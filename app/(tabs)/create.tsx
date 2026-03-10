@@ -1862,17 +1862,26 @@ export default function CreatePostScreen() {
                   <TouchableOpacity
                     style={[styles.videoControlButton, styles.discardButton]}
                     onPress={() => {
-                      setServerMediaUrl(null);
-                      setRecordedVideoUri(null);
-                      setCapturedImageUri(null);
-                      setEditedVideoUri(null);
-                      setThumbnailUri(null);
-                      setCaption('');
-                      setSelectedGroup('');
-                      setSelectedCategoryId('');
-                      setIsVideoPlaying(false);
+                      if (uploading) {
+                        Alert.alert(
+                          'Discard anyway?',
+                          'Upload in progress. Discard will cancel and clear this post.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
+                          ]
+                        );
+                      } else {
+                        Alert.alert(
+                          'Discard Post?',
+                          'Are you sure you want to discard this post?',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
+                          ]
+                        );
+                      }
                     }}
-                    disabled={uploading}
                     accessibilityLabel="Discard media"
                     accessibilityRole="button"
                   >
@@ -2216,29 +2225,16 @@ export default function CreatePostScreen() {
                     style={[styles.quickActionButton, styles.quickDiscardButton]}
                     onPress={() => {
                       Alert.alert(
-                        'Discard Post?',
-                        'Are you sure you want to discard this post? This action cannot be undone.',
+                        uploading ? 'Discard anyway?' : 'Discard Post?',
+                        uploading
+                          ? 'Upload in progress. Discard will cancel and clear this post.'
+                          : 'Are you sure you want to discard this post? This action cannot be undone.',
                         [
                           { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Discard',
-                            style: 'destructive',
-                            onPress: () => {
-                              setRecordedVideoUri(null);
-                              setCapturedImageUri(null);
-                              setEditedVideoUri(null);
-                              setThumbnailUri(null);
-                              setCaption('');
-                              setSelectedGroup('');
-                              setSelectedCategoryId('');
-                              setSelectedChallengeId(null);
-                              setIsVideoPlaying(false);
-                            }
-                          }
+                          { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
                         ]
                       );
                     }}
-                    disabled={uploading}
                     accessibilityLabel="Discard post"
                     accessibilityRole="button"
                   >
@@ -2304,28 +2300,16 @@ export default function CreatePostScreen() {
                     style={[styles.quickActionButton, styles.quickDiscardButton]}
                     onPress={() => {
                       Alert.alert(
-                        'Discard Post?',
-                        'Are you sure you want to discard this post? This action cannot be undone.',
+                        uploading ? 'Discard anyway?' : 'Discard Post?',
+                        uploading
+                          ? 'Upload in progress. Discard will cancel and clear this post.'
+                          : 'Are you sure you want to discard this post? This action cannot be undone.',
                         [
                           { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Discard',
-                            style: 'destructive',
-                            onPress: () => {
-                              setRecordedVideoUri(null);
-                              setCapturedImageUri(null);
-                              setEditedVideoUri(null);
-                              setThumbnailUri(null);
-                              setCaption('');
-                              setSelectedGroup('');
-                              setSelectedCategoryId('');
-                              setIsVideoPlaying(false);
-                            }
-                          }
+                          { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
                         ]
                       );
                     }}
-                    disabled={uploading}
                     accessibilityLabel="Discard post"
                     accessibilityRole="button"
                   >

@@ -48,10 +48,11 @@ interface VideoThumbnailProps {
   onOptionsPress?: () => void;
   onPublishPress?: () => void;
   onSubmitToCompetitionPress?: () => void;
+  onUseContentPress?: () => void;
   onViewsPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onViewsPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onUseContentPress, onViewsPress }: VideoThumbnailProps) => {
   const [imageError, setImageError] = useState(false);
 
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
@@ -172,21 +173,21 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
             <Text style={styles.publishDraftButtonText}>Publish</Text>
           </TouchableOpacity>
         )}
-      {/* Submit to competition for draft posts */}
+      {/* Use Content for draft posts: opens Publish normally / Submit to competition */}
       {(() => {
         const isDraft = post.status === 'draft' || post.status === 'Draft';
-        return isDraft && onSubmitToCompetitionPress;
+        return isDraft && onUseContentPress;
       })() && (
           <TouchableOpacity
             style={styles.submitToCompetitionDraftButton}
             onPress={(e) => {
               e.stopPropagation();
-              onSubmitToCompetitionPress?.();
+              onUseContentPress();
             }}
             activeOpacity={0.8}
           >
-            <Feather name="award" size={14} color="#fff" />
-            <Text style={styles.submitToCompetitionDraftButtonText}>To competition</Text>
+            <Feather name="inbox" size={14} color="#fff" />
+            <Text style={styles.submitToCompetitionDraftButtonText}>Use Content</Text>
           </TouchableOpacity>
         )}
     </TouchableOpacity>
@@ -223,7 +224,7 @@ const normalizeProfilePost = (post: any): Post => {
     thumbnail_url: post.thumbnail_url || post.thumbnailUrl || '',
     thumbnailUrl: post.thumbnailUrl || post.thumbnail_url || '',
     thumbnail: post.thumbnail || post.thumbnail_url || post.thumbnailUrl || '',
-    likes: post.likes ?? post.likesCount ?? post.like_count ?? 0,
+    likes: post.like_count ?? post.likes ?? post.likesCount ?? 0,
     comments_count: post.comments_count ?? post.commentsCount ?? post.comment_count ?? 0,
     createdAt: post.createdAt || post.created_at || post.uploadDate,
   };
@@ -1127,17 +1128,18 @@ export default function ProfileScreen() {
           setSelectedPost(item);
           setPostOptionsModalVisible(true);
         }}
-        onPublishPress={() => {
-          if (__DEV__) {
-            console.log('📤 [renderPost] Publish button pressed for draft:', {
-              postId: item.id,
-              status: item.status,
-            });
-          }
-          // Publish draft directly from grid
-          handlePublishDraft(item.id);
+        onPublishPress={() => handlePublishDraft(item.id)}
+        onUseContentPress={() => {
+          Alert.alert(
+            'Use Content',
+            'Choose what to do with this draft.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Publish the content normally', onPress: () => handlePublishDraft(item.id) },
+              { text: 'Submit the content to a competition', onPress: () => openSubmitDraftToCompetition(item.id) },
+            ]
+          );
         }}
-        onSubmitToCompetitionPress={() => openSubmitDraftToCompetition(item.id)}
       />
     );
   };

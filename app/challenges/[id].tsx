@@ -108,7 +108,8 @@ export default function ChallengeDetailScreen() {
   const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
-  const [activeTab, setActiveTab] = useState<'posts' | 'participants'>('posts');
+  const challengeEnded = challenge ? new Date() > new Date(challenge.end_date) : false;
+  const [activeTab, setActiveTab] = useState<'posts' | 'participants' | 'winners'>('posts');
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
   const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
@@ -407,10 +408,36 @@ export default function ChallengeDetailScreen() {
     return map;
   }, [rawChallengePosts]);
 
+  // Sort posts by likes (ongoing and ended): use challenge likes map when available, else post.likes
   const sortedPosts = useMemo(() => {
-    if (!isChallengeEnded || !rawChallengePosts.length) return posts;
-    return sortChallengePosts(posts, likesDuringChallengeMap, true);
-  }, [posts, rawChallengePosts, isChallengeEnded, likesDuringChallengeMap]);
+    if (!posts.length) return posts;
+    return sortChallengePosts(posts, likesDuringChallengeMap, rawChallengePosts.length > 0);
+  }, [posts, rawChallengePosts.length, likesDuringChallengeMap]);
+
+  // Rank participants by total likes on their posts in this challenge
+  const participantTotalLikesMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    rawChallengePosts.forEach((cp: any) => {
+      const uid = cp.user_id ?? cp.user?.id ?? cp.post?.user_id ?? cp.post?.user?.id;
+      if (uid) {
+        const key = String(uid);
+        const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? cp.post?.likes ?? 0;
+        map[key] = (map[key] ?? 0) + Number(likes);
+      }
+    });
+    return map;
+  }, [rawChallengePosts]);
+  const sortedParticipants = useMemo(() => {
+    if (!allParticipants.length) return allParticipants;
+    return [...allParticipants].sort((a, b) => {
+      const uidA = String(a.user?.id ?? a.user_id ?? a.id ?? '');
+      const uidB = String(b.user?.id ?? b.user_id ?? b.id ?? '');
+      const totalA = participantTotalLikesMap[uidA] ?? 0;
+      const totalB = participantTotalLikesMap[uidB] ?? 0;
+      if (totalB !== totalA) return totalB - totalA;
+      return 0;
+    });
+  }, [allParticipants, participantTotalLikesMap]);
 
   const isOrganizer = challenge?.organizer_id === user?.id;
 
@@ -833,12 +860,30 @@ export default function ChallengeDetailScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
+              {challengeEnded && (
+                <TouchableOpacity
+                  style={[styles.tab, activeTab === 'winners' && styles.tabActive]}
+                  onPress={() => setActiveTab('winners')}
+                >
+                  <MaterialIcons
+                    name="emoji-events"
+                    size={18}
+                    color={activeTab === 'winners' ? C.primary : C.textSecondary}
+                  />
+                  <Text style={[
+                    styles.tabText,
+                    { color: activeTab === 'winners' ? C.primary : C.textSecondary }
+                  ]}>
+                    Winners
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
 
-        {/* Winners (Top 10) - only when ended and on posts tab, sorted by likes */}
-        {activeTab === 'posts' && new Date() > new Date(challenge.end_date) && rawChallengePosts.length > 0 && (
+        {/* Winners (Top 10) - when ended and Winners tab selected; frontend-only until backend provides list */}
+        {activeTab === 'winners' && challengeEnded && rawChallengePosts.length > 0 && (
           <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
             <Text style={[styles.winnersTitle, { color: C.text }]}>Winners (Top 10)</Text>
             <View style={styles.winnersGrid}>
@@ -902,10 +947,11 @@ export default function ChallengeDetailScreen() {
         <TouchableOpacity
           style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
           onPress={() => {
-            if (participantUser.id || item.user_id) {
+            const uid = participantUser.id || item.user_id;
+            if (uid) {
               router.push({
-                pathname: '/user/[id]',
-                params: { id: participantUser.id || item.user_id }
+                pathname: '/profile-feed/[userId]',
+                params: { userId: String(uid), challengeId: String(challenge.id) }
               });
             }
           }}
@@ -973,8 +1019,8 @@ export default function ChallengeDetailScreen() {
   }
 
   // Determine data source based on active tab (posts sorted by likes when challenge ended)
-  const data = activeTab === 'posts' ? sortedPosts : allParticipants;
-  const isLoading = activeTab === 'posts' ? postsLoading : loadingAllParticipants;
+  const data = activeTab === 'winners' ? [] : (activeTab === 'posts' ? sortedPosts : sortedParticipants);
+  const isLoading = activeTab === 'winners' ? false : (activeTab === 'posts' ? postsLoading : loadingAllParticipants);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
@@ -1008,6 +1054,12 @@ export default function ChallengeDetailScreen() {
           isLoading ? (
             <View style={styles.postsLoading}>
               <ActivityIndicator size="small" color={C.primary} />
+            </View>
+          ) : activeTab === 'winners' ? (
+            <View style={styles.emptyParticipants}>
+              <MaterialIcons name="emoji-events" size={48} color={C.textSecondary} />
+              <Text style={[styles.emptyText, { color: C.textSecondary }]}>No winners data yet</Text>
+              <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>Winners will appear here once set by the organizer.</Text>
             </View>
           ) : (
             <View style={activeTab === 'posts' ? styles.emptyPosts : styles.emptyParticipants}>
@@ -1153,10 +1205,10 @@ export default function ChallengeDetailScreen() {
                     <TouchableOpacity
                       style={styles.modalUserItem}
                       onPress={() => {
-                        if (participantUser.id) {
+                        if (participantUser.id && challenge?.id) {
                           router.push({
-                            pathname: '/user/[id]',
-                            params: { id: participantUser.id }
+                            pathname: '/profile-feed/[userId]',
+                            params: { userId: String(participantUser.id), challengeId: String(challenge.id) }
                           });
                           setParticipantsModalVisible(false);
                         }

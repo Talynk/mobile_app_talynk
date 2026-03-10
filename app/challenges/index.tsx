@@ -46,12 +46,12 @@ const COLORS = {
 };
 
 const TABS_AUTH: Array<{ key: 'live_upcoming' | 'ended' | 'my'; label: string }> = [
-  { key: 'live_upcoming', label: 'Live & Upcoming' },
+  { key: 'live_upcoming', label: 'Ongoing & Upcoming' },
   { key: 'ended', label: 'Ended' },
   { key: 'my', label: 'Created by Me' },
 ];
 const TABS_GUEST: Array<{ key: 'live_upcoming' | 'ended'; label: string }> = [
-  { key: 'live_upcoming', label: 'Live & Upcoming' },
+  { key: 'live_upcoming', label: 'Ongoing & Upcoming' },
   { key: 'ended', label: 'Ended' },
 ];
 
@@ -121,8 +121,14 @@ export default function ChallengesScreen() {
         return (ch.status === 'active' || ch.status === 'approved') && startDate > now;
       });
 
-      const endedListRaw = normalizeChallenges(endedRes);
-      const endedList = endedListRaw.map((item: any) => item.challenge || item);
+      // Ended: from dedicated endpoint and from active list (end_date < now) so nothing is missed
+      const endedFromApi = normalizeChallenges(endedRes).map((item: any) => item.challenge || item);
+      const endedFromActive = allListRaw.filter((ch: any) => new Date(ch.end_date) < now);
+      const endedMerged = [...endedFromApi];
+      endedFromActive.forEach((ch: any) => {
+        if (ch?.id && !endedMerged.some((e: any) => e.id === ch.id)) endedMerged.push(ch);
+      });
+      const endedList = endedMerged;
 
       const myListRaw = myRes?.status === 'success' ? normalizeChallenges(myRes) : [];
       const myList = myListRaw.map((item: any) => item.challenge || item);
@@ -417,7 +423,7 @@ export default function ChallengesScreen() {
         </View>
       )}
 
-      {/* Tabs: 2 for guests (Live & Upcoming, Ended), 3 for authenticated (+ Created by Me) */}
+      {/* Tabs: 2 for guests (Ongoing & Upcoming, Ended), 3 for authenticated (+ Created by Me) */}
       <View style={[styles.tabBar, { backgroundColor: C.card, borderBottomColor: C.border }]}>
         {(isAuthenticated ? TABS_AUTH : TABS_GUEST).map((tab) => (
           <TouchableOpacity

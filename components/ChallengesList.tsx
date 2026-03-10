@@ -121,31 +121,31 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     return aStart - bStart;
                 });
             } else if (internalTab === 'ended') {
-                // Fetch 'active' (which returns active + approved) because ended challenges still have 'approved' status
-                // We CANNOT rely on getAll('ended') as it returns empty
-                const response = await challengesApi.getAll('active');
+                // Fetch ended from API and also from active list (end_date < now) so all ended challenges appear
+                const [endedRes, activeRes] = await Promise.all([
+                    challengesApi.getAll('ended').catch(() => ({ status: 'success' as const, data: { challenges: [] } })),
+                    challengesApi.getAll('active'),
+                ]);
                 let endedChallenges: Challenge[] = [];
+                const endedFromApi = (endedRes.data?.challenges ?? (Array.isArray(endedRes.data) ? endedRes.data : [])) as any[];
+                endedChallenges = endedFromApi.map((item: any) => item.challenge || item);
 
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
+                if (activeRes.status === 'success') {
+                    const data = activeRes.data?.challenges || activeRes.data || [];
                     const all = Array.isArray(data) ? data : [];
-                    // Filter for ended challenges
-                    endedChallenges = all.filter((ch: any) => new Date(ch.end_date) < now);
+                    all.filter((ch: any) => new Date(ch.end_date) < now).forEach((ch: any) => {
+                        if (ch?.id && !endedChallenges.some(e => e.id === ch.id)) endedChallenges.push(ch);
+                    });
                 }
 
-                // Also include any JOINED challenges that have ended (even if not in public list)
                 if (userJoinedIds.size > 0) {
                     const joinedRes = await challengesApi.getJoinedChallenges();
                     if (joinedRes.status === 'success') {
                         const joined = joinedRes.data || [];
                         const joinedChallenges = Array.isArray(joined) ? joined.map((item: any) => item.challenge || item) : [];
-
-                        // Add joined ended challenges to the list if not already present
                         joinedChallenges.forEach((ch: any) => {
-                            if (new Date(ch.end_date) < now) {
-                                if (!endedChallenges.some(e => e.id === ch.id)) {
-                                    endedChallenges.push(ch);
-                                }
+                            if (new Date(ch.end_date) < now && ch?.id && !endedChallenges.some(e => e.id === ch.id)) {
+                                endedChallenges.push(ch);
                             }
                         });
                     }
@@ -425,12 +425,12 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
     };
 
     const TABS_AUTH = [
-        { key: 'live_upcoming' as const, label: 'Live & Upcoming', icon: 'zap' as const },
+        { key: 'live_upcoming' as const, label: 'Ongoing & Upcoming', icon: 'zap' as const },
         { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
         { key: 'created' as const, label: 'Created by Me', icon: 'user' as const },
     ];
     const TABS_GUEST = [
-        { key: 'live_upcoming' as const, label: 'Live & Upcoming', icon: 'zap' as const },
+        { key: 'live_upcoming' as const, label: 'Ongoing & Upcoming', icon: 'zap' as const },
         { key: 'ended' as const, label: 'Ended', icon: 'check-square' as const },
     ];
 

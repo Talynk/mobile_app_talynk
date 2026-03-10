@@ -13,6 +13,8 @@ import {
   RefreshControl,
   Keyboard,
   Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { router } from 'expo-router';
 import { postsApi, userApi, followsApi, categoriesApi, searchApi, countriesApi } from '@/lib/api';
@@ -693,7 +695,11 @@ export default function ExploreScreen() {
         transparent={true}
         onRequestClose={() => setShowCountryPicker(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
           <View style={[styles.modalContent, { paddingBottom: insets.bottom + 20 }]}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Select Country</Text>
@@ -777,7 +783,7 @@ export default function ExploreScreen() {
               />
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

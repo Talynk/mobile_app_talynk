@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { postsApi, likesApi, userApi, categoriesApi, followsApi } from '@/lib/api';
+import { postsApi, likesApi, userApi, categoriesApi, followsApi, challengesApi } from '@/lib/api';
 import { API_BASE_URL } from '@/lib/config';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
@@ -47,6 +47,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 export default function ProfileFeedScreen() {
   const params = useLocalSearchParams<{
     userId?: string;
+    challengeId?: string;
     initialPostId?: string;
     status?: string;
     initialPostData?: string;
@@ -56,11 +57,13 @@ export default function ProfileFeedScreen() {
     postsData?: string;
   }>();
   const resolvedUserId = typeof params.userId === 'string' ? params.userId : '';
+  const challengeId = typeof params.challengeId === 'string' ? params.challengeId : undefined;
 
   return (
     <RealtimeProvider>
       <ProfileFeedContent
         userId={resolvedUserId}
+        challengeId={challengeId}
         initialPostId={params.initialPostId as string}
         status={params.status as string}
         initialPostData={params.initialPostData as string}
@@ -75,6 +78,7 @@ export default function ProfileFeedScreen() {
 
 interface ProfileFeedContentProps {
   userId: string;
+  challengeId?: string;
   initialPostId?: string;
   status?: string;
   initialPostData?: string;
@@ -115,6 +119,7 @@ function applyExploreFilters(
 
 function ProfileFeedContent({
   userId,
+  challengeId,
   initialPostId,
   status,
   initialPostData,
@@ -275,6 +280,19 @@ function ProfileFeedContent({
             }
           }
         }
+      } else if (challengeId) {
+        // Show only this user's posts that were submitted to this competition
+        const res = await challengesApi.getPosts(challengeId, 1, 100);
+        if (res.status === 'success') {
+          const raw = res.data?.posts ?? res.data ?? [];
+          const list = Array.isArray(raw) ? raw : [];
+          const uid = userId;
+          postsArray = list
+            .map((item: any) => item.post || item)
+            .filter((p: any) => p && (String(p.user_id) === uid || String(p.user?.id) === uid || String(p.userId) === uid));
+        }
+        setHasMore(false);
+        response = { status: 'success' } as any;
       } else {
         // Use getUserPosts for other users' posts
         response = await userApi.getUserPosts(userId, page, LIMIT, postStatus as string);
@@ -303,7 +321,7 @@ function ProfileFeedContent({
           thumbnail_url: p.thumbnail_url || p.thumbnailUrl || '',
           thumbnailUrl: p.thumbnailUrl || p.thumbnail_url || '',
           thumbnail: p.thumbnail || p.thumbnail_url || p.thumbnailUrl || '',
-          likes: p.likes ?? p.likesCount ?? 0,
+          likes: p.like_count ?? p.likes ?? p.likesCount ?? 0,
           comments_count: p.comments_count ?? p.commentsCount ?? p.comment_count ?? 0,
           createdAt: p.createdAt || p.created_at,
           user: p.user || {

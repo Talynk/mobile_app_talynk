@@ -226,8 +226,10 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         const contactDigits = (formData.contact_phone_digits || '').replace(/\D/g, '');
         if (!contactCode || !contactCode.startsWith('+')) {
             errors.organizer_contact = 'Select country code';
-        } else if (contactDigits.length !== 9) {
-            errors.organizer_contact = 'Enter exactly 9 digits for phone number';
+        } else if (!contactDigits) {
+            errors.organizer_contact = 'Enter phone number (excluding country code)';
+        } else if (contactDigits.length < 6) {
+            errors.organizer_contact = 'Phone number is too short';
         }
 
         if (formData.has_rewards) {
@@ -455,12 +457,12 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                 </TouchableOpacity>
                                 <TextInput
                                     style={[styles.input, styles.phoneDigitsInput, fieldErrors.organizer_contact && styles.inputError]}
-                                    placeholder="9 digits"
+                                    placeholder="Write your number excluding country code"
                                     placeholderTextColor="#9ca3af"
                                     value={formData.contact_phone_digits}
-                                    onChangeText={(text) => updateField('contact_phone_digits', text.replace(/\D/g, '').slice(0, 9))}
-                                    keyboardType="number-pad"
-                                    maxLength={9}
+                                    onChangeText={(text) => updateField('contact_phone_digits', text.replace(/\D/g, '').slice(0, 15))}
+                                    keyboardType="phone-pad"
+                                    maxLength={15}
                                 />
                             </View>
                             {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
@@ -642,7 +644,11 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 animationType="slide"
                 onRequestClose={() => setShowCountryPicker(false)}
             >
-                <View style={styles.countryPickerOverlay}>
+                <KeyboardAvoidingView
+                    style={styles.countryPickerOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+                >
                     <View style={styles.countryPickerCard}>
                         <View style={styles.countryPickerHeader}>
                             <Text style={styles.countryPickerTitle}>Select country code</Text>
@@ -686,7 +692,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             }
                         />
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
         </Modal>
     );
