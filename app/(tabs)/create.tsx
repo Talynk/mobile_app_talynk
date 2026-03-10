@@ -32,6 +32,7 @@ import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Audio } from 'expo-av';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Constants from 'expo-constants';
@@ -293,6 +294,19 @@ export default function CreatePostScreen() {
       return () => setCreateFocused(false);
     }, [setCreateFocused])
   );
+
+  // Keep screen awake while recording video so system timeout doesn't interrupt capture
+  useEffect(() => {
+    const tag = 'create-recording';
+    if (isRecording) {
+      activateKeepAwakeAsync(tag).catch(() => {});
+    } else {
+      deactivateKeepAwake(tag);
+    }
+    return () => {
+      deactivateKeepAwake(tag);
+    };
+  }, [isRecording]);
 
   // --- AUTHENTICATION CHECK ---
   useEffect(() => {
