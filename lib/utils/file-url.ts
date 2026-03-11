@@ -49,7 +49,10 @@ export function getFileUrl(relativePath: string | null | undefined): string | nu
 export function getPostMediaUrl(post: any): string | null {
   // Check for fullUrl first (from API response), then various video / image fields
   const url =
+    post?.playback_url ||
     post?.fullUrl ||
+    post?.hls_url ||
+    post?.hlsUrl ||
     post?.video_url ||
     post?.videoUrl ||
     post?.image ||
@@ -109,7 +112,10 @@ export function getProfilePictureUrl(user: any, fallback?: string): string | nul
  */
 export function isHlsReady(post: any): boolean {
   return post?.hlsReady === true ||
-    (post?.hls_url && post?.processing_status === 'completed');
+    post?.streamType === 'hls' ||
+    post?.stream_type === 'hls' ||
+    (post?.playback_url && typeof post.playback_url === 'string' && post.playback_url.toLowerCase().includes('.m3u8')) ||
+    ((post?.hls_url || post?.hlsUrl) && (post?.processing_status === 'completed' || post?.processingStatus === 'completed'));
 }
 
 /**
@@ -132,6 +138,9 @@ export function isVideoProcessing(post: any): boolean {
 export function getStreamType(post: any): 'hls' | 'raw' | null {
   if (post?.streamType) {
     return post.streamType;
+  }
+  if (post?.stream_type) {
+    return post.stream_type;
   }
   // Infer from other fields if streamType not present
   if (isHlsReady(post)) {
@@ -174,16 +183,22 @@ export function getPlaybackUrl(post: any): string | null {
 
   // Only play when HLS is ready — check both camelCase and snake_case
   const processingDone = post.processing_status === 'completed' || post.processingStatus === 'completed';
-  const hasHlsUrl = post.hls_url || post.hlsUrl || post.fullUrl?.includes('.m3u8');
+  const hasHlsUrl =
+    post.playback_url?.includes?.('.m3u8') ||
+    post.hls_url ||
+    post.hlsUrl ||
+    post.fullUrl?.includes('.m3u8');
   const hlsReady = processingDone && hasHlsUrl;
 
   // Also allow if hlsReady boolean flag is set
   if (!hlsReady && !post.hlsReady) return null;
 
   // Prefer hls_url, then hlsUrl, then fullUrl (which backend sets to hls_url when completed)
-  const url = post.hls_url || post.hlsUrl || post.fullUrl;
+  const url = post.playback_url || post.hls_url || post.hlsUrl || post.fullUrl;
   if (!url) return null;
 
-  return getFileUrl(url);
+  const resolved = getFileUrl(url);
+  // NEVER play raw MP4 anywhere in the app — HLS only
+  if (resolved && resolved.toLowerCase().includes('.mp4')) return null;
+  return resolved;
 }
-

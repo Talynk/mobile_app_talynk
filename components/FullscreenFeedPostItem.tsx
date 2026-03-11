@@ -373,6 +373,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
   const isAd = (item as any).isAd === true;
+  const adDisplayName = item.user?.display_name || item.user?.username || 'Sponsored';
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
@@ -506,6 +507,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
         <View style={[styles.bottomInfo, { bottom: 60 + insets.bottom - 40 }]}>
           <View style={styles.bottomInfoContent}>
+            {isAd && (
+              <View style={styles.sponsoredMetaRow}>
+                <View style={styles.sponsoredPill}>
+                  <Text style={styles.sponsoredPillText}>Sponsored</Text>
+                </View>
+                <Text style={styles.sponsoredByText} numberOfLines={1}>
+                  {adDisplayName}
+                </Text>
+              </View>
+            )}
             <TouchableOpacity onPress={handleUserPress}>
               <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
             </TouchableOpacity>
@@ -523,13 +534,19 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             {(item.createdAt || item.uploadDate || (item as any).created_at) && (
               <Text style={styles.timestamp}>{timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}</Text>
             )}
+            {isAd && (
+              <TouchableOpacity style={styles.sponsoredCtaInline} onPress={() => onShare(item.id)}>
+                <Feather name="external-link" size={14} color="#fff" />
+                <Text style={styles.sponsoredCtaInlineText}>Learn more</Text>
+              </TouchableOpacity>
+            )}
           </View>
-          {item.category && (
+          {!isAd && item.category && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
               <Text style={styles.categoryText}>#{typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name}</Text>
             </TouchableOpacity>
           )}
-          {user && user.id !== item.user?.id && (
+          {!isAd && user && user.id !== item.user?.id && (
             <TouchableOpacity
               style={[styles.followButton, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }]}
               onPress={handleFollow}
@@ -838,6 +855,31 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
   },
+  sponsoredMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  sponsoredPill: {
+    backgroundColor: 'rgba(96, 165, 250, 0.92)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  sponsoredPillText: {
+    color: '#031525',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  sponsoredByText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
+  },
   username: {
     color: '#fff',
     fontSize: 14,
@@ -887,6 +929,24 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  sponsoredCtaInline: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.45)',
+  },
+  sponsoredCtaInlineText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   categoryBadge: {
     alignSelf: 'flex-start',

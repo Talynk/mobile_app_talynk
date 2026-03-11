@@ -6,33 +6,26 @@
  */
 
 /**
- * Check if a post is HLS-ready (safe to display).
- * STRICT: Only HLS (.m3u8) or backend-confirmed completed. No MP4, no other formats.
+ * Check if a post is HLS-ready (safe to display). Image posts always pass.
+ * Video: allow if backend says hlsReady, or we have .m3u8, or processing completed with any non-MP4 URL.
+ * Only exclude when it's clearly video and the ONLY URL is .mp4 (never play raw MP4).
  */
 export function isHlsReady(post: any): boolean {
-    // Non-video posts always pass
-    if (post.type !== 'video') return true;
+    const isVideo = post.type === 'video' || post.mediaType === 'video';
+    if (!isVideo) return true;
 
-    // Backend says HLS is ready
     if (post.hlsReady === true) return true;
-
-    const urls = [
-        post.fullUrl,
-        post.video_url,
-        post.videoUrl,
-        post.mediaUrl,
-        post.hls_url,
-        post.hlsUrl,
-    ].filter(Boolean);
-
-    for (const url of urls) {
-        if (typeof url === 'string' && url.toLowerCase().includes('.m3u8')) return true;
-    }
-
-    // Processing completed (backend transcoded to HLS)
     if (post.processing_status === 'completed' || post.processingStatus === 'completed') return true;
+    if (post.streamType === 'hls' || post.stream_type === 'hls') return true;
 
-    // No HLS — do not show (no MP4, no other formats)
+    const fullUrl = post.playback_url || post.fullUrl || post.hls_url || post.hlsUrl;
+    if (fullUrl && typeof fullUrl === 'string' && fullUrl.toLowerCase().includes('.m3u8')) return true;
+    if (fullUrl && typeof fullUrl === 'string' && !fullUrl.toLowerCase().includes('.mp4')) return true;
+
+    const videoUrl = post.video_url || post.videoUrl || post.mediaUrl;
+    if (videoUrl && typeof videoUrl === 'string' && videoUrl.toLowerCase().includes('.m3u8')) return true;
+    if (videoUrl && typeof videoUrl === 'string' && !videoUrl.toLowerCase().includes('.mp4')) return true;
+
     return false;
 }
 

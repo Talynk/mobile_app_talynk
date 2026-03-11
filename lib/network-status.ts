@@ -44,4 +44,3 @@ export const networkStatus = {
     notify({ at: lastChangedAt, source: meta?.source });
   },
 };
-

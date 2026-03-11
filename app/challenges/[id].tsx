@@ -14,6 +14,7 @@ import {
   useWindowDimensions,
   StatusBar,
   Animated,
+  InteractionManager,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { challengesApi, postsApi, followsApi, likesApi } from '@/lib/api';
@@ -99,6 +100,7 @@ export default function ChallengeDetailScreen() {
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
+  const challengeDetailListRef = useRef<FlatList>(null);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -115,8 +117,52 @@ export default function ChallengeDetailScreen() {
   const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
   const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
   const [challengePostsOrderedBy, setChallengePostsOrderedBy] = useState<string | undefined>(undefined);
+  const [tabsSectionOffsetY, setTabsSectionOffsetY] = useState(0);
+  const pendingTabScrollRef = useRef(false);
 
   useRefetchOnReconnect(() => fetchChallenge());
+
+  const scrollToTabsSection = useCallback(() => {
+    if (tabsSectionOffsetY <= 0) return;
+
+    InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        challengeDetailListRef.current?.scrollToOffset({
+          offset: Math.max(0, tabsSectionOffsetY - 16),
+          animated: true,
+        });
+      });
+    });
+  }, [tabsSectionOffsetY]);
+
+  const handleTabChange = useCallback((tab: 'posts' | 'participants' | 'winners') => {
+    if (tab === activeTab) {
+      scrollToTabsSection();
+      return;
+    }
+    pendingTabScrollRef.current = true;
+    setActiveTab(tab);
+  }, [activeTab, scrollToTabsSection]);
+
+  useEffect(() => {
+    if (!pendingTabScrollRef.current || tabsSectionOffsetY <= 0) return;
+
+    const readyForCurrentTab =
+      activeTab === 'winners'
+        ? true
+        : activeTab === 'posts'
+          ? !postsLoading
+          : !loadingAllParticipants;
+
+    if (!readyForCurrentTab) return;
+
+    const timeout = setTimeout(() => {
+      scrollToTabsSection();
+      pendingTabScrollRef.current = false;
+    }, 80);
+
+    return () => clearTimeout(timeout);
+  }, [activeTab, postsLoading, loadingAllParticipants, tabsSectionOffsetY, scrollToTabsSection]);
 
   const fetchChallenge = async () => {
     if (!id) return;
@@ -629,42 +675,31 @@ export default function ChallengeDetailScreen() {
               )}
               {challenge.status !== 'pending' && (
                 <>
-                  <TouchableOpacity
-                    style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
-                    onPress={async () => {
-                      setParticipantsModalVisible(true);
-                      setLoadingParticipants(true);
-                      try {
-                        const response = await challengesApi.getParticipants(id as string);
-                        if (response?.status === 'success') {
-                          const participantsList = response.data?.participants || response.data || [];
-                          setParticipants(Array.isArray(participantsList) ? participantsList : []);
-                        } else {
-                          setParticipants([]);
-                        }
-                      } catch (error) {
-                        console.error('Error fetching participants:', error);
-                        setParticipants([]);
-                        Alert.alert('Error', 'Failed to load participants');
-                      } finally {
-                        setLoadingParticipants(false);
-                      }
-                    }}
-                  >
-                    <MaterialIcons name="people" size={20} color="#fff" />
-                    <Text style={styles.organizerActionText}>View Participants</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.organizerActionButton, { backgroundColor: C.success }]}
-                    onPress={() => {
-                      Alert.alert('Competition Posts', `There are ${posts.length} posts in this competition`, [
-                        { text: 'OK' }
-                      ]);
-                    }}
-                  >
-                    <MaterialIcons name="video-library" size={20} color="#fff" />
-                    <Text style={styles.organizerActionText}>View Posts ({posts.length})</Text>
-                  </TouchableOpacity>
+                  <View style={styles.organizerActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.organizerActionButton, { backgroundColor: C.primary }]}
+                      onPress={() => handleTabChange('participants')}
+                    >
+                      <MaterialIcons name="people" size={20} color="#fff" />
+                      <Text style={styles.organizerActionText}>View Participants</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.organizerActionButton, { backgroundColor: C.success }]}
+                      onPress={() => handleTabChange('posts')}
+                    >
+                      <MaterialIcons name="video-library" size={20} color="#fff" />
+                      <Text style={styles.organizerActionText}>View Posts</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {challengeEnded && (
+                    <TouchableOpacity
+                      style={[styles.organizerActionButton, styles.organizerActionButtonFull, { backgroundColor: '#f59e0b' }]}
+                      onPress={() => handleTabChange('winners')}
+                    >
+                      <MaterialIcons name="emoji-events" size={20} color="#fff" />
+                      <Text style={styles.organizerActionText}>View Winners</Text>
+                    </TouchableOpacity>
+                  )}
                 </>
               )}
             </View>
@@ -822,13 +857,18 @@ export default function ChallengeDetailScreen() {
         {/* Tabs - only when challenge is approved (not pending); pending organizer sees no Posts/Participants tabs */}
         {challenge.status !== 'pending' && (
           <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
+            <View
+              onLayout={(event) => {
+                setTabsSectionOffsetY(event.nativeEvent.layout.y);
+              }}
+            >
             <View style={styles.tabsContainer}>
               <TouchableOpacity
                 style={[
                   styles.tab,
                   activeTab === 'posts' && styles.tabActive
                 ]}
-                onPress={() => setActiveTab('posts')}
+                onPress={() => handleTabChange('posts')}
               >
                 <MaterialIcons
                   name="video-library"
@@ -838,9 +878,10 @@ export default function ChallengeDetailScreen() {
                 <Text style={[
                   styles.tabText,
                   { color: activeTab === 'posts' ? C.primary : C.textSecondary }
-                ]}>
-                  Posts ({postCount})
-                </Text>
+                ]} numberOfLines={1}>Posts</Text>
+                <View style={[styles.tabCountBadge, activeTab === 'posts' && styles.tabCountBadgeActive]}>
+                  <Text style={[styles.tabCountText, activeTab === 'posts' && styles.tabCountTextActive]}>{postCount}</Text>
+                </View>
               </TouchableOpacity>
 
               {isAuthenticated && (
@@ -849,7 +890,7 @@ export default function ChallengeDetailScreen() {
                     styles.tab,
                     activeTab === 'participants' && styles.tabActive
                   ]}
-                  onPress={() => setActiveTab('participants')}
+                  onPress={() => handleTabChange('participants')}
                 >
                   <MaterialIcons
                     name="people"
@@ -859,15 +900,16 @@ export default function ChallengeDetailScreen() {
                   <Text style={[
                     styles.tabText,
                     { color: activeTab === 'participants' ? C.primary : C.textSecondary }
-                  ]}>
-                    Participants ({participantCount})
-                  </Text>
+                  ]} numberOfLines={1}>Participants</Text>
+                  <View style={[styles.tabCountBadge, activeTab === 'participants' && styles.tabCountBadgeActive]}>
+                    <Text style={[styles.tabCountText, activeTab === 'participants' && styles.tabCountTextActive]}>{participantCount}</Text>
+                  </View>
                 </TouchableOpacity>
               )}
               {challengeEnded && (
                 <TouchableOpacity
                   style={[styles.tab, activeTab === 'winners' && styles.tabActive]}
-                  onPress={() => setActiveTab('winners')}
+                  onPress={() => handleTabChange('winners')}
                 >
                   <MaterialIcons
                     name="emoji-events"
@@ -882,6 +924,7 @@ export default function ChallengeDetailScreen() {
                   </Text>
                 </TouchableOpacity>
               )}
+            </View>
             </View>
           </View>
         )}
@@ -1044,6 +1087,7 @@ export default function ChallengeDetailScreen() {
 
       {/* Main Content - Single FlatList: flex: 1 so it fills space and scroll works; paddingBottom so all details are reachable */}
       <FlatList
+        ref={challengeDetailListRef}
         style={styles.challengeDetailList}
         data={data}
         renderItem={renderItem}
@@ -1055,7 +1099,7 @@ export default function ChallengeDetailScreen() {
           }
         }}
         numColumns={activeTab === 'posts' ? 3 : 1}
-        key={activeTab} // Force re-render when switching tabs
+        key={activeTab === 'posts' ? 'posts' : 'detail-list'}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
           isLoading ? (
@@ -1477,6 +1521,9 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   organizerActions: {
+    gap: 12,
+  },
+  organizerActionsRow: {
     flexDirection: 'row',
     gap: 12,
   },
@@ -1487,12 +1534,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 14,
     borderRadius: 12,
+    minHeight: 52,
+    paddingHorizontal: 12,
+  },
+  organizerActionButtonFull: {
+    width: '100%',
   },
   organizerActionText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     marginLeft: 8,
+    flexShrink: 1,
   },
   tabsSection: {
     paddingHorizontal: 20,
@@ -1503,24 +1556,51 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
   },
   tab: {
-    flexDirection: 'row',
+    flex: 1,
+    flexDirection: 'column',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 6,
+    paddingHorizontal: 12,
+    minHeight: 72,
+    borderRadius: 10,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
   tabActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.10)',
+    borderColor: '#60a5fa',
     borderBottomColor: '#60a5fa',
   },
   tabText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  tabCountBadge: {
+    minWidth: 28,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#1f2937',
+  },
+  tabCountBadgeActive: {
+    backgroundColor: '#60a5fa',
+  },
+  tabCountText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  tabCountTextActive: {
+    color: '#ffffff',
   },
   winnersSection: {
     padding: 16,

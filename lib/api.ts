@@ -318,42 +318,29 @@ export type PostsAllParams = {
 export const postsApi = {
   getAll: async (
     page = 1,
-    limit = 20,
-    options: PostsAllParams | string = {}
+    limit = 10,
+    options: PostsAllParams | string = ''
   ): Promise<ApiResponse<{ posts: Post[]; pagination: any; filters: any }>> => {
     try {
-      const params: Record<string, string | number> = { page, limit };
-      if (typeof options === 'object') {
+      if (typeof options === 'object' && options) {
+        const params: Record<string, string | number> = { page, limit };
         if (options.featured_first !== undefined) params.featured_first = options.featured_first;
         if (options.sort !== undefined) params.sort = options.sort;
         if (options.status !== undefined) params.status = options.status;
         if (options.category_id !== undefined) params.category_id = options.category_id;
         if (options.subcategory_id !== undefined) params.subcategory_id = options.subcategory_id;
-      } else if (typeof options === 'string') {
-        params.timestamp = options;
+        const qs = new URLSearchParams(params as any).toString();
+        const response = await apiClient.get(`/api/posts/all?${qs}`);
+        return response.data;
       }
-      const qs = new URLSearchParams(params as any).toString();
-      const response = await apiClient.get(`/api/posts/all?${qs}`);
-      const apiResponse = response.data;
-      if (apiResponse?.status === 'success' && apiResponse?.data) {
-        const posts = Array.isArray(apiResponse.data.posts) ? apiResponse.data.posts : [];
-        const pagination = apiResponse.data.pagination || {};
-        const filters = apiResponse.data.filters || {};
-        return {
-          status: 'success',
-          message: apiResponse.message || 'Posts fetched',
-          data: { posts, pagination, filters },
-        };
-      }
-      return {
-        status: 'error',
-        message: apiResponse?.message || 'Failed to fetch posts',
-        data: { posts: [], pagination: {}, filters: {} },
-      };
+
+      const timestamp = typeof options === 'string' ? options : '';
+      const response = await apiClient.get(`/api/posts/all?page=${page}&limit=${limit}${timestamp}`);
+      return response.data;
     } catch (error: any) {
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to fetch posts',
+        message: 'Failed to fetch posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }

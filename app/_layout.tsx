@@ -22,7 +22,6 @@ import { imageCache } from '@/lib/utils/image-cache';
 import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
 import { CreateFocusProvider } from '@/lib/create-focus-context';
-import NetworkBanner from '@/components/NetworkBanner';
 import { VideoReadyWatcher } from '@/components/VideoReadyWatcher';
 
 export {
@@ -204,7 +203,6 @@ function RootLayoutNav() {
                   <Stack.Screen name="search" options={{ headerShown: false }} />
                   <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
                 </Stack>
-                <NetworkBanner />
               </View>
               <StatusBar style="light" />
             </ThemeProvider>

@@ -41,6 +41,7 @@ import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
+import { getExplorePostsCache } from '@/lib/explore-posts-cache';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -193,8 +194,13 @@ function ProfileFeedContent({
       if (isExplore) {
         let explorePosts: Post[] = [];
 
+        const cachedExplorePosts = getExplorePostsCache();
+        if (cachedExplorePosts.length > 0) {
+          explorePosts = cachedExplorePosts;
+        }
+
         // If Explore grid passed us the exact posts, use them directly
-        if (explorePostsData) {
+        if (explorePosts.length === 0 && explorePostsData) {
           try {
             const parsed = JSON.parse(explorePostsData);
             if (Array.isArray(parsed)) {
@@ -209,7 +215,7 @@ function ProfileFeedContent({
         if (explorePosts.length === 0) {
           const [categoriesRes, postsRes] = await Promise.all([
             categoriesApi.getAll(),
-            postsApi.getAll(1, 50),
+            postsApi.getAll(1, 100),
           ]);
           const categories = (categoriesRes.data as any)?.categories ?? [];
           const allPosts = (postsRes.data as any)?.posts ?? [];

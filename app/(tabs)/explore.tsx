@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useDeferredValue, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,7 @@ import {
   Platform,
 } from 'react-native';
 import { router } from 'expo-router';
-import { postsApi, userApi, followsApi, categoriesApi, searchApi, countriesApi } from '@/lib/api';
+import { feedApi, postsApi, userApi, followsApi, categoriesApi, searchApi, countriesApi } from '@/lib/api';
 import { Post, User, Country } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
@@ -27,18 +27,88 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
-// expo-av removed — grid uses Image thumbnails only
-import { useVideoThumbnail } from '@/lib/hooks/use-video-thumbnail';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
+import { normalizePost } from '@/lib/utils/normalize-post';
+import { setExplorePostsCache } from '@/lib/explore-posts-cache';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+
+const ExploreGridCard = React.memo(function ExploreGridCard({
+  item,
+  onPress,
+}: {
+  item: Post;
+  onPress: (postId: string) => void;
+}) {
+  const mediaUrl = getPostMediaUrl(item) || '';
+  const serverThumbnail = getThumbnailUrl(item);
+  const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+  const isHls = mediaUrl.endsWith('.m3u8');
+  const isVideo =
+    item.type === 'video' || isHls ||
+    (mediaUrl !== null &&
+      mediaUrl !== '' &&
+      (mediaUrl.toLowerCase().includes('.mp4') ||
+        mediaUrl.toLowerCase().includes('.mov') ||
+        mediaUrl.toLowerCase().includes('.webm')));
+
+  const displayUrl = serverThumbnail || fallbackImageUrl || (!isVideo ? mediaUrl : null);
+
+  return (
+    <TouchableOpacity
+      style={styles.gridCard}
+      activeOpacity={0.9}
+      onPress={() => onPress(item.id)}
+    >
+      {displayUrl ? (
+        <Image
+          source={{ uri: displayUrl }}
+          style={styles.gridMedia}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.gridMedia, styles.gridNoMedia]}>
+          <MaterialIcons
+            name={isVideo ? 'video-library' : 'image'}
+            size={28}
+            color="#444"
+          />
+        </View>
+      )}
+
+      {isVideo && (
+        <View style={styles.gridPlayIcon}>
+          <Feather name="play" size={16} color="#fff" />
+        </View>
+      )}
+
+      <View style={styles.gridOverlay}>
+        <View style={styles.gridStats}>
+          <Feather name="heart" size={12} color="#fff" />
+          <Text style={styles.gridStatText}>{item.likes || 0}</Text>
+        </View>
+        {(item.createdAt || (item as any).uploadDate) && (
+          <Text style={styles.gridTime}>
+            {timeAgo(
+              (item as any).createdAt ||
+              (item as any).uploadDate ||
+              (item as any).created_at
+            )}
+          </Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 export default function ExploreScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Grid state
   const [gridPosts, setGridPosts] = useState<Post[]>([]);
+  const [allGridPosts, setAllGridPosts] = useState<Post[]>([]);
   const [gridLoading, setGridLoading] = useState(false);
 
   // Filters
@@ -63,10 +133,16 @@ export default function ExploreScreen() {
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
   const insets = useSafeAreaInsets();
-  const gridScrollViewRef = useRef<ScrollView>(null);
+  const gridListRef = useRef<FlatList<Post>>(null);
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const deferredCountrySearchQuery = useDeferredValue(countrySearchQuery);
 
   useEffect(() => {
     loadInitialContent();
+    setGridLoading(true);
+    loadGridPosts().catch(() => {
+      setGridLoading(false);
+    });
   }, []);
 
   // Fetch countries from backend (no hardcoding)
@@ -106,34 +182,25 @@ export default function ExploreScreen() {
     return displayMap[name] || name;
   };
 
-  // Load posts when filters change (only if not searching)
+  // Apply client-side filters to the full explore dataset
   useEffect(() => {
     if (!searchQuery) {
-      // Immediately clear posts and show loading
-      setGridPosts([]);
-      setGridLoading(true);
-
-      // Load posts with current filters immediately
-      loadGridPosts().then(() => {
-        // Scroll to top after loading
-        setTimeout(() => {
-          gridScrollViewRef.current?.scrollTo({ y: 0, animated: false });
-        }, 50);
-      }).catch(() => {
-        setGridLoading(false);
-      });
+      setGridPosts(applyClientFilters(allGridPosts));
+      setTimeout(() => {
+        gridListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      }, 50);
     }
-  }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, searchQuery]);
+  }, [allGridPosts, selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, searchQuery, categories]);
 
   useEffect(() => {
-    if (searchQuery.trim().length > 0) {
+    if (deferredSearchQuery.trim().length > 0) {
       performSearch();
     } else {
       setSearchUsers([]);
       setSearchPosts([]);
       setIsSearching(false);
     }
-  }, [searchQuery]);
+  }, [deferredSearchQuery]);
 
   const applyClientFilters = (posts: Post[]) => {
     let filtered = [...posts];
@@ -190,21 +257,120 @@ export default function ExploreScreen() {
     }
   };
 
-  const loadGridPosts = async () => {
+  const loadGridPosts = async (_page?: number, _forceRefresh?: boolean) => {
     try {
-      // If we have filters, we might want to use a specific API endpoint or just client-side filter if dataset is small.
-      // But for scalability, we should use API.
-      // However, the current API seems to support basic filtering.
-      // Let's try to use getAll with some params if possible, or just client side for now as per previous implementation logic
-      // The previous implementation used client-side filtering on the initial fetch?
-      // Wait, applyClientFilters was used. Let's stick to fetching fresh data.
+      setGridLoading(true);
 
-      const response = await postsApi.getAll(1, 50);
-      if (response.status === 'success') {
-        const allPosts = response.data.posts || [];
-        const filtered = applyClientFilters(filterHlsReady(allPosts));
-        setGridPosts(filtered);
+      const limit = 50;
+      const seen = new Set<string>();
+      const mergedPosts: Post[] = [];
+      let page = 1;
+      let totalPages = 1;
+      let keepGoing = true;
+      let useCursorFallback = false;
+      let nextCursor: string | null = null;
+
+      while (keepGoing) {
+        let pagePosts: Post[] = [];
+        let isFallback = false;
+
+        if (useCursorFallback) {
+          const response = await feedApi.getPublic(nextCursor || undefined, 20);
+          if (response.status !== 'success') {
+            if (__DEV__) {
+              console.log(`🟡 [Explore] public fallback failed: ${response.message}`);
+            }
+            break;
+          }
+          pagePosts = response.data?.posts ?? [];
+          nextCursor = response.data?.nextCursor || null;
+          isFallback = true;
+        } else {
+          const response = await postsApi.getAll(page, limit, {
+            featured_first: 'false',
+            sort: 'newest',
+            status: 'active',
+          });
+
+          if (response.status !== 'success') {
+            if (__DEV__) {
+              console.log(`🟡 [Explore] getAll failed on page ${page}: ${response.message}`);
+            }
+            useCursorFallback = true;
+            nextCursor = null;
+            continue;
+          }
+
+          pagePosts = response.data?.posts ?? [];
+          const pagination = response.data?.pagination ?? {};
+          isFallback = !!pagination.fallback || response.data?.filters?.fallback === 'public_feed';
+          totalPages = Number(pagination.totalPages || 1);
+
+          if (isFallback) {
+            useCursorFallback = true;
+            nextCursor = null;
+            continue;
+          }
+
+          if (page >= totalPages || pagePosts.length < limit) {
+            keepGoing = false;
+          } else {
+            page += 1;
+          }
+        }
+
+        const filteredPagePosts = pagePosts.filter((post: any) => {
+          if (!post?.id || seen.has(post.id)) return false;
+          if (post?.isAd) return false;
+          if (post?.challenge_id || post?.challengeId) return false;
+          return true;
+        });
+
+        for (const post of filteredPagePosts) {
+          seen.add(post.id);
+          mergedPosts.push(post);
+        }
+
+        if (isFallback) {
+          keepGoing = !!nextCursor;
+          if (!nextCursor) {
+            break;
+          }
+        }
       }
+
+      const needsEnrichment = mergedPosts.some((post: any) => !post?.category && !post?.category_id);
+      let enrichedPosts = mergedPosts;
+
+      if (needsEnrichment && mergedPosts.length > 0) {
+        const enrichResults = await Promise.allSettled(
+          mergedPosts.map((post) => postsApi.getById(post.id))
+        );
+
+        enrichedPosts = mergedPosts.map((post, index) => {
+          const result = enrichResults[index];
+          if (result?.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
+            return normalizePost({
+              ...post,
+              ...result.value.data,
+            });
+          }
+          return post;
+        });
+      }
+
+      const readyPosts = filterHlsReady(
+        enrichedPosts.filter((post: any) => !post?.isAd && !post?.challenge_id && !post?.challengeId)
+      );
+
+      if (__DEV__) {
+        console.log(
+          `🟣 [Explore] Loaded source posts: total=${enrichedPosts.length}, afterHLS=${readyPosts.length}, totalPages=${totalPages}, cursorFallback=${useCursorFallback}`
+        );
+      }
+
+      setAllGridPosts(readyPosts);
+      setGridPosts(applyClientFilters(readyPosts));
     } catch (error) {
       console.error('Error loading grid posts:', error);
     } finally {
@@ -213,13 +379,13 @@ export default function ExploreScreen() {
   };
 
   const performSearch = async () => {
-    if (!searchQuery.trim()) return;
+    if (!deferredSearchQuery.trim()) return;
 
     setIsSearching(true);
     try {
       const [usersRes, postsRes] = await Promise.all([
-        searchApi.search(searchQuery, { type: 'users' }),
-        searchApi.search(searchQuery, { type: 'posts' }),
+        searchApi.search(deferredSearchQuery, { type: 'users' }),
+        searchApi.search(deferredSearchQuery, { type: 'posts' }),
       ]);
 
       if (usersRes.status === 'success') {
@@ -271,110 +437,32 @@ export default function ExploreScreen() {
     setCountrySearchQuery('');
   };
 
-  const filteredCountries = !countrySearchQuery.trim()
-    ? countriesList
-    : countriesList.filter(c =>
-        (c.name || '').toLowerCase().includes(countrySearchQuery.toLowerCase().trim()) ||
-        (c.code || '').toLowerCase().includes(countrySearchQuery.toLowerCase().trim())
-      );
-
-  // ============ GRID COMPONENTS ============
-  const GridPostCard = ({ item, index }: { item: Post; index: number }) => {
-    const mediaUrl = getPostMediaUrl(item) || '';
-    // HLS OPTIMIZATION: Server provides thumbnail_url for HLS-processed videos
-    const serverThumbnail = getThumbnailUrl(item); // Uses post.thumbnail_url from API
-    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-
-    const isHls = mediaUrl.endsWith('.m3u8');
-    const isVideo =
-      item.type === 'video' || isHls ||
-      (mediaUrl !== null &&
-        mediaUrl !== '' &&
-        (mediaUrl.toLowerCase().includes('.mp4') ||
-          mediaUrl.toLowerCase().includes('.mov') ||
-          mediaUrl.toLowerCase().includes('.webm')));
-
-    // DATA SAVER: Server always generates thumbnail_url during HLS processing
-    // Only fall back to client-side thumbnail generation if server thumbnail is missing
-    // This prevents downloading the full raw MP4 just for a thumbnail frame
-    const thumbnailSourceUrl = null; // Server thumbnails are always available for HLS-ready posts
-
-    const { thumbnailUri: generatedThumbnail, isLoading: thumbnailLoading } = useVideoThumbnail(
-      thumbnailSourceUrl,
-      fallbackImageUrl || '',
-      1000
+  const filteredCountries = useMemo(() => {
+    if (!deferredCountrySearchQuery.trim()) return countriesList;
+    const needle = deferredCountrySearchQuery.toLowerCase().trim();
+    return countriesList.filter(c =>
+      (c.name || '').toLowerCase().includes(needle) ||
+      (c.code || '').toLowerCase().includes(needle)
     );
+  }, [countriesList, deferredCountrySearchQuery]);
 
-    // PRIORITY: Server thumbnail > generated thumbnail > fallback image > nothing
-    const displayUrl = serverThumbnail
-      || generatedThumbnail
-      || fallbackImageUrl
-      || (!isVideo ? mediaUrl : null); // For images, use media URL directly
+  const handleOpenGridPost = useCallback((postId: string) => {
+    setExplorePostsCache(gridPosts);
+    router.push({
+      pathname: '/profile-feed/explore' as any,
+      params: {
+        initialPostId: postId,
+        mainCategoryId: String(selectedMainCategoryId ?? ''),
+        subCategoryId: String(selectedSubCategoryId ?? ''),
+        countryId: String(selectedCountryId ?? ''),
+      },
+    });
+  }, [gridPosts, selectedMainCategoryId, selectedSubCategoryId, selectedCountryId]);
 
-  return (
-    <TouchableOpacity
-      style={styles.gridCard}
-      onPress={() =>
-        router.push({
-          pathname: '/profile-feed/explore' as any,
-          params: {
-            initialPostId: item.id,
-            mainCategoryId: String(selectedMainCategoryId ?? ''),
-            subCategoryId: String(selectedSubCategoryId ?? ''),
-            countryId: String(selectedCountryId ?? ''),
-            // Pass the currently visible grid posts so explore feed
-            // shows EXACTLY the same items instead of re-fetching.
-            postsData: JSON.stringify(gridPosts),
-          },
-        })
-      }
-    >
-        {thumbnailLoading ? (
-          // Show spinner while generating thumbnail (max 5 seconds)
-          <View style={[styles.gridMedia, styles.gridNoMedia]}>
-            <ActivityIndicator size="small" color="#60a5fa" />
-          </View>
-        ) : displayUrl ? (
-          <Image
-            source={{ uri: displayUrl }}
-            style={styles.gridMedia}
-            resizeMode="cover"
-          />
-        ) : (
-          // Fallback placeholder
-          <View style={[styles.gridMedia, styles.gridNoMedia]}>
-            <MaterialIcons
-              name={isVideo ? 'video-library' : 'image'}
-              size={28}
-              color="#444"
-            />
-          </View>
-        )}
-
-        {isVideo && (
-          <View style={styles.gridPlayIcon}>
-            <Feather name="play" size={16} color="#fff" />
-          </View>
-        )}
-
-        <View style={styles.gridOverlay}>
-          <View style={styles.gridStats}>
-            <Feather name="heart" size={12} color="#fff" />
-            <Text style={styles.gridStatText}>{item.likes || 0}</Text>
-          </View>
-          {(item.createdAt || (item as any).uploadDate) && (
-            <Text style={styles.gridTime}>
-              {timeAgo(
-                (item as any).createdAt ||
-                (item as any).uploadDate ||
-                (item as any).created_at
-              )}
-            </Text>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const renderGridItem = useCallback(
+    ({ item }: { item: Post }) => <ExploreGridCard item={item} onPress={handleOpenGridPost} />,
+    [handleOpenGridPost]
+  );
 
   // ============ SEARCH COMPONENTS ============
   const SearchUserRow = ({ item }: { item: User }) => (
@@ -399,20 +487,11 @@ export default function ExploreScreen() {
     const isHls = mediaUrl?.endsWith('.m3u8');
     const isVideo = item.type === 'video' || isHls || (mediaUrl && mediaUrl.includes('.mp4'));
 
-    // HLS OPTIMIZATION: Server thumbnail_url takes priority
     const serverThumbnail = getThumbnailUrl(item);
     const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
 
-    // DATA SAVER: Don't download raw MP4 for thumbnail — use server-generated thumbnail
-    const { thumbnailUri: generatedThumbnail } = useVideoThumbnail(
-      null, // Never download raw MP4 for thumbnails
-      fallbackImageUrl || '',
-      1000
-    );
-
-    // PRIORITY: Server thumbnail > generated thumbnail > media URL > fallback
     const thumbnailUrl = isVideo
-      ? (serverThumbnail || generatedThumbnail || fallbackImageUrl)
+      ? (serverThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
 
     return (
@@ -535,157 +614,158 @@ export default function ExploreScreen() {
           )}
         </ScrollView>
       ) : (
-        // GRID VIEW WITH FILTERS
-        <ScrollView
-          ref={gridScrollViewRef}
+        <FlatList
+          ref={gridListRef}
+          data={gridLoading ? [] : gridPosts}
+          keyExtractor={(item) => item.id}
+          numColumns={3}
+          removeClippedSubviews={true}
+          initialNumToRender={18}
+          maxToRenderPerBatch={24}
+          windowSize={9}
+          updateCellsBatchingPeriod={50}
+          contentContainerStyle={styles.gridListContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        >
-          {/* Filters */}
-          <View style={styles.filterSection}>
-            {/* Country filter */}
-            <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => setShowCountryPicker(true)}
-            >
-              <MaterialIcons name="public" size={18} color="#60a5fa" />
-              <Text style={styles.filterButtonText}>
-                {countriesList.find((c: Country) => c.id === selectedCountryId)?.name ||
-                  'All Countries'}
-              </Text>
-              <Feather name="chevron-down" size={16} color="#666" />
-            </TouchableOpacity>
-
-            {/* Main Category filter */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.categoryScroll}
-            >
-              <TouchableOpacity
-                style={[
-                  styles.categoryPill,
-                  !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillActive,
-                ]}
-                onPress={() => {
-                  setSelectedMainCategoryId(null);
-                  setSelectedSubCategoryId(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.categoryPillText,
-                    !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillTextActive,
-                  ]}
-                >
-                  All
-                </Text>
-              </TouchableOpacity>
-
-              {categories.map((cat) => (
+          ListHeaderComponent={
+            <>
+              <View style={styles.filterSection}>
                 <TouchableOpacity
-                  key={cat.id}
-                  style={[
-                    styles.categoryPill,
-                    selectedMainCategoryId === cat.id && styles.categoryPillActive,
-                  ]}
-                  onPress={() => {
-                    setSelectedMainCategoryId(cat.id);
-                    setSelectedSubCategoryId(null);
-                  }}
+                  style={styles.filterButton}
+                  onPress={() => setShowCountryPicker(true)}
                 >
-                  <Text
-                    style={[
-                      styles.categoryPillText,
-                      selectedMainCategoryId === cat.id && styles.categoryPillTextActive,
-                    ]}
-                  >
-                    {getCategoryDisplayName(cat.name)}
+                  <MaterialIcons name="public" size={18} color="#60a5fa" />
+                  <Text style={styles.filterButtonText}>
+                    {countriesList.find((c: Country) => c.id === selectedCountryId)?.name ||
+                      'All Countries'}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-
-          {/* Subcategories (if main selected) */}
-          {selectedMainCategoryId && (
-            <View style={styles.subCategorySection}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.categoryScroll}
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.subCategoryPill,
-                    !selectedSubCategoryId && styles.subCategoryPillActive,
-                  ]}
-                  onPress={() => setSelectedSubCategoryId(null)}
-                >
-                  <Text
-                    style={[
-                      styles.subCategoryPillText,
-                      !selectedSubCategoryId && styles.subCategoryPillTextActive,
-                    ]}
-                  >
-                    All {getCategoryDisplayName(categories.find(c => c.id === selectedMainCategoryId)?.name || '')}
-                  </Text>
+                  <Feather name="chevron-down" size={16} color="#666" />
                 </TouchableOpacity>
 
-                {categories
-                  .find((c) => c.id === selectedMainCategoryId)
-                  ?.children?.map((sub: any) => (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.categoryScroll}
+                >
+                  <TouchableOpacity
+                    style={[
+                      styles.categoryPill,
+                      !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedMainCategoryId(null);
+                      setSelectedSubCategoryId(null);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryPillText,
+                        !selectedMainCategoryId && !selectedSubCategoryId && styles.categoryPillTextActive,
+                      ]}
+                    >
+                      All
+                    </Text>
+                  </TouchableOpacity>
+
+                  {categories.map((cat) => (
                     <TouchableOpacity
-                      key={sub.id}
+                      key={cat.id}
+                      style={[
+                        styles.categoryPill,
+                        selectedMainCategoryId === cat.id && styles.categoryPillActive,
+                      ]}
+                      onPress={() => {
+                        setSelectedMainCategoryId(cat.id);
+                        setSelectedSubCategoryId(null);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.categoryPillText,
+                          selectedMainCategoryId === cat.id && styles.categoryPillTextActive,
+                        ]}
+                      >
+                        {getCategoryDisplayName(cat.name)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              {selectedMainCategoryId && (
+                <View style={styles.subCategorySection}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.categoryScroll}
+                  >
+                    <TouchableOpacity
                       style={[
                         styles.subCategoryPill,
-                        selectedSubCategoryId === sub.id && styles.subCategoryPillActive,
+                        !selectedSubCategoryId && styles.subCategoryPillActive,
                       ]}
-                      onPress={() => setSelectedSubCategoryId(sub.id)}
+                      onPress={() => setSelectedSubCategoryId(null)}
                     >
                       <Text
                         style={[
                           styles.subCategoryPillText,
-                          selectedSubCategoryId === sub.id && styles.subCategoryPillTextActive,
+                          !selectedSubCategoryId && styles.subCategoryPillTextActive,
                         ]}
                       >
-                        {sub.name}
+                        All {getCategoryDisplayName(categories.find(c => c.id === selectedMainCategoryId)?.name || '')}
                       </Text>
                     </TouchableOpacity>
-                  ))}
-              </ScrollView>
-            </View>
-          )}
 
-          {/* Grid Content */}
-          {gridLoading ? (
-            <View style={{ padding: 40 }}>
-              <ActivityIndicator size="large" color="#60a5fa" />
-            </View>
-          ) : gridPosts.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <MaterialIcons name="grid-off" size={48} color="#333" />
-              <Text style={styles.emptyText}>No posts found</Text>
-              <TouchableOpacity
-                style={styles.resetButton}
-                onPress={() => {
-                  setSelectedMainCategoryId(null);
-                  setSelectedSubCategoryId(null);
-                  setSelectedCountryId(null);
-                }}
-              >
-                <Text style={styles.resetButtonText}>Clear Filters</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.gridContainer}>
-              {gridPosts.map((item, index) => (
-                <GridPostCard key={item.id} item={item} index={index} />
-              ))}
-            </View>
-          )}
-
-          <View style={{ height: 100 }} />
-        </ScrollView>
+                    {categories
+                      .find((c) => c.id === selectedMainCategoryId)
+                      ?.children?.map((sub: any) => (
+                        <TouchableOpacity
+                          key={sub.id}
+                          style={[
+                            styles.subCategoryPill,
+                            selectedSubCategoryId === sub.id && styles.subCategoryPillActive,
+                          ]}
+                          onPress={() => setSelectedSubCategoryId(sub.id)}
+                        >
+                          <Text
+                            style={[
+                              styles.subCategoryPillText,
+                              selectedSubCategoryId === sub.id && styles.subCategoryPillTextActive,
+                            ]}
+                          >
+                            {sub.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                  </ScrollView>
+                </View>
+              )}
+            </>
+          }
+          ListEmptyComponent={
+            gridLoading ? (
+              <View style={{ padding: 40 }}>
+                <ActivityIndicator size="large" color="#60a5fa" />
+              </View>
+            ) : (
+              <View style={styles.emptyContainer}>
+                <MaterialIcons name="grid-off" size={48} color="#333" />
+                <Text style={styles.emptyText}>No posts found</Text>
+                <TouchableOpacity
+                  style={styles.resetButton}
+                  onPress={() => {
+                    setSelectedMainCategoryId(null);
+                    setSelectedSubCategoryId(null);
+                    setSelectedCountryId(null);
+                  }}
+                >
+                  <Text style={styles.resetButtonText}>Clear Filters</Text>
+                </TouchableOpacity>
+              </View>
+            )
+          }
+          ListFooterComponent={<View style={{ height: 100 }} />}
+          renderItem={renderGridItem}
+        />
       )}
 
       {/* Country Picker Modal */}
@@ -1002,6 +1082,9 @@ const styles = StyleSheet.create({
   },
   gridContent: {
     padding: 1,
+  },
+  gridListContent: {
+    paddingBottom: 100,
   },
   gridLoadingContainer: {
     height: 300,
