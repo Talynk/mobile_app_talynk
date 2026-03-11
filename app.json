@@ -1,5 +1,6 @@
 {
   "expo": {
+    "owner": "humura",
     "name": "Talentix",
     "slug": "talentix",
     "version": "1.0.0",
@@ -89,7 +90,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "eba91790-fe7a-4c3d-a3e4-f939266e69d3"
+        "projectId": "1a34bcea-2f8e-4be9-bde8-7ba5e34f42c6"
       }
     }
   }

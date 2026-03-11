@@ -71,13 +71,13 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 setJoinedIds(userJoinedIds);
             }
 
-            // For unauthenticated users: fetch ALL challenges then filter by tab
+            // For unauthenticated users: fetch by tab. Ended uses dedicated getEnded() (public API).
             if (!user) {
-                const response = await challengesApi.getAll('active');
-                if (response.status === 'success') {
-                    const data = response.data?.challenges || response.data || [];
-                    const all = Array.isArray(data) ? data : [];
-                    if (internalTab === 'live_upcoming') {
+                if (internalTab === 'live_upcoming') {
+                    const response = await challengesApi.getAll('active');
+                    if (response.status === 'success') {
+                        const data = response.data?.challenges || response.data || [];
+                        const all = Array.isArray(data) ? data : [];
                         challengesToDisplay = all.filter((ch: any) => {
                             if (ch.status !== 'approved' && ch.status !== 'active') return false;
                             const endDate = new Date(ch.end_date).getTime();
@@ -92,8 +92,11 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                             if (!aActive && bActive) return 1;
                             return aStart - bStart;
                         });
-                    } else {
-                        challengesToDisplay = all.filter((ch: any) => new Date(ch.end_date) < now);
+                    }
+                } else if (internalTab === 'ended') {
+                    const endedRes = await challengesApi.getEnded().catch(() => ({ status: 'success' as const, data: { challenges: [] } }));
+                    if (endedRes.status === 'success' && endedRes.data?.challenges) {
+                        challengesToDisplay = (endedRes.data.challenges as any[]).map((item: any) => item.challenge || item);
                     }
                 }
             } else if (internalTab === 'live_upcoming') {
