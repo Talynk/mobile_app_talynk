@@ -367,8 +367,8 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                         )}
                         {item.has_rewards && (
                             <View style={styles.rewardBadge}>
-                                <Feather name="gift" size={12} color="#fff" />
-                                <Text style={styles.rewardText}>
+                                <Feather name="gift" size={12} color="#fff" style={styles.rewardIcon} />
+                                <Text style={styles.rewardText} numberOfLines={3} ellipsizeMode="tail">
                                     {item.rewards || 'Rewards'}
                                 </Text>
                             </View>
@@ -668,20 +668,26 @@ const styles = StyleSheet.create({
     },
     rewardBadge: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        alignSelf: 'flex-start',
         backgroundColor: '#f59e0b',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         borderRadius: 8,
-        gap: 4,
-        flexShrink: 0,
-        width: 72,
-        maxWidth: 72,
+        gap: 6,
+        maxWidth: 160,
+        minWidth: 0,
+    },
+    rewardIcon: {
+        marginTop: 2,
     },
     rewardText: {
         color: '#fff',
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '700',
+        lineHeight: 16,
+        flex: 1,
+        minWidth: 0,
     },
     statusBadge: {
         paddingHorizontal: 8,

@@ -373,15 +373,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
   const isAd = (item as any).isAd === true;
-  const adDisplayName = item.user?.display_name || item.user?.username || 'Sponsored';
+  const adTitle = (item as any).title || (item as any).ad_title || '';
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
-      {isAd && (
-        <View style={styles.adBadge}>
-          <Text style={styles.adBadgeText}>Ad</Text>
-        </View>
-      )}
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
@@ -442,7 +437,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
         )}
 
-        <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
+        <View style={[styles.rightActions, { bottom: insets.bottom + 36 }]}>
           {!isAd && (
             <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
               <Avatar
@@ -468,40 +463,36 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </TouchableOpacity>
           )}
 
-          {isAd ? (
-            <TouchableOpacity style={styles.adLearnMoreButton} onPress={() => onShare(item.id)}>
-              <Feather name="external-link" size={20} color="#fff" />
-              <Text style={styles.adLearnMoreText}>Learn more</Text>
+          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+            <Animated.View style={{ transform: [{ scale: likeScale }] }}>
+              <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
+            </Animated.View>
+            <Text style={styles.actionCount}>{formatNumber(displayLikeCount)}</Text>
+          </TouchableOpacity>
+
+          <Animated.View style={[styles.likeAnimationOverlay, { opacity: likeOpacity }]}>
+            <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
+          </Animated.View>
+
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleComment}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Feather name="message-circle" size={24} color="#fff" />
+            <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
+            <Feather name="share-2" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          {!isAd && showReportButton && (
+            <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
+              <Feather name="flag" size={22} color="#fff" />
+              <Text style={styles.actionReportLabel}>Report</Text>
             </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-                <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-                  <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
-                </Animated.View>
-                <Text style={styles.actionCount}>{formatNumber(displayLikeCount)}</Text>
-              </TouchableOpacity>
-
-              <Animated.View style={[styles.likeAnimationOverlay, { opacity: likeOpacity }]}>
-                <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
-              </Animated.View>
-
-              <TouchableOpacity style={styles.actionButton} onPress={handleComment} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Feather name="message-circle" size={24} color="#fff" />
-                <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-                <Feather name="share-2" size={24} color="#fff" />
-              </TouchableOpacity>
-
-              {showReportButton && (
-                <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-                  <Feather name="flag" size={22} color="#fff" />
-                  <Text style={styles.actionReportLabel}>Report</Text>
-                </TouchableOpacity>
-              )}
-            </>
           )}
         </View>
 
@@ -512,14 +503,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 <View style={styles.sponsoredPill}>
                   <Text style={styles.sponsoredPillText}>Sponsored</Text>
                 </View>
-                <Text style={styles.sponsoredByText} numberOfLines={1}>
-                  {adDisplayName}
-                </Text>
               </View>
             )}
-            <TouchableOpacity onPress={handleUserPress}>
-              <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
-            </TouchableOpacity>
+            {!isAd && (
+              <TouchableOpacity onPress={handleUserPress}>
+                <Text style={styles.username}>@{item.user?.username || 'unknown'}</Text>
+              </TouchableOpacity>
+            )}
+            {isAd && !!adTitle && (
+              <Text style={styles.username}>{adTitle}</Text>
+            )}
             {isCompetitionPost && (
               <View style={styles.challengeTag}>
                 <Feather name="award" size={12} color="#fbbf24" />
@@ -531,14 +524,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             {(item.caption || item.description || item.title) && (
               <ExpandableCaption text={item.caption || item.description || item.title || ''} maxLines={2} />
             )}
-            {(item.createdAt || item.uploadDate || (item as any).created_at) && (
+            {!isAd && (item.createdAt || item.uploadDate || (item as any).created_at) && (
               <Text style={styles.timestamp}>{timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}</Text>
-            )}
-            {isAd && (
-              <TouchableOpacity style={styles.sponsoredCtaInline} onPress={() => onShare(item.id)}>
-                <Feather name="external-link" size={14} color="#fff" />
-                <Text style={styles.sponsoredCtaInlineText}>Learn more</Text>
-              </TouchableOpacity>
             )}
           </View>
           {!isAd && item.category && (

@@ -117,52 +117,23 @@ export default function ChallengeDetailScreen() {
   const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
   const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
   const [challengePostsOrderedBy, setChallengePostsOrderedBy] = useState<string | undefined>(undefined);
-  const [tabsSectionOffsetY, setTabsSectionOffsetY] = useState(0);
-  const pendingTabScrollRef = useRef(false);
 
-  useRefetchOnReconnect(() => fetchChallenge());
-
-  const scrollToTabsSection = useCallback(() => {
-    if (tabsSectionOffsetY <= 0) return;
-
-    InteractionManager.runAfterInteractions(() => {
-      requestAnimationFrame(() => {
-        challengeDetailListRef.current?.scrollToOffset({
-          offset: Math.max(0, tabsSectionOffsetY - 16),
-          animated: true,
-        });
-      });
-    });
-  }, [tabsSectionOffsetY]);
+  useRefetchOnReconnect(() => {
+    fetchChallenge();
+    fetchPosts();
+  });
 
   const handleTabChange = useCallback((tab: 'posts' | 'participants' | 'winners') => {
-    if (tab === activeTab) {
-      scrollToTabsSection();
-      return;
-    }
-    pendingTabScrollRef.current = true;
+    if (tab === activeTab) return;
     setActiveTab(tab);
-  }, [activeTab, scrollToTabsSection]);
-
-  useEffect(() => {
-    if (!pendingTabScrollRef.current || tabsSectionOffsetY <= 0) return;
-
-    const readyForCurrentTab =
-      activeTab === 'winners'
-        ? true
-        : activeTab === 'posts'
-          ? !postsLoading
-          : !loadingAllParticipants;
-
-    if (!readyForCurrentTab) return;
-
-    const timeout = setTimeout(() => {
-      scrollToTabsSection();
-      pendingTabScrollRef.current = false;
-    }, 80);
-
-    return () => clearTimeout(timeout);
-  }, [activeTab, postsLoading, loadingAllParticipants, tabsSectionOffsetY, scrollToTabsSection]);
+    // Only fetch the specific tab data; no full page reload, no auto-scroll.
+    if (tab === 'posts') {
+      fetchPosts();
+    } else if (tab === 'participants') {
+      fetchParticipants();
+    }
+    // Winners uses rawChallengePosts that come from fetchPosts().
+  }, [activeTab]);
 
   const fetchChallenge = async () => {
     if (!id) return;
@@ -234,24 +205,18 @@ export default function ChallengeDetailScreen() {
     }
   };
 
+  // Initial load when screen mounts or challenge id changes.
   useEffect(() => {
     fetchChallenge();
-    if (activeTab === 'posts') {
-      fetchPosts();
-    } else if (activeTab === 'participants') {
-      fetchParticipants();
-    }
-  }, [id, activeTab]);
+    fetchPosts();
+  }, [id]);
 
+  // Refresh challenge + posts when screen regains focus (not on every tab change).
   useFocusEffect(
     useCallback(() => {
       fetchChallenge();
-      if (activeTab === 'posts') {
-        fetchPosts();
-      } else if (activeTab === 'participants') {
-        fetchParticipants();
-      }
-    }, [id, activeTab])
+      fetchPosts();
+    }, [id])
   );
 
   const onRefresh = async () => {
@@ -627,7 +592,7 @@ export default function ChallengeDetailScreen() {
     const postCount = challenge._count?.posts || posts.length || 0;
 
     return (
-      <>
+      <View style={{ flex: 0 }}>
         {/* Challenge Header */}
         <LinearGradient
           colors={challenge.has_rewards ? ['#f59e0b', '#d97706'] : ['#3b82f6', '#2563eb']}
@@ -857,11 +822,6 @@ export default function ChallengeDetailScreen() {
         {/* Tabs - only when challenge is approved (not pending); pending organizer sees no Posts/Participants tabs */}
         {challenge.status !== 'pending' && (
           <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
-            <View
-              onLayout={(event) => {
-                setTabsSectionOffsetY(event.nativeEvent.layout.y);
-              }}
-            >
             <View style={styles.tabsContainer}>
               <TouchableOpacity
                 style={[
@@ -925,7 +885,6 @@ export default function ChallengeDetailScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            </View>
           </View>
         )}
 
@@ -978,7 +937,7 @@ export default function ChallengeDetailScreen() {
             </View>
           </View>
         )}
-      </>
+      </View>
     );
   };
 
@@ -1109,7 +1068,7 @@ export default function ChallengeDetailScreen() {
           ) : activeTab === 'winners' ? (
             <View style={styles.emptyParticipants}>
               <MaterialIcons name="emoji-events" size={48} color={C.textSecondary} />
-              <Text style={[styles.emptyText, { color: C.textSecondary }]}>No winners data yet</Text>
+              <Text style={[styles.emptyText, { color: C.textSecondary }]}>No winners yet</Text>
               <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>Winners will appear here once set by the organizer.</Text>
             </View>
           ) : (

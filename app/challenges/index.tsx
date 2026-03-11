@@ -298,8 +298,8 @@ export default function ChallengesScreen() {
             <View style={styles.badgesContainer}>
               {item.has_rewards && (
                 <View style={styles.rewardBadge}>
-                  <MaterialIcons name="emoji-events" size={14} color="#fff" />
-                  <Text style={styles.rewardBadgeText} numberOfLines={1}>
+                  <MaterialIcons name="emoji-events" size={14} color="#fff" style={styles.rewardBadgeIcon} />
+                  <Text style={styles.rewardBadgeText} numberOfLines={3} ellipsizeMode="tail">
                     {item.rewards || 'Rewards'}
                   </Text>
                 </View>
@@ -678,20 +678,26 @@ const styles = StyleSheet.create({
   },
   rewardBadge: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    alignSelf: 'flex-start',
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderRadius: 12,
-    flexShrink: 1,
-    maxWidth: '100%',
+    maxWidth: 160,
+    minWidth: 0,
+    gap: 6,
+  },
+  rewardBadgeIcon: {
+    marginTop: 2,
   },
   rewardBadgeText: {
     color: '#fff',
     fontSize: 11,
     fontWeight: '600',
-    marginLeft: 4,
-    maxWidth: 100,
+    lineHeight: 16,
+    flex: 1,
+    minWidth: 0,
   },
   statusBadge: {
     paddingHorizontal: 8,
