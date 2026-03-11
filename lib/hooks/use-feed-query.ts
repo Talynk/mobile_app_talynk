@@ -44,26 +44,21 @@ export function useFeedQuery(tab: FeedTab) {
         return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
       }
 
-      // FOR YOU: single call to GET /api/posts/all with large limit
+      // FOR YOU: GET /api/posts/all — featured first, then content + ads interleaved (backend order)
       const page = pageParam ? Number(pageParam) : 1;
-      console.log(`🔵 [FEED] ForYou: calling postsApi.getAll(page=${page}, limit=50)`);
-
-      const raw = await postsApi.getAll(page, 50);
-
-      console.log(`🔵 [FEED] ForYou: raw status=${raw?.status}, hasData=${!!raw?.data}`);
-
-      const allPosts = extractPosts(raw);
-      console.log(`🔵 [FEED] ForYou: extracted ${allPosts.length} posts from response`);
-
-      allPosts.forEach((p: any, i: number) => {
-        console.log(`🔵 [FEED] post[${i}]: id=${p.id?.slice(0,8)} type=${p.type} proc=${p.processing_status} hlsReady=${p.hlsReady} fullUrl=${(p.fullUrl || '').slice(0,50)}`);
+      const limit = 20;
+      const raw = await postsApi.getAll(page, limit, {
+        featured_first: 'true',
+        sort: 'default',
+        status: 'active',
       });
 
+      const allPosts = extractPosts(raw);
+      // Preserve isAd on items; filter to HLS-ready for video posts only (ads and images can stay)
       const hlsPosts = filterHlsReady(allPosts);
-      console.log(`🔵 [FEED] ForYou: after HLS filter = ${hlsPosts.length} posts`);
-
-      const pagination = raw?.data?.pagination;
-      const hasNext = pagination ? (page < pagination.totalPages) : (allPosts.length >= 50);
+      const pagination = raw?.data?.pagination || {};
+      const totalPages = pagination.totalPages ?? Math.ceil((pagination.total || 0) / limit) || 1;
+      const hasNext = page < totalPages;
       return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
     },
     initialPageParam: undefined as string | undefined,

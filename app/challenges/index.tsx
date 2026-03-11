@@ -92,7 +92,7 @@ export default function ChallengesScreen() {
     try {
       const [allRes, endedRes, myRes] = await Promise.all([
         challengesApi.getAll('active'),
-        challengesApi.getAll('ended').catch((e: any) => {
+        challengesApi.getEnded().catch((e: any) => {
           const isNet = e?.message?.includes('Network') || e?.message?.includes('timeout') || !e?.response;
           if (isNet) throw e;
           return { status: 'success' as const, data: { challenges: [] }, message: '' };
@@ -121,14 +121,9 @@ export default function ChallengesScreen() {
         return (ch.status === 'active' || ch.status === 'approved') && startDate > now;
       });
 
-      // Ended: from dedicated endpoint and from active list (end_date < now) so nothing is missed
-      const endedFromApi = normalizeChallenges(endedRes).map((item: any) => item.challenge || item);
-      const endedFromActive = allListRaw.filter((ch: any) => new Date(ch.end_date) < now);
-      const endedMerged = [...endedFromApi];
-      endedFromActive.forEach((ch: any) => {
-        if (ch?.id && !endedMerged.some((e: any) => e.id === ch.id)) endedMerged.push(ch);
-      });
-      const endedList = endedMerged;
+      // Ended: GET /api/challenges/ended
+      const endedFromApi = (endedRes.data?.challenges ?? []) as any[];
+      const endedList = endedFromApi.map((item: any) => item.challenge || item);
 
       const myListRaw = myRes?.status === 'success' ? normalizeChallenges(myRes) : [];
       const myList = myListRaw.map((item: any) => item.challenge || item);

@@ -121,36 +121,24 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     return aStart - bStart;
                 });
             } else if (internalTab === 'ended') {
-                // Fetch ended from API and also from active list (end_date < now) so all ended challenges appear
-                const [endedRes, activeRes] = await Promise.all([
-                    challengesApi.getAll('ended').catch(() => ({ status: 'success' as const, data: { challenges: [] } })),
-                    challengesApi.getAll('active'),
-                ]);
+                // GET /api/challenges/ended — dedicated backend endpoint for ended challenges
+                const endedRes = await challengesApi.getEnded().catch(() => ({ status: 'success' as const, data: { challenges: [] } }));
                 let endedChallenges: Challenge[] = [];
-                const endedFromApi = (endedRes.data?.challenges ?? (Array.isArray(endedRes.data) ? endedRes.data : [])) as any[];
-                endedChallenges = endedFromApi.map((item: any) => item.challenge || item);
-
-                if (activeRes.status === 'success') {
-                    const data = activeRes.data?.challenges || activeRes.data || [];
-                    const all = Array.isArray(data) ? data : [];
-                    all.filter((ch: any) => new Date(ch.end_date) < now).forEach((ch: any) => {
-                        if (ch?.id && !endedChallenges.some(e => e.id === ch.id)) endedChallenges.push(ch);
-                    });
+                if (endedRes.status === 'success' && endedRes.data?.challenges) {
+                    endedChallenges = (endedRes.data.challenges as any[]).map((item: any) => item.challenge || item);
                 }
-
                 if (userJoinedIds.size > 0) {
                     const joinedRes = await challengesApi.getJoinedChallenges();
                     if (joinedRes.status === 'success') {
                         const joined = joinedRes.data || [];
                         const joinedChallenges = Array.isArray(joined) ? joined.map((item: any) => item.challenge || item) : [];
                         joinedChallenges.forEach((ch: any) => {
-                            if (new Date(ch.end_date) < now && ch?.id && !endedChallenges.some(e => e.id === ch.id)) {
+                            if (new Date(ch.end_date) < now && ch?.id && !endedChallenges.some((e: any) => e.id === ch.id)) {
                                 endedChallenges.push(ch);
                             }
                         });
                     }
                 }
-
                 challengesToDisplay = endedChallenges;
 
             } else if (internalTab === 'created') {

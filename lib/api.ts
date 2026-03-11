@@ -304,16 +304,56 @@ export const feedApi = {
   },
 };
 
-// Posts API
+// Posts API — main discovery feed: GET /api/posts/all (featured first, then content + ads interleaved)
+export type PostsAllParams = {
+  page?: number;
+  limit?: number;
+  featured_first?: 'true' | 'false';
+  sort?: 'default' | 'newest' | 'oldest' | 'most_liked' | 'most_viewed' | 'most_commented';
+  status?: 'active' | 'all' | 'suspended';
+  category_id?: number;
+  subcategory_id?: number;
+};
+
 export const postsApi = {
-  getAll: async (page = 1, limit = 10, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+  getAll: async (
+    page = 1,
+    limit = 20,
+    options: PostsAllParams | string = {}
+  ): Promise<ApiResponse<{ posts: Post[]; pagination: any; filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/all?page=${page}&limit=${limit}${timestamp}`);
-      return response.data;
+      const params: Record<string, string | number> = { page, limit };
+      if (typeof options === 'object') {
+        if (options.featured_first !== undefined) params.featured_first = options.featured_first;
+        if (options.sort !== undefined) params.sort = options.sort;
+        if (options.status !== undefined) params.status = options.status;
+        if (options.category_id !== undefined) params.category_id = options.category_id;
+        if (options.subcategory_id !== undefined) params.subcategory_id = options.subcategory_id;
+      } else if (typeof options === 'string') {
+        params.timestamp = options;
+      }
+      const qs = new URLSearchParams(params as any).toString();
+      const response = await apiClient.get(`/api/posts/all?${qs}`);
+      const apiResponse = response.data;
+      if (apiResponse?.status === 'success' && apiResponse?.data) {
+        const posts = Array.isArray(apiResponse.data.posts) ? apiResponse.data.posts : [];
+        const pagination = apiResponse.data.pagination || {};
+        const filters = apiResponse.data.filters || {};
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Posts fetched',
+          data: { posts, pagination, filters },
+        };
+      }
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch posts',
+        data: { posts: [], pagination: {}, filters: {} },
+      };
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to fetch posts',
+        message: error.response?.data?.message || 'Failed to fetch posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }
@@ -321,8 +361,8 @@ export const postsApi = {
 
   getByCategory: async (categoryId: number, page = 1, limit = 20): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const response = await apiClient.get(`/api/posts/all?category_id=${categoryId}&page=${page}&limit=${limit}`);
-      return response.data;
+      const response = await postsApi.getAll(page, limit, { category_id: categoryId });
+      return response;
     } catch (error: any) {
       return {
         status: 'error',
@@ -1360,6 +1400,33 @@ export const challengesApi = {
     }
   },
 
+  getEnded: async (): Promise<ApiResponse<{ challenges: any[] }>> => {
+    try {
+      const response = await apiClient.get('/api/challenges/ended');
+      const apiResponse = response.data;
+      if (apiResponse?.status === 'success') {
+        const raw = apiResponse.data;
+        const challenges = Array.isArray(raw) ? raw : (raw?.challenges ?? []);
+        return {
+          status: 'success',
+          message: apiResponse.message || 'Ended challenges fetched',
+          data: { challenges },
+        };
+      }
+      return {
+        status: 'error',
+        message: apiResponse?.message || 'Failed to fetch ended challenges',
+        data: { challenges: [] },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch ended challenges',
+        data: { challenges: [] },
+      };
+    }
+  },
+
   getMyChallenges: async (): Promise<ApiResponse<any>> => {
     try {
       const response = await apiClient.get('/api/challenges/my-challenges');
@@ -1529,10 +1596,19 @@ export const challengesApi = {
       const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
       const apiResponse = response.data;
 
-      // Backend returns: { status: 'success', data: [...], pagination: {...}, ordered_by?: string }
+      // Backend: { status, data: [...], pagination, ordered_by?: 'winner_rank' | 'likes_at_challenge_end' }
+      // Each item: { post, winner_rank?, likes_during_challenge, total_likes?, ... }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
         const rawItems = Array.isArray(apiResponse.data) ? apiResponse.data : [];
-        const normalizedPosts = rawItems.map((item: any) => item.post || item);
+        const normalizedPosts = rawItems.map((item: any) => {
+          const post = item.post || item;
+          return {
+            ...post,
+            winner_rank: item.winner_rank ?? post.winner_rank,
+            likes_during_challenge: item.likes_during_challenge ?? item.likes_at_challenge_end ?? post.likes_during_challenge,
+            total_likes: item.total_likes ?? post.total_likes ?? post.likes,
+          };
+        });
 
         return {
           status: 'success',

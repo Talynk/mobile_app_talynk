@@ -100,6 +100,8 @@ export interface Post {
   stream_type?: string;
   is_featured?: boolean;
   is_frozen?: boolean;
+  /** True when this feed item is an ad (from GET /api/posts/all). Same playback fields as posts; render with "Ad" label and different CTA. */
+  isAd?: boolean;
   report_count?: number;
   featured_at?: string | null;
   frozen_at?: string | null;

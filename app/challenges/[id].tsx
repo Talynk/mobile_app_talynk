@@ -114,6 +114,7 @@ export default function ChallengeDetailScreen() {
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
   const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
   const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
+  const [challengePostsOrderedBy, setChallengePostsOrderedBy] = useState<string | undefined>(undefined);
 
   useRefetchOnReconnect(() => fetchChallenge());
 
@@ -149,9 +150,11 @@ export default function ChallengeDetailScreen() {
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
+        const orderedBy = response.data?.ordered_by;
         const normalizedPosts = filterHlsReady(Array.isArray(postsList) ? postsList : []);
         setPosts(normalizedPosts);
         setRawChallengePosts(Array.isArray(rawItems) ? rawItems : []);
+        setChallengePostsOrderedBy(orderedBy);
       }
     } catch (err: any) {
       console.warn('Error fetching challenge posts:', err?.message);
@@ -408,11 +411,12 @@ export default function ChallengeDetailScreen() {
     return map;
   }, [rawChallengePosts]);
 
-  // Sort posts by likes (ongoing and ended): use challenge likes map when available, else post.likes
+  // When backend returns winner_rank order, keep API order; otherwise sort by likes
   const sortedPosts = useMemo(() => {
     if (!posts.length) return posts;
+    if (challengePostsOrderedBy === 'winner_rank') return posts;
     return sortChallengePosts(posts, likesDuringChallengeMap, rawChallengePosts.length > 0);
-  }, [posts, rawChallengePosts.length, likesDuringChallengeMap]);
+  }, [posts, rawChallengePosts.length, likesDuringChallengeMap, challengePostsOrderedBy]);
 
   // Rank participants by total likes on their posts in this challenge
   const participantTotalLikesMap = useMemo(() => {
@@ -882,22 +886,25 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
-        {/* Winners (Top 10) - when ended and Winners tab selected; frontend-only until backend provides list */}
+        {/* Winners (Top 10) - from API when ordered_by winner_rank, else by likes */}
         {activeTab === 'winners' && challengeEnded && rawChallengePosts.length > 0 && (
           <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
             <Text style={[styles.winnersTitle, { color: C.text }]}>Winners (Top 10)</Text>
             <View style={styles.winnersGrid}>
-              {[...rawChallengePosts]
-                .sort((a, b) => {
-                  const likesA = a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0;
-                  const likesB = b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0;
-                  if (likesB !== likesA) return likesB - likesA;
-                  return getChallengeSortTimestamp(b.post || b) - getChallengeSortTimestamp(a.post || a);
-                })
-                .slice(0, 10)
-                .map((cp: any, idx: number) => {
+              {(challengePostsOrderedBy === 'winner_rank'
+                ? [...rawChallengePosts].sort((a: any, b: any) => (a.winner_rank ?? 999) - (b.winner_rank ?? 999)).slice(0, 10)
+                : [...rawChallengePosts]
+                    .sort((a: any, b: any) => {
+                      const likesA = a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0;
+                      const likesB = b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0;
+                      if (likesB !== likesA) return likesB - likesA;
+                      return getChallengeSortTimestamp(b.post || b) - getChallengeSortTimestamp(a.post || a);
+                    })
+                    .slice(0, 10)
+              ).map((cp: any, idx: number) => {
                 const post = cp.post || cp;
                 const likesDuring = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+                const rank = cp.winner_rank != null ? cp.winner_rank : idx + 1;
                 const thumbUrl = getThumbnailUrl(post) || getPostMediaUrl(post) || '';
                 return (
                   <TouchableOpacity
@@ -912,7 +919,7 @@ export default function ChallengeDetailScreen() {
                     }}
                   >
                     <View style={styles.winnerRank}>
-                      <Text style={styles.winnerRankText}>#{idx + 1}</Text>
+                      <Text style={styles.winnerRankText}>#{rank}</Text>
                     </View>
                     {thumbUrl ? (
                       <Image source={{ uri: thumbUrl }} style={styles.winnerThumb} resizeMode="cover" />

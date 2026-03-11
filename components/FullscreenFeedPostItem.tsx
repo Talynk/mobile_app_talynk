@@ -372,9 +372,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   };
 
   const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
+  const isAd = (item as any).isAd === true;
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
+      {isAd && (
+        <View style={styles.adBadge}>
+          <Text style={styles.adBadgeText}>Ad</Text>
+        </View>
+      )}
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
@@ -436,20 +442,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         )}
 
         <View style={[styles.rightActions, { bottom: insets.bottom + 20 }]}>
-          <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
-            <Avatar
-              user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
-              size={48}
-              style={styles.userAvatar}
-            />
-            {user && user.id !== item.user?.id && (
-              <TouchableOpacity style={styles.followIconButton} onPress={handleFollow}>
-                <Feather name={isFollowing ? 'check' : 'plus'} size={16} color="#000" />
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
+          {!isAd && (
+            <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
+              <Avatar
+                user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
+                size={48}
+                style={styles.userAvatar}
+              />
+              {user && user.id !== item.user?.id && (
+                <TouchableOpacity style={styles.followIconButton} onPress={handleFollow}>
+                  <Feather name={isFollowing ? 'check' : 'plus'} size={16} color="#000" />
+                </TouchableOpacity>
+              )}
+            </TouchableOpacity>
+          )}
 
-          {showBestButton && (
+          {!isAd && showBestButton && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => setShowBestModal(true)}
@@ -459,31 +467,40 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
-            <Animated.View style={{ transform: [{ scale: likeScale }] }}>
-              <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
-            </Animated.View>
-            <Text style={styles.actionCount}>{formatNumber(displayLikeCount)}</Text>
-          </TouchableOpacity>
-
-          <Animated.View style={[styles.likeAnimationOverlay, { opacity: likeOpacity }]}>
-            <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
-          </Animated.View>
-
-          <TouchableOpacity style={styles.actionButton} onPress={handleComment} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Feather name="message-circle" size={24} color="#fff" />
-            <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
-            <Feather name="share-2" size={24} color="#fff" />
-          </TouchableOpacity>
-
-          {showReportButton && (
-            <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
-              <Feather name="flag" size={22} color="#fff" />
-              <Text style={styles.actionReportLabel}>Report</Text>
+          {isAd ? (
+            <TouchableOpacity style={styles.adLearnMoreButton} onPress={() => onShare(item.id)}>
+              <Feather name="external-link" size={20} color="#fff" />
+              <Text style={styles.adLearnMoreText}>Learn more</Text>
             </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+                <Animated.View style={{ transform: [{ scale: likeScale }] }}>
+                  <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
+                </Animated.View>
+                <Text style={styles.actionCount}>{formatNumber(displayLikeCount)}</Text>
+              </TouchableOpacity>
+
+              <Animated.View style={[styles.likeAnimationOverlay, { opacity: likeOpacity }]}>
+                <Feather name="heart" size={48} color="#ff2d55" fill="#ff2d55" />
+              </Animated.View>
+
+              <TouchableOpacity style={styles.actionButton} onPress={handleComment} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Feather name="message-circle" size={24} color="#fff" />
+                <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
+                <Feather name="share-2" size={24} color="#fff" />
+              </TouchableOpacity>
+
+              {showReportButton && (
+                <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
+                  <Feather name="flag" size={22} color="#fff" />
+                  <Text style={styles.actionReportLabel}>Report</Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
 
@@ -584,6 +601,36 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: 'transparent',
     overflow: 'hidden',
+  },
+  adBadge: {
+    position: 'absolute',
+    top: 52,
+    left: 16,
+    zIndex: 100,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  adBadgeText: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  adLearnMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(96,165,250,0.9)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginBottom: 12,
+  },
+  adLearnMoreText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   mediaContainer: {
     flex: 1,

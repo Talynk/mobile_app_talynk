@@ -136,19 +136,24 @@ export default function ChallengePostsScreen() {
       const response = await challengesApi.getPosts(id as string, page, limit);
 
       if (response.status === 'success') {
-        let postsList = filterHlsReady(response.data?.posts || []) as Post[];
         const rawItems = response.data?.rawItems || [];
         const orderedBy = response.data?.ordered_by;
-        const ended = orderedBy === 'likes_at_challenge_end';
-
-        const map: Record<string, number> = {};
-        rawItems.forEach((cp: any) => {
-          const postId = cp.post?.id || cp.post_id;
-          const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
-          if (postId) map[postId] = likes;
-        });
-
-        postsList = sortChallengePosts(postsList, map, ended);
+        const ended = orderedBy === 'likes_at_challenge_end' || orderedBy === 'winner_rank';
+        // When backend returns winner_rank order, preserve API order; otherwise sort by likes
+        let postsList: Post[];
+        if (orderedBy === 'winner_rank' && rawItems.length > 0) {
+          const orderedPosts = rawItems.map((cp: any) => cp.post || cp).filter(Boolean);
+          postsList = filterHlsReady(orderedPosts) as Post[];
+        } else {
+          let list = filterHlsReady(response.data?.posts || []) as Post[];
+          const map: Record<string, number> = {};
+          rawItems.forEach((cp: any) => {
+            const postId = cp.post?.id || cp.post_id;
+            const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+            if (postId) map[postId] = likes;
+          });
+          postsList = sortChallengePosts(list, map, ended);
+        }
 
         const pagination = response.data?.pagination || {};
         const hasMoreData = pagination.hasNextPage !== false && postsList.length === limit;
