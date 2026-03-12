@@ -619,7 +619,7 @@ export default function ExploreScreen() {
           data={gridLoading ? [] : gridPosts}
           keyExtractor={(item) => item.id}
           numColumns={3}
-          removeClippedSubviews={true}
+          removeClippedSubviews={false}
           initialNumToRender={18}
           maxToRenderPerBatch={24}
           windowSize={9}

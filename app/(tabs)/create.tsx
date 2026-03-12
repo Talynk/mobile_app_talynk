@@ -1231,25 +1231,12 @@ export default function CreatePostScreen() {
 
             if (response.status === 'success') {
               const challengeIdToOpen = selectedChallengeId;
-              const createdPostId = response.data?.post?.id as string | undefined;
+              const createdPost = response.data?.post;
+              const createdPostId = createdPost?.id as string | undefined;
+              const createdType = createdPost?.type || createdPost?.mediaType || null;
 
-              // Wait for HLS to be ready before telling user it's done (like normal posts)
-              if (createdPostId) {
-                try {
-                  const maxAttempts = 20;
-                  const delayMs = 3000;
-                  for (let i = 0; i < maxAttempts; i++) {
-                    const statusRes = await postsApi.getProcessingStatus(createdPostId);
-                    if (statusRes.status === 'success' && statusRes.data?.processing?.status === 'completed') {
-                      break;
-                    }
-                    await new Promise(res => setTimeout(res, delayMs));
-                  }
-                } catch {
-                  // If polling fails, backend will still finish processing
-                }
-              }
-
+              // As soon as upload is done, mark it complete in the UI.
+              // For videos, backend will continue HLS processing and send a notification when ready.
               await uploadNotificationService.showUploadComplete(fileName);
 
               setRecordedVideoUri(null);
@@ -1265,23 +1252,24 @@ export default function CreatePostScreen() {
               setUploading(false);
               setUploadProgress(0);
 
-              Alert.alert(
-                'Success',
-                'Video posted successfully to the Competition and is ready to play. Tap "View challenge" to see it at the bottom.',
-                [
-                  {
-                    text: 'View challenge',
-                    onPress: () => {
-                      if (challengeIdToOpen) {
-                        router.replace(`/challenges/${challengeIdToOpen}` as any);
-                      } else {
-                        router.back();
-                      }
-                    },
+              const isImagePost = createdType === 'image' || createdType === 'photo' || !createdType;
+              const successBody = isImagePost
+                ? 'Post uploaded successfully to the competition and is ready to view.'
+                : 'Video uploaded to the competition. It is being processed for streaming; you will receive a notification when it is ready to watch.';
+
+              Alert.alert('Post uploaded', successBody, [
+                {
+                  text: 'View challenge',
+                  onPress: () => {
+                    if (challengeIdToOpen) {
+                      router.replace(`/challenges/${challengeIdToOpen}` as any);
+                    } else {
+                      router.back();
+                    }
                   },
-                  { text: 'Done', onPress: () => router.back() },
-                ]
-              );
+                },
+                { text: 'Done', onPress: () => router.back() },
+              ]);
             } else {
               const errorMsg = response.message || 'Failed to create post in challenge';
               await uploadNotificationService.showUploadError(errorMsg, fileName);
