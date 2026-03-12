@@ -315,6 +315,28 @@ function ProfileFeedContent({
         const videoUrl = p.video_url || p.videoUrl || '';
         const hlsUrl = p.hlsUrl || p.hls_url || '';
         const mediaUrl = p.mediaUrl || videoUrl || '';
+
+        // Try to surface any competition/challenge information that the backend provides,
+        // even if it's only nested on challenge_posts.
+        const firstChallengePost = Array.isArray(p.challenge_posts)
+          ? p.challenge_posts[0]
+          : undefined;
+        const nestedChallenge =
+          p.challenge ||
+          p.competition ||
+          firstChallengePost?.challenge;
+
+        const challengeId =
+          p.challenge_id ||
+          p.challengeId ||
+          nestedChallenge?.id ||
+          firstChallengePost?.challenge_id;
+
+        const challengeName =
+          p.challenge_name ||
+          p.challengeName ||
+          nestedChallenge?.name;
+
         return {
           ...p,
           video_url: videoUrl,
@@ -335,6 +357,13 @@ function ProfileFeedContent({
             username: p.authorName || p.username || '',
             profile_picture: p.authorProfilePicture || p.profile_picture || '',
           },
+          // Explicitly promote challenge metadata so the fullscreen component
+          // can always see that this is a competition post.
+          challenge: nestedChallenge || p.challenge || p.competition,
+          challenge_id: challengeId,
+          challengeId: challengeId,
+          challenge_name: challengeName,
+          challengeName: challengeName,
         };
       });
 

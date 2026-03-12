@@ -15,16 +15,28 @@ function pickString(...values: unknown[]): string | undefined {
 }
 
 export function getChallengePostMeta(post: any): ChallengePostMeta {
-  const challenge = post?.challenge || post?.competition || post?.challenge_post?.challenge;
+  // Backend can attach challenge in several shapes:
+  // - post.challenge
+  // - post.competition
+  // - post.challenge_post.challenge
+  // - post.challenge_posts[0].challenge
+  const primaryChallenge =
+    post?.challenge ||
+    post?.competition ||
+    post?.challenge_post?.challenge ||
+    (Array.isArray(post?.challenge_posts) ? post.challenge_posts[0]?.challenge : undefined);
+
   const challengeId = pickString(
-    challenge?.id,
+    primaryChallenge?.id,
     post?.challenge_id,
     post?.challengeId,
     post?.competition_id,
-    post?.competitionId
+    post?.competitionId,
+    // Some backends expose challenge_posts with challenge_id on the pivot
+    Array.isArray(post?.challenge_posts) ? post.challenge_posts[0]?.challenge_id : undefined
   );
   const challengeName = pickString(
-    challenge?.name,
+    primaryChallenge?.name,
     post?.challenge_name,
     post?.challengeName,
     post?.competition_name,
@@ -32,7 +44,7 @@ export function getChallengePostMeta(post: any): ChallengePostMeta {
   );
 
   return {
-    isChallengePost: Boolean(challenge || challengeId || challengeName),
+    isChallengePost: Boolean(primaryChallenge || challengeId || challengeName),
     challengeId,
     challengeName,
   };
