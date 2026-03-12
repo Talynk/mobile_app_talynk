@@ -390,10 +390,30 @@ function ProfileFeedContent({
           }
         });
 
-        // Merge enriched data back
+        // Merge enriched data back, including any challenge / competition metadata.
         postsArray = postsArray.map((p: any) => {
           const enriched = enrichMap.get(p.id);
           if (!enriched) return p;
+
+          const enrichedFirstChallengePost = Array.isArray(enriched.challenge_posts)
+            ? enriched.challenge_posts[0]
+            : undefined;
+          const enrichedChallenge =
+            enriched.challenge ||
+            enriched.competition ||
+            enrichedFirstChallengePost?.challenge;
+
+          const enrichedChallengeId =
+            enriched.challenge_id ||
+            enriched.challengeId ||
+            enrichedChallenge?.id ||
+            enrichedFirstChallengePost?.challenge_id;
+
+          const enrichedChallengeName =
+            enriched.challenge_name ||
+            enriched.challengeName ||
+            enrichedChallenge?.name;
+
           return {
             ...p,
             hls_url: enriched.hls_url || enriched.hlsUrl || p.hls_url,
@@ -405,6 +425,13 @@ function ProfileFeedContent({
             processing_status: enriched.processing_status || enriched.processingStatus || p.processing_status,
             video_url: enriched.video_url || enriched.videoUrl || p.video_url,
             user: enriched.user || p.user,
+            // Promote challenge metadata from enriched post so the profile feed
+            // sees the same competition info as the challenge posts screen.
+            challenge: enrichedChallenge || p.challenge || p.competition,
+            challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
+            challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
+            challenge_name: enrichedChallengeName || p.challenge_name || p.challengeName,
+            challengeName: enrichedChallengeName || p.challengeName || p.challenge_name,
           };
         });
 

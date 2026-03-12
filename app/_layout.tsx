@@ -8,7 +8,6 @@ import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Sentry from '@sentry/react-native';
 
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
@@ -37,15 +36,16 @@ export const unstable_settings = {
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-// Defer Sentry init to avoid creating React context before Expo Dev Launcher is ready (Android crash: "App react context shouldn't be created before").
+// Defer Sentry init and avoid importing Sentry in dev so Expo Dev Launcher never sees React context created early (Android: "App react context shouldn't be created before").
 let sentryInitialized = false;
 function initSentryOnce() {
-  if (sentryInitialized) return;
+  if (__DEV__ || sentryInitialized) return;
   sentryInitialized = true;
+  const Sentry = require('@sentry/react-native');
   Sentry.init({
     dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
     sendDefaultPii: true,
-    beforeSend(event, hint) {
+    beforeSend(event: { message?: string; environment?: string }, hint?: { originalException?: unknown }) {
       const ex = hint?.originalException as Error | undefined;
       const msg = (event.message || ex?.message || '').toString();
       if (/ExpoAsset\.downloadAsync|Unable to download asset from url|Metro|8081\/assets/.test(msg)) return null;
@@ -215,6 +215,8 @@ function RootLayoutNav() {
   );
 }
 
-// In dev, skip Sentry.wrap to avoid "App react context shouldn't be created before" (Expo Dev Launcher Android).
-const RootLayout = __DEV__ ? RootLayoutInner : Sentry.wrap(RootLayoutInner);
+// In dev, never load Sentry so Dev Launcher doesn't hit "App react context shouldn't be created before". In prod, wrap with Sentry.
+const RootLayout = __DEV__
+  ? RootLayoutInner
+  : require('@sentry/react-native').wrap(RootLayoutInner);
 export default RootLayout;
