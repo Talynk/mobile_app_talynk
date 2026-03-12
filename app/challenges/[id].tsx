@@ -951,6 +951,11 @@ export default function ChallengeDetailScreen() {
       const participantUser = item.user || item;
       const postCount = item.post_count || 0;
       const joinedAt = item.joined_at || item.createdAt;
+      const participantId = String(
+        participantUser.id || item.user_id || item.id || ''
+      );
+      const totalLikesInChallenge =
+        participantTotalLikesMap[participantId] ?? 0;
 
       return (
         <TouchableOpacity
@@ -984,11 +989,27 @@ export default function ChallengeDetailScreen() {
             )}
           </View>
           <View style={styles.participantStats}>
-            <View style={styles.participantStat}>
-              <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
-              <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
-                {postCount}
+            <View style={styles.participantStatColumn}>
+              <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
+                Posts
               </Text>
+              <View style={styles.participantStatRow}>
+                <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
+                <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                  {postCount}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.participantStatColumn}>
+              <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
+                Likes
+              </Text>
+              <View style={styles.participantStatRow}>
+                <MaterialIcons name="favorite" size={16} color={C.textSecondary} />
+                <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                  {totalLikesInChallenge}
+                </Text>
+              </View>
             </View>
           </View>
         </TouchableOpacity>
@@ -1706,6 +1727,8 @@ const styles = StyleSheet.create({
   },
   participantStats: {
     alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 16,
   },
   participantStat: {
     flexDirection: 'row',
@@ -1715,6 +1738,19 @@ const styles = StyleSheet.create({
   participantStatText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  participantStatColumn: {
+    alignItems: 'flex-end',
+  },
+  participantStatLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  participantStatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   postsLoading: {
     paddingVertical: 40,
