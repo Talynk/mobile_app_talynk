@@ -35,6 +35,20 @@ import { useMute } from '@/lib/mute-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 
+const VIDEO_BUFFER_OPTIONS = Platform.select({
+  ios: {
+    preferredForwardBufferDuration: 4,
+    waitsToMinimizeStalling: true,
+  },
+  android: {
+    preferredForwardBufferDuration: 4,
+    minBufferForPlayback: 1.5,
+    maxBufferBytes: 2 * 1024 * 1024,
+    prioritizeTimeOverSizeThreshold: true,
+  },
+  default: {},
+});
+
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
@@ -149,9 +163,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const challengeMeta = getChallengePostMeta(item);
   const activeChallengeName = challengeName || challengeMeta.challengeName;
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
-  const playbackUrl = item.playback_url || getPlaybackUrl(item);
+  const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
-  const shouldLoadVideo = isVideo && hlsReady && (isActive || shouldPreload) && !videoError;
+  const shouldLoadVideo = isVideo && hlsReady && isAppActive && (isActive || shouldPreload) && !videoError;
   const videoPlayerSource = shouldLoadVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
@@ -166,6 +180,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       try {
         player.loop = true;
         player.muted = isMuted;
+        player.staysActiveInBackground = false;
+        player.bufferOptions = VIDEO_BUFFER_OPTIONS;
       } catch (e) {
         console.warn('[VideoPlayer] Error setting player properties:', e);
       }
@@ -201,6 +217,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setImageError(false);
     setUsingImageFallback(false);
   }, [item.id, mediaUrl, thumbnailOrPlaceholderUrl]);
+
+  useEffect(() => {
+    setVideoError(false);
+    setVideoReady(false);
+    setIsPlaying(false);
+    setDecoderErrorDetected(false);
+    setVideoProgress(0);
+    setRetryCount(0);
+    setPausedByUser(false);
+  }, [item.id]);
 
   // Play/pause based on active state
   useEffect(() => {
@@ -242,7 +268,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
         if (isMountedRef.current) {
           setIsPlaying(event.isPlaying);
-          if (event.isPlaying && isActive) setVideoReady(true);
         }
       });
       return () => {
@@ -253,6 +278,36 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return () => {};
     }
   }, [videoPlayer, isActive]);
+
+  useEffect(() => {
+    if (!videoPlayer || !playerValidRef.current) return;
+    try {
+      const sub = videoPlayer.addListener('statusChange', (event: { status?: string; error?: unknown }) => {
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        if (event?.error) {
+          setVideoError(true);
+          setDecoderErrorDetected(true);
+          setIsPlaying(false);
+          return;
+        }
+
+        if (event?.status === 'readyToPlay') {
+          setVideoError(false);
+          setDecoderErrorDetected(false);
+        }
+      });
+
+      return () => {
+        try { sub.remove(); } catch (_) {}
+      };
+    } catch (_) {
+      playerValidRef.current = false;
+      return () => {};
+    }
+  }, [videoPlayer]);
 
   // Track progress
   useEffect(() => {
@@ -409,6 +464,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                     style={styles.media}
                     contentFit="cover"
                     nativeControls={false}
+                    useExoShutter={false}
+                    onFirstFrameRender={() => setVideoReady(true)}
                     {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as any } : {})}
                   />
                 </View>

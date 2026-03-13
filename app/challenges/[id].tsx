@@ -49,6 +49,13 @@ import {
   loadFallbackChallengePosts,
   sortChallengePostsByLikes,
 } from '@/lib/utils/challenge-post-fallback';
+import {
+  shouldPreloadFeedVideo,
+  VIDEO_FEED_INITIAL_NUM_TO_RENDER,
+  VIDEO_FEED_MAX_TO_RENDER_PER_BATCH,
+  VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
+  VIDEO_FEED_WINDOW_SIZE,
+} from '@/lib/utils/video-feed';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -1622,8 +1629,7 @@ export default function ChallengeDetailScreen() {
             data={sortedPosts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -1 && distance <= 1;
+              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, { disabled: isActive });
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -1652,6 +1658,10 @@ export default function ChallengeDetailScreen() {
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
+            windowSize={VIDEO_FEED_WINDOW_SIZE}
+            initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
+            maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
+            removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
               setFullscreenIndex(Math.max(0, Math.min(index, sortedPosts.length - 1)));

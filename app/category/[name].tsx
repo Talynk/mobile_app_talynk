@@ -33,6 +33,13 @@ import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  shouldPreloadFeedVideo,
+  VIDEO_FEED_INITIAL_NUM_TO_RENDER,
+  VIDEO_FEED_MAX_TO_RENDER_PER_BATCH,
+  VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
+  VIDEO_FEED_WINDOW_SIZE,
+} from '@/lib/utils/video-feed';
 
 const POSTS_PER_PAGE = 20;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -357,8 +364,9 @@ export default function CategoryScreen() {
             data={posts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const distance = index - fullscreenIndex;
-              const shouldPreload = !isActive && distance >= -1 && distance <= 1;
+              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, {
+                disabled: isCreateFocused || isActive,
+              });
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -384,6 +392,10 @@ export default function CategoryScreen() {
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
+            windowSize={VIDEO_FEED_WINDOW_SIZE}
+            initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
+            maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
+            removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
             onMomentumScrollEnd={(event) => {

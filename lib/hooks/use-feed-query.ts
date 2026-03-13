@@ -30,7 +30,9 @@ export function useFeedQuery(tab: FeedTab) {
   const query = useInfiniteQuery<FeedPage>({
     queryKey,
     queryFn: async ({ pageParam }) => {
-      console.log(`🔵 [FEED v2-clean] queryFn called: tab=${tab}, pageParam=${pageParam}`);
+      if (__DEV__) {
+        console.log(`🔵 [FEED v2-clean] queryFn called: tab=${tab}, pageParam=${pageParam}`);
+      }
 
       if (tab === 'following') {
         if (!isAuthenticated) return { posts: [], nextCursor: null };
@@ -38,7 +40,9 @@ export function useFeedQuery(tab: FeedTab) {
         const raw = await postsApi.getFollowing(page, 20);
         const allPosts = extractPosts(raw);
         const hlsPosts = filterHlsReady(allPosts);
-        console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
+        if (__DEV__) {
+          console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
+        }
         const pagination = raw?.data?.pagination;
         const hasNext = pagination?.hasNext ?? (allPosts.length >= 20);
         return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
@@ -46,21 +50,25 @@ export function useFeedQuery(tab: FeedTab) {
 
       // FOR YOU: single call to GET /api/posts/all with large limit
       const page = pageParam ? Number(pageParam) : 1;
-      console.log(`🔵 [FEED v2-clean] ForYou: calling postsApi.getAll(page=${page}, limit=50)`);
+      if (__DEV__) {
+        console.log(`🔵 [FEED v2-clean] ForYou: calling postsApi.getAll(page=${page}, limit=50)`);
+      }
 
       const raw = await postsApi.getAll(page, 50);
 
-      console.log(`🔵 [FEED v2-clean] ForYou: raw status=${raw?.status}, hasData=${!!raw?.data}`);
+      if (__DEV__) {
+        console.log(`🔵 [FEED v2-clean] ForYou: raw status=${raw?.status}, hasData=${!!raw?.data}`);
+      }
 
       const allPosts = extractPosts(raw);
-      console.log(`🔵 [FEED v2-clean] ForYou: extracted ${allPosts.length} posts from response`);
-
-      allPosts.forEach((p: any, i: number) => {
-        console.log(`🔵 [FEED v2-clean] post[${i}]: id=${p.id?.slice(0,8)} type=${p.type} proc=${p.processing_status} hlsReady=${p.hlsReady} fullUrl=${(p.fullUrl || '').slice(0,50)}`);
-      });
+      if (__DEV__) {
+        console.log(`🔵 [FEED v2-clean] ForYou: extracted ${allPosts.length} posts from response`);
+      }
 
       const hlsPosts = filterHlsReady(allPosts);
-      console.log(`🔵 [FEED v2-clean] ForYou: after HLS filter = ${hlsPosts.length} posts`);
+      if (__DEV__) {
+        console.log(`🔵 [FEED v2-clean] ForYou: after HLS filter = ${hlsPosts.length} posts`);
+      }
 
       const pagination = raw?.data?.pagination || {};
       const hasNext = pagination ? (page < pagination.totalPages) : (allPosts.length >= 50);
@@ -68,7 +76,7 @@ export function useFeedQuery(tab: FeedTab) {
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    staleTime: 0,
+    staleTime: 30_000,
     gcTime: 5 * 60_000,
     retry: 1,
   });

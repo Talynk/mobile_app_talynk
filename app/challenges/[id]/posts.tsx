@@ -33,6 +33,13 @@ import { useAppSelector } from '@/lib/store/hooks';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { loadFallbackChallengePosts } from '@/lib/utils/challenge-post-fallback';
+import {
+  shouldPreloadFeedVideo,
+  VIDEO_FEED_INITIAL_NUM_TO_RENDER,
+  VIDEO_FEED_MAX_TO_RENDER_PER_BATCH,
+  VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
+  VIDEO_FEED_WINDOW_SIZE,
+} from '@/lib/utils/video-feed';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -541,8 +548,9 @@ export default function ChallengePostsScreen() {
             data={posts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const distance = index - fullscreenIndex;
-              const shouldPreload = !isCreateFocused && !isActive && distance >= -1 && distance <= 1;
+              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, {
+                disabled: isCreateFocused || isActive,
+              });
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -570,6 +578,10 @@ export default function ChallengePostsScreen() {
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}
+            windowSize={VIDEO_FEED_WINDOW_SIZE}
+            initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
+            maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
+            removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
             getItemLayout={(_, index) => ({

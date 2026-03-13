@@ -2070,14 +2070,10 @@ export default function CreatePostScreen() {
                     ) : joinedChallenges.length > 0 ? (
                       <>
                         <View style={styles.labelRow}>
-                          <Text style={[styles.label, { color: C.text }]}>Post to Competition 🏆</Text>
-                          <Text style={[styles.labelHint, { color: C.textSecondary }]}>
-                            Optional
-                          </Text>
+
+                          
                         </View>
-                        <Text style={[styles.subLabel, styles.challengeIntroText, { color: C.textSecondary }]}>
-                          Choose where to publish this content
-                        </Text>
+
                         <View style={styles.challengeSelectionStack}>
                           <TouchableOpacity
                             style={[
@@ -2113,7 +2109,7 @@ export default function CreatePostScreen() {
                           </View>
 
                           <Text style={[styles.subLabel, styles.challengeListLabel, { color: C.textSecondary }]}>
-                            Choose a Competition from the ones below
+                            Choose a Competition from the ones below you've joined sofar
                           </Text>
 
                           <ScrollView
@@ -3173,6 +3169,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   challengePrimaryAction: {
+    marginTop: 20,
     borderWidth: 1,
     borderRadius: 18,
     paddingVertical: 14,
@@ -3201,6 +3198,7 @@ const styles = StyleSheet.create({
   challengeListLabel: {
     marginTop: 0,
     marginBottom: 6,
+    fontSize: 16,
   },
   warningBanner: {
     borderRadius: 12,

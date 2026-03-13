@@ -43,6 +43,13 @@ import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { getExplorePostsCache } from '@/lib/explore-posts-cache';
 import { normalizePost } from '@/lib/utils/normalize-post';
+import {
+  shouldPreloadFeedVideo,
+  VIDEO_FEED_INITIAL_NUM_TO_RENDER,
+  VIDEO_FEED_MAX_TO_RENDER_PER_BATCH,
+  VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
+  VIDEO_FEED_WINDOW_SIZE,
+} from '@/lib/utils/video-feed';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -758,8 +765,9 @@ function ProfileFeedContent({
           data={posts}
           renderItem={({ item, index }) => {
             const isActive = isScreenFocused && currentIndex === index;
-            const distanceFromActive = index - currentIndex;
-            const shouldPreload = !isCreateFocused && !isActive && distanceFromActive >= -1 && distanceFromActive <= 1;
+            const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, {
+              disabled: isCreateFocused || isActive,
+            });
             return (
               <FullscreenFeedPostItem
                 item={item}
@@ -789,10 +797,10 @@ function ProfileFeedContent({
           snapToAlignment="start"
           decelerationRate="fast"
           contentContainerStyle={{ paddingBottom: 0 }}
-          windowSize={5}
-          initialNumToRender={2}
-          maxToRenderPerBatch={2}
-          removeClippedSubviews={false}
+          windowSize={VIDEO_FEED_WINDOW_SIZE}
+          initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
+          maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
+          removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
           getItemLayout={(data, index) => ({
             length: availableHeight,
             offset: availableHeight * index,

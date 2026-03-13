@@ -2,18 +2,34 @@ import type { VideoSource } from 'expo-video';
 
 let cachedConvertUrl: ((url: string) => string) | null | undefined = undefined;
 
+function isHlsUrl(url: string): boolean {
+  return url.toLowerCase().includes('.m3u8');
+}
+
 function getConvertUrlOnce(): ((url: string) => string) | null {
   if (cachedConvertUrl !== undefined) return cachedConvertUrl;
   try {
-    cachedConvertUrl = require('expo-video-cache').convertUrl;
+    const convertUrl = require('expo-video-cache').convertUrl as ((url: string) => string) | undefined;
+    cachedConvertUrl = typeof convertUrl === 'function' ? convertUrl : null;
   } catch {
     cachedConvertUrl = null;
   }
-  return cachedConvertUrl;
+  return cachedConvertUrl ?? null;
 }
 
 export function getVideoSource(url: string): VideoSource {
   const convertUrl = getConvertUrlOnce();
-  if (convertUrl) return { uri: convertUrl(url) };
-  return { uri: url };
+  const contentType = isHlsUrl(url) ? 'hls' as const : undefined;
+
+  if (convertUrl) {
+    return {
+      uri: convertUrl(url),
+      ...(contentType ? { contentType } : {}),
+    };
+  }
+
+  return {
+    uri: url,
+    ...(contentType ? { contentType } : {}),
+  };
 }
