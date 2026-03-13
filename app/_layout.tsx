@@ -220,7 +220,7 @@ function RootLayoutNav() {
 
       retryIntervalId = setInterval(() => {
         void checkConnectivity();
-      }, 12000);
+      }, 5000);
     };
 
     const unsubscribe = networkStatus.subscribe((status, meta) => {

@@ -34,6 +34,7 @@ import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { networkStatus } from '@/lib/network-status';
 
 const VIDEO_BUFFER_OPTIONS = Platform.select({
   ios: {
@@ -48,6 +49,10 @@ const VIDEO_BUFFER_OPTIONS = Platform.select({
   },
   default: {},
 });
+
+const PLAYBACK_STALL_MS = 1500;
+const INITIAL_PLAYBACK_STALL_MS = 2500;
+const PLAYBACK_STALL_BUFFER_GAP = 0.35;
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -157,12 +162,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
   const thumbnailOpacity = useRef(new Animated.Value(1)).current;
+  const playbackStatusRef = useRef<'idle' | 'loading' | 'readyToPlay' | 'error'>('idle');
+  const lastPlaybackTimeRef = useRef(0);
+  const lastProgressAtRef = useRef(Date.now());
+  const stalledAtRef = useRef<number | null>(null);
+  const awaitingNetworkRecoveryRef = useRef(false);
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
   const challengeMeta = getChallengePostMeta(item);
   const activeChallengeName = challengeName || challengeMeta.challengeName;
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
+  const playbackStallSource = `feed-playback:${item.id}`;
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
   const shouldLoadVideo = isVideo && hlsReady && isAppActive && (isActive || shouldPreload) && !videoError;
@@ -187,6 +198,40 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       }
     }
   });
+
+  const clearPlaybackStall = useCallback((options?: { resume?: boolean }) => {
+    networkStatus.reportOnline({ source: playbackStallSource });
+
+    const stalledAt = stalledAtRef.current;
+    awaitingNetworkRecoveryRef.current = false;
+    stalledAtRef.current = null;
+    lastProgressAtRef.current = Date.now();
+
+    if (options?.resume && videoPlayer && isActive && isAppActive && !pausedByUser) {
+      try {
+        if (stalledAt != null && Math.abs((videoPlayer.currentTime || 0) - stalledAt) > 0.75) {
+          videoPlayer.currentTime = stalledAt;
+        }
+        videoPlayer.play();
+      } catch (_) {}
+    }
+  }, [isActive, isAppActive, pausedByUser, playbackStallSource, videoPlayer]);
+
+  const markPlaybackStall = useCallback((currentTime: number) => {
+    if (awaitingNetworkRecoveryRef.current) {
+      return;
+    }
+
+    awaitingNetworkRecoveryRef.current = true;
+    stalledAtRef.current = currentTime;
+    setIsPlaying(false);
+    setVideoReady(false);
+    networkStatus.reportOffline({
+      source: playbackStallSource,
+      message: 'No or low internet connection. Video will continue automatically when connection returns.',
+      immediate: true,
+    });
+  }, [playbackStallSource]);
 
   useEffect(() => {
     if (videoPlayer) {
@@ -226,7 +271,19 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setVideoProgress(0);
     setRetryCount(0);
     setPausedByUser(false);
-  }, [item.id]);
+    playbackStatusRef.current = 'idle';
+    lastPlaybackTimeRef.current = 0;
+    lastProgressAtRef.current = Date.now();
+    stalledAtRef.current = null;
+    awaitingNetworkRecoveryRef.current = false;
+    networkStatus.reportOnline({ source: playbackStallSource });
+  }, [item.id, playbackStallSource]);
+
+  useEffect(() => {
+    return () => {
+      networkStatus.reportOnline({ source: playbackStallSource });
+    };
+  }, [playbackStallSource]);
 
   // Play/pause based on active state
   useEffect(() => {
@@ -268,6 +325,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
         if (isMountedRef.current) {
           setIsPlaying(event.isPlaying);
+          if (event.isPlaying) {
+            lastProgressAtRef.current = Date.now();
+            if (awaitingNetworkRecoveryRef.current) {
+              clearPlaybackStall();
+            }
+          }
         }
       });
       return () => {
@@ -277,7 +340,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       playerValidRef.current = false;
       return () => {};
     }
-  }, [videoPlayer, isActive]);
+  }, [clearPlaybackStall, videoPlayer, isActive]);
 
   useEffect(() => {
     if (!videoPlayer || !playerValidRef.current) return;
@@ -287,16 +350,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           return;
         }
 
+        if (event?.status) {
+          playbackStatusRef.current = event.status as 'idle' | 'loading' | 'readyToPlay' | 'error';
+        }
+
         if (event?.error) {
-          setVideoError(true);
-          setDecoderErrorDetected(true);
           setIsPlaying(false);
+          markPlaybackStall(videoPlayer.currentTime || lastPlaybackTimeRef.current || 0);
           return;
         }
 
         if (event?.status === 'readyToPlay') {
           setVideoError(false);
           setDecoderErrorDetected(false);
+          if (awaitingNetworkRecoveryRef.current) {
+            clearPlaybackStall({ resume: true });
+          }
         }
       });
 
@@ -307,7 +376,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       playerValidRef.current = false;
       return () => {};
     }
-  }, [videoPlayer]);
+  }, [clearPlaybackStall, markPlaybackStall, videoPlayer]);
 
   // Track progress
   useEffect(() => {
@@ -316,11 +385,64 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       try {
         const ct = videoPlayer.currentTime || 0;
         const dur = videoPlayer.duration || 0;
-        if (dur > 0) setVideoProgress(ct / dur);
+        const bufferedPosition = videoPlayer.bufferedPosition ?? -1;
+
+        if (dur > 0) {
+          setVideoProgress(ct / dur);
+        }
+
+        if (ct > lastPlaybackTimeRef.current + 0.05) {
+          lastPlaybackTimeRef.current = ct;
+          lastProgressAtRef.current = Date.now();
+          if (awaitingNetworkRecoveryRef.current) {
+            clearPlaybackStall();
+          }
+          return;
+        }
+
+        const bufferGap =
+          bufferedPosition >= 0 ? bufferedPosition - ct : Number.POSITIVE_INFINITY;
+        const stalledLongEnough = Date.now() - lastProgressAtRef.current >= PLAYBACK_STALL_MS;
+        const initialLoadStalled =
+          shouldLoadVideo &&
+          !videoReady &&
+          !pausedByUser &&
+          playbackStatusRef.current === 'loading' &&
+          ct < 0.05 &&
+          Date.now() - lastProgressAtRef.current >= INITIAL_PLAYBACK_STALL_MS;
+        const midPlaybackStalled =
+          shouldLoadVideo &&
+          videoReady &&
+          !pausedByUser &&
+          playbackStatusRef.current === 'loading' &&
+          stalledLongEnough &&
+          (bufferedPosition < 0 || bufferGap < PLAYBACK_STALL_BUFFER_GAP);
+
+        if (initialLoadStalled || midPlaybackStalled) {
+          markPlaybackStall(ct);
+        }
       } catch (_) {}
     }, 250);
     return () => clearInterval(interval);
-  }, [videoPlayer, isActive]);
+  }, [clearPlaybackStall, isActive, markPlaybackStall, pausedByUser, shouldLoadVideo, videoPlayer, videoReady]);
+
+  useEffect(() => {
+    if (!videoPlayer) {
+      return;
+    }
+
+    const unsubscribe = networkStatus.subscribe((status, meta) => {
+      if (meta?.source === 'subscribe') {
+        return;
+      }
+
+      if (status === 'online' && awaitingNetworkRecoveryRef.current) {
+        clearPlaybackStall({ resume: true });
+      }
+    });
+
+    return unsubscribe;
+  }, [clearPlaybackStall, videoPlayer]);
 
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {

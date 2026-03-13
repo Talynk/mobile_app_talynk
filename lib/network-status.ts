@@ -5,7 +5,38 @@ type Listener = (status: NetworkStatus, meta?: { at: number; source?: string; me
 let currentStatus: NetworkStatus = 'online';
 let lastChangedAt = Date.now();
 const listeners = new Set<Listener>();
-let pendingOfflineTimer: ReturnType<typeof setTimeout> | null = null;
+const pendingOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const offlineSources = new Map<string, { message?: string }>();
+
+function getSourceKey(source?: string): string {
+  return source?.trim() || 'unknown';
+}
+
+function isConnectivitySource(source?: string): boolean {
+  return source === 'api-client' || source === 'offline-probe';
+}
+
+function clearPendingTimer(source: string) {
+  const timer = pendingOfflineTimers.get(source);
+  if (timer) {
+    clearTimeout(timer);
+    pendingOfflineTimers.delete(source);
+  }
+}
+
+function clearSources(predicate: (source: string) => boolean) {
+  [...pendingOfflineTimers.keys()].forEach((source) => {
+    if (predicate(source)) {
+      clearPendingTimer(source);
+    }
+  });
+
+  [...offlineSources.keys()].forEach((source) => {
+    if (predicate(source)) {
+      offlineSources.delete(source);
+    }
+  });
+}
 
 function notify(meta?: { at: number; source?: string; message?: string }) {
   listeners.forEach((fn) => {
@@ -15,6 +46,18 @@ function notify(meta?: { at: number; source?: string; message?: string }) {
       // ignore listener errors
     }
   });
+}
+
+function activateOfflineSource(source: string, message?: string) {
+  pendingOfflineTimers.delete(source);
+  offlineSources.set(source, { message });
+
+  if (currentStatus !== 'offline') {
+    currentStatus = 'offline';
+    lastChangedAt = Date.now();
+  }
+
+  notify({ at: lastChangedAt, source, message });
 }
 
 export const networkStatus = {
@@ -32,26 +75,47 @@ export const networkStatus = {
       listeners.delete(listener);
     };
   },
-  reportOffline(meta?: { source?: string; message?: string }) {
-    if (currentStatus === 'offline' || pendingOfflineTimer) return;
+  reportOffline(meta?: { source?: string; message?: string; immediate?: boolean }) {
+    const source = getSourceKey(meta?.source);
+
+    if (offlineSources.has(source) || pendingOfflineTimers.has(source)) {
+      return;
+    }
+
+    if (meta?.immediate) {
+      activateOfflineSource(source, meta?.message);
+      return;
+    }
 
     // Guard against transient request hiccups on otherwise healthy connections.
-    pendingOfflineTimer = setTimeout(() => {
-      pendingOfflineTimer = null;
-      if (currentStatus === 'offline') return;
-      currentStatus = 'offline';
-      lastChangedAt = Date.now();
-      notify({ at: lastChangedAt, source: meta?.source, message: meta?.message });
+    const timer = setTimeout(() => {
+      activateOfflineSource(source, meta?.message);
     }, 1500);
+
+    pendingOfflineTimers.set(source, timer);
   },
   reportOnline(meta?: { source?: string }) {
-    if (pendingOfflineTimer) {
-      clearTimeout(pendingOfflineTimer);
-      pendingOfflineTimer = null;
+    const source = meta?.source ? getSourceKey(meta.source) : null;
+
+    if (!source) {
+      clearSources(() => true);
+    } else if (isConnectivitySource(source)) {
+      clearSources(() => true);
+    } else {
+      clearPendingTimer(source);
+      offlineSources.delete(source);
     }
-    if (currentStatus === 'online') return;
+
+    if (offlineSources.size > 0 || pendingOfflineTimers.size > 0) {
+      return;
+    }
+
+    if (currentStatus === 'online') {
+      return;
+    }
+
     currentStatus = 'online';
     lastChangedAt = Date.now();
-    notify({ at: lastChangedAt, source: meta?.source });
+    notify({ at: lastChangedAt, source: source ?? undefined });
   },
 };

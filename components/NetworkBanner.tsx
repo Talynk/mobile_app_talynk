@@ -64,7 +64,7 @@ export default function NetworkBanner() {
           showBanner(
             {
               variant: 'offline',
-              message: 'No or low internet connection. Reconnecting automatically…',
+              message: meta?.message || 'No or low internet connection. Reconnecting automatically…',
             },
             false
           );
@@ -76,7 +76,7 @@ export default function NetworkBanner() {
         showBanner(
           {
             variant: 'offline',
-            message: 'No or low internet connection. Reconnecting automatically…',
+            message: meta?.message || 'No or low internet connection. Reconnecting automatically…',
           },
           false
         );
