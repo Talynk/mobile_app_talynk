@@ -2523,6 +2523,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
+    marginTop: 20,
   },
   input: {
     height: 50,
@@ -3106,7 +3107,7 @@ const styles = StyleSheet.create({
   },
   subLabel: {
     fontSize: 13,
-    marginBottom: 14,
+    marginBottom: 40,
     marginTop: 6,
   },
   selectedBadge: {
@@ -3169,7 +3170,7 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   challengeIntroText: {
-    marginBottom: 6,
+    marginBottom: 18,
   },
   challengePrimaryAction: {
     borderWidth: 1,

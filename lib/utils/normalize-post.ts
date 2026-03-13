@@ -11,9 +11,57 @@ function isLikelyVideoUrl(value: unknown): boolean {
   );
 }
 
+function isLikelyImageUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const url = value.toLowerCase();
+  return (
+    url.includes('.jpg') ||
+    url.includes('.jpeg') ||
+    url.includes('.png') ||
+    url.includes('.webp') ||
+    url.includes('.gif') ||
+    url.includes('.bmp') ||
+    url.includes('.heic') ||
+    url.includes('.heif') ||
+    url.includes('.avif') ||
+    url.includes('.svg')
+  );
+}
+
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return '';
+}
+
+function getChallengeEntries(post: any): any[] {
+  return [
+    ...(Array.isArray(post?.challengePosts) ? post.challengePosts : []),
+    ...(Array.isArray(post?.challenge_posts) ? post.challenge_posts : []),
+    ...(post?.challengePost ? [post.challengePost] : []),
+    ...(post?.challenge_post ? [post.challenge_post] : []),
+  ].filter(Boolean);
+}
+
 function inferPostType(post: any, playbackUrl: string, videoUrl: string, imageUrl: string): 'video' | 'image' {
-  if (post?.type === 'video' || post?.mediaType === 'video') return 'video';
-  if (post?.type === 'image' || post?.mediaType === 'image') return 'image';
+  const explicitImage = post?.type === 'image' || post?.mediaType === 'image';
+  const explicitVideo = post?.type === 'video' || post?.mediaType === 'video';
+  const likelyVideo =
+    post?.streamType === 'hls' ||
+    post?.streamType === 'raw' ||
+    post?.stream_type === 'hls' ||
+    post?.stream_type === 'raw' ||
+    isLikelyVideoUrl(playbackUrl) ||
+    isLikelyVideoUrl(videoUrl);
+  const likelyImage = !!imageUrl || isLikelyImageUrl(playbackUrl) || isLikelyImageUrl(videoUrl);
+
+  if (explicitImage) return 'image';
+  if (explicitVideo && likelyImage && !likelyVideo) return 'image';
+  if (explicitVideo) return 'video';
   if (post?.streamType === 'hls' || post?.streamType === 'raw') return 'video';
   if (post?.stream_type === 'hls' || post?.stream_type === 'raw') return 'video';
   if (isLikelyVideoUrl(playbackUrl) || isLikelyVideoUrl(videoUrl)) return 'video';
@@ -22,35 +70,71 @@ function inferPostType(post: any, playbackUrl: string, videoUrl: string, imageUr
 }
 
 export function normalizePost(post: any): Post {
-  const playbackUrl =
-    post?.playback_url ||
-    post?.fullUrl ||
+  const challengeEntries = getChallengeEntries(post);
+  const primaryChallenge =
+    post?.challenge ||
+    post?.competition ||
+    post?.challengePost?.challenge ||
+    post?.challenge_post?.challenge ||
+    challengeEntries[0]?.challenge ||
+    challengeEntries[0]?.competition;
+  const explicitImage = post?.type === 'image' || post?.mediaType === 'image';
+  const explicitVideo = post?.type === 'video' || post?.mediaType === 'video';
+  const rawPlaybackUrl = pickString(
+    post?.playback_url,
+    post?.fullUrl,
     post?.hls_url ||
-    post?.hlsUrl ||
-    post?.video_url ||
-    post?.videoUrl ||
-    post?.mediaUrl ||
-    '';
-  const imageUrl = post?.image || post?.imageUrl || '';
-  const videoUrl =
-    post?.video_url ||
-    post?.videoUrl ||
-    ((post?.stream_type === 'raw' || post?.streamType === 'raw') && playbackUrl ? playbackUrl : '') ||
-    '';
+    post?.hlsUrl,
+    post?.video_url,
+    post?.videoUrl,
+    post?.mediaUrl,
+    post?.media_url,
+  );
+  const directImageUrl = pickString(post?.image, post?.imageUrl, post?.image_url, post?.imageURL);
+  const fallbackImageUrl =
+    explicitImage ||
+    (!explicitVideo && isLikelyImageUrl(rawPlaybackUrl) && !isLikelyVideoUrl(rawPlaybackUrl))
+      ? rawPlaybackUrl
+      : '';
+  const imageUrl = pickString(directImageUrl, fallbackImageUrl);
+  const rawVideoUrl = pickString(
+    post?.video_url,
+    post?.videoUrl,
+    post?.mediaUrl,
+    post?.media_url,
+    (post?.stream_type === 'raw' || post?.streamType === 'raw') && rawPlaybackUrl ? rawPlaybackUrl : '',
+  );
   const hlsUrl =
-    post?.hls_url ||
-    post?.hlsUrl ||
-    ((post?.stream_type === 'hls' || post?.streamType === 'hls' || playbackUrl?.toLowerCase?.().includes('.m3u8'))
-      ? playbackUrl
-      : '') ||
-    '';
-  const type = inferPostType(post, playbackUrl, videoUrl, imageUrl);
+    pickString(post?.hls_url, post?.hlsUrl) ||
+    ((post?.stream_type === 'hls' || post?.streamType === 'hls' || rawPlaybackUrl?.toLowerCase?.().includes('.m3u8'))
+      ? rawPlaybackUrl
+      : '');
+  const type = inferPostType(post, rawPlaybackUrl, rawVideoUrl, imageUrl);
+  const resolvedImageUrl =
+    type === 'image'
+      ? pickString(directImageUrl, fallbackImageUrl, rawPlaybackUrl, rawVideoUrl)
+      : imageUrl;
+  const videoUrl =
+    type === 'video'
+      ? pickString(
+          rawVideoUrl,
+          (post?.stream_type === 'raw' || post?.streamType === 'raw') && rawPlaybackUrl ? rawPlaybackUrl : '',
+        )
+      : '';
+  const playbackUrl =
+    type === 'image'
+      ? pickString(imageUrl, rawPlaybackUrl)
+      : pickString(post?.playback_url, rawPlaybackUrl, hlsUrl, videoUrl);
   const streamType =
+    type === 'image'
+      ? null
+      :
     post?.streamType ||
     post?.stream_type ||
     (hlsUrl ? 'hls' : videoUrl ? 'raw' : null);
   const processingStatus = post?.processingStatus || post?.processing_status || null;
   const hlsReady =
+    type === 'image' ||
     post?.hlsReady === true ||
     streamType === 'hls' ||
     (!!hlsUrl && processingStatus === 'completed');
@@ -62,19 +146,37 @@ export function normalizePost(post: any): Post {
     post?.profile_picture ||
     userFromPost?.profile_picture ||
     null;
+  const challengeId = pickString(
+    primaryChallenge?.id,
+    post?.challenge_id,
+    post?.challengeId,
+    post?.competition_id,
+    post?.competitionId,
+    challengeEntries[0]?.challenge_id,
+    challengeEntries[0]?.challengeId,
+  );
+  const challengeName = pickString(
+    primaryChallenge?.name,
+    post?.challenge_name,
+    post?.challengeName,
+    post?.competition_name,
+    post?.competitionName,
+    challengeEntries[0]?.challenge?.name,
+    challengeEntries[0]?.competition?.name,
+  );
 
   return {
     ...post,
     type,
-    mediaType: post?.mediaType || type,
-    image: imageUrl || post?.image || '',
-    imageUrl: post?.imageUrl || imageUrl || '',
+    mediaType: type,
+    image: pickString(post?.image, resolvedImageUrl),
+    imageUrl: pickString(post?.imageUrl, resolvedImageUrl),
     video_url: videoUrl,
-    videoUrl: post?.videoUrl || videoUrl,
+    videoUrl: type === 'video' ? pickString(post?.videoUrl, videoUrl) : '',
     hls_url: hlsUrl,
     hlsUrl: post?.hlsUrl || hlsUrl,
-    playback_url: post?.playback_url || playbackUrl || hlsUrl || '',
-    fullUrl: playbackUrl || hlsUrl || videoUrl || imageUrl || '',
+    playback_url: type === 'video' ? pickString(post?.playback_url, playbackUrl, hlsUrl) : '',
+    fullUrl: type === 'image' ? pickString(post?.fullUrl, resolvedImageUrl, playbackUrl) : pickString(playbackUrl, hlsUrl, videoUrl, resolvedImageUrl),
     streamType,
     stream_type: post?.stream_type || streamType || undefined,
     hlsReady,
@@ -95,6 +197,13 @@ export function normalizePost(post: any): Post {
     view_count: post?.view_count ?? post?.views ?? 0,
     is_featured: post?.is_featured ?? post?.isFeatured ?? false,
     isAd: !!post?.isAd,
+    challenge: primaryChallenge || post?.challenge || post?.competition,
+    challenge_id: challengeId || undefined,
+    challengeId: challengeId || undefined,
+    challenge_name: challengeName || undefined,
+    challengeName: challengeName || undefined,
+    challengePosts: post?.challengePosts ?? post?.challenge_posts,
+    challenge_posts: post?.challenge_posts ?? post?.challengePosts,
     user:
       userFromPost ||
       (post?.user_id || authorName || authorProfilePicture

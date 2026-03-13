@@ -12,6 +12,7 @@ import {
   RegisterCompletePayload,
   PasswordResetVerifyData,
 } from '../types';
+import { normalizePost } from './utils/normalize-post';
 
 // Auth API
 export const authApi = {
@@ -1618,12 +1619,15 @@ export const challengesApi = {
         const rawItems = Array.isArray(apiResponse.data) ? apiResponse.data : [];
         const normalizedPosts = rawItems.map((item: any) => {
           const post = item.post || item;
-          return {
+          return normalizePost({
             ...post,
             winner_rank: item.winner_rank ?? post.winner_rank,
             likes_during_challenge: item.likes_during_challenge ?? item.likes_at_challenge_end ?? post.likes_during_challenge,
             total_likes: item.total_likes ?? post.total_likes ?? post.likes,
-          };
+            submitted_at: item.submitted_at ?? post.submitted_at,
+            challengePosts: post?.challengePosts ?? post?.challenge_posts,
+            challenge_posts: post?.challenge_posts ?? post?.challengePosts,
+          });
         });
 
         return {
@@ -1723,12 +1727,15 @@ export const challengesApi = {
       const rawItems = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
       const posts = rawItems.map((item: any) => {
         const post = item.post || item;
-        return {
+        return normalizePost({
           ...post,
           winner_rank: item.winner_rank ?? post.winner_rank,
           likes_during_challenge: item.likes_during_challenge ?? item.likes_at_challenge_end ?? post.likes_during_challenge,
           total_likes: item.total_likes ?? post.total_likes ?? post.likes,
-        };
+          submitted_at: item.submitted_at ?? post.submitted_at,
+          challengePosts: post?.challengePosts ?? post?.challenge_posts,
+          challenge_posts: post?.challenge_posts ?? post?.challengePosts,
+        });
       });
 
       return {

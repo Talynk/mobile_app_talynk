@@ -1,5 +1,9 @@
 import { API_BASE_URL } from '@/lib/config';
 
+function isImagePost(post: any): boolean {
+  return post?.type === 'image' || post?.mediaType === 'image';
+}
+
 /**
  * Converts a relative file path from the API to a full URL
  * 
@@ -47,18 +51,33 @@ export function getFileUrl(relativePath: string | null | undefined): string | nu
  * @returns Full media URL or null
  */
 export function getPostMediaUrl(post: any): string | null {
-  // Check for fullUrl first (from API response), then various video / image fields
-  const url =
-    post?.playback_url ||
-    post?.fullUrl ||
-    post?.hls_url ||
-    post?.hlsUrl ||
-    post?.video_url ||
-    post?.videoUrl ||
-    post?.image ||
-    post?.imageUrl ||
-    post?.mediaUrl ||
-    '';
+  const url = isImagePost(post)
+    ? (
+        post?.image ||
+        post?.imageUrl ||
+        post?.image_url ||
+        post?.fullUrl ||
+        post?.video_url ||
+        post?.videoUrl ||
+        post?.mediaUrl ||
+        post?.media_url ||
+        post?.playback_url ||
+        ''
+      )
+    : (
+        post?.playback_url ||
+        post?.fullUrl ||
+        post?.hls_url ||
+        post?.hlsUrl ||
+        post?.video_url ||
+        post?.videoUrl ||
+        post?.image ||
+        post?.imageUrl ||
+        post?.image_url ||
+        post?.mediaUrl ||
+        post?.media_url ||
+        ''
+      );
 
   if (!url || url.trim() === '') {
     return null;
@@ -79,7 +98,7 @@ export function getThumbnailUrl(post: any): string | null {
   const url = post?.thumbnail_url || post?.thumbnailUrl || post?.thumbnail || '';
 
   if (!url || url.trim() === '') {
-    return null;
+    return isImagePost(post) ? getPostMediaUrl(post) : null;
   }
 
   return getFileUrl(url);

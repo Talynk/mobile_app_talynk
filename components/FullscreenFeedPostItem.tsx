@@ -127,6 +127,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [isPlayerValid, setIsPlayerValid] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [usingImageFallback, setUsingImageFallback] = useState(false);
   const { isMuted, toggleMute } = useMute();
   const [videoError, setVideoError] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
@@ -154,6 +155,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const videoPlayerSource = shouldLoadVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
+  const fallbackImageUrl =
+    !isVideo && thumbnailOrPlaceholderUrl && thumbnailOrPlaceholderUrl !== mediaUrl
+      ? thumbnailOrPlaceholderUrl
+      : null;
+  const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
 
   const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
     if (player) {
@@ -190,6 +196,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (isMountedRef.current) setIsPlayerValid(false);
     }
   }, [videoPlayerSource]);
+
+  useEffect(() => {
+    setImageError(false);
+    setUsingImageFallback(false);
+  }, [item.id, mediaUrl, thumbnailOrPlaceholderUrl]);
 
   // Play/pause based on active state
   useEffect(() => {
@@ -433,8 +444,19 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </>
         ) : (
           <View style={styles.mediaWrapper}>
-            {mediaUrl && !imageError ? (
-              <Image source={{ uri: mediaUrl }} style={styles.media} resizeMode="cover" onError={() => setImageError(true)} />
+            {imageDisplayUrl && !imageError ? (
+              <Image
+                source={{ uri: imageDisplayUrl }}
+                style={styles.media}
+                resizeMode="cover"
+                onError={() => {
+                  if (!usingImageFallback && fallbackImageUrl) {
+                    setUsingImageFallback(true);
+                    return;
+                  }
+                  setImageError(true);
+                }}
+              />
             ) : null}
           </View>
         )}

@@ -34,6 +34,7 @@ import { Avatar } from '@/components/Avatar';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { localNotificationEvents } from '@/lib/local-notification-events';
+import { normalizePost } from '@/lib/utils/normalize-post';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -209,25 +210,7 @@ const getPostTimestamp = (post: Post) =>
   new Date(post.createdAt || post.uploadDate || (post as any).created_at || 0).getTime();
 
 const normalizeProfilePost = (post: any): Post => {
-  const videoUrl = post.video_url || post.videoUrl || '';
-  const fullUrl = post.fullUrl || post.hls_url || post.hlsUrl || videoUrl || post.mediaUrl || '';
-
-  return {
-    ...post,
-    video_url: videoUrl,
-    videoUrl: post.videoUrl || videoUrl,
-    fullUrl,
-    type: post.type || post.mediaType || (videoUrl ? 'video' : 'image'),
-    processing_status: post.processing_status || post.processingStatus,
-    processingStatus: post.processingStatus || post.processing_status,
-    hlsReady: post.hlsReady || false,
-    thumbnail_url: post.thumbnail_url || post.thumbnailUrl || '',
-    thumbnailUrl: post.thumbnailUrl || post.thumbnail_url || '',
-    thumbnail: post.thumbnail || post.thumbnail_url || post.thumbnailUrl || '',
-    likes: post.like_count ?? post.likes ?? post.likesCount ?? 0,
-    comments_count: post.comments_count ?? post.commentsCount ?? post.comment_count ?? 0,
-    createdAt: post.createdAt || post.created_at || post.uploadDate,
-  };
+  return normalizePost(post);
 };
 
 const sortPostsNewestFirst = (items: Post[]) => [...items].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
@@ -388,7 +371,15 @@ export default function ProfileScreen() {
 
   const enrichPostsWithPlaybackData = useCallback(async (items: Post[]) => {
     const postsNeedingEnrichment = items.filter(
-      (post: any) => post.type === 'video' && post.hlsReady && !post.hls_url && !post.fullUrl?.includes('.m3u8')
+      (post: any) => {
+        const missingChallengeMeta = !getChallengePostMeta(post).isChallengePost;
+        const needsPlaybackData =
+          post.type === 'video' && post.hlsReady && !post.hls_url && !post.fullUrl?.includes('.m3u8');
+        const missingImageMedia =
+          post.type === 'image' && !post.image && !post.imageUrl && !post.fullUrl;
+
+        return needsPlaybackData || missingChallengeMeta || missingImageMedia;
+      }
     );
 
     if (!postsNeedingEnrichment.length) {

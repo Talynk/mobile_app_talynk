@@ -10,7 +10,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/mobile-app-logo.png",
+      "image": "./assets/images/mobile-app-logo-1024.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },

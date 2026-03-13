@@ -42,6 +42,7 @@ import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { getExplorePostsCache } from '@/lib/explore-posts-cache';
+import { normalizePost } from '@/lib/utils/normalize-post';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -131,7 +132,7 @@ function ProfileFeedContent({
 }: ProfileFeedContentProps) {
   // Parse initial post data if available for instant loading
   const initialPost = initialPostData ? (() => {
-    try { return JSON.parse(initialPostData); } catch (e) { return null; }
+    try { return normalizePost(JSON.parse(initialPostData)); } catch (e) { return null; }
   })() : null;
 
   const [posts, setPosts] = useState<Post[]>(initialPost ? [initialPost] : []);
@@ -312,65 +313,25 @@ function ProfileFeedContent({
       // CRITICAL: Normalize posts from API — backend returns camelCase fields
       // but the video player and UI expects snake_case fields
       postsArray = postsArray.map((p: any) => {
-        const videoUrl = p.video_url || p.videoUrl || '';
-        const hlsUrl = p.hlsUrl || p.hls_url || '';
-        const mediaUrl = p.mediaUrl || videoUrl || '';
-
-        // Try to surface any competition/challenge information that the backend provides,
-        // even if it's only nested on challenge_posts.
-        const firstChallengePost = Array.isArray(p.challenge_posts)
-          ? p.challenge_posts[0]
-          : undefined;
-        const nestedChallenge =
-          p.challenge ||
-          p.competition ||
-          firstChallengePost?.challenge;
-
-        const challengeId =
-          p.challenge_id ||
-          p.challengeId ||
-          nestedChallenge?.id ||
-          firstChallengePost?.challenge_id;
-
-        const challengeName =
-          p.challenge_name ||
-          p.challengeName ||
-          nestedChallenge?.name;
-
-        return {
+        return normalizePost({
           ...p,
-          video_url: videoUrl,
-          videoUrl: p.videoUrl || videoUrl,
-          fullUrl: p.fullUrl || hlsUrl || videoUrl || mediaUrl,
-          type: p.type || p.mediaType || (videoUrl ? 'video' : 'image'),
-          processing_status: p.processing_status || p.processingStatus,
-          processingStatus: p.processingStatus || p.processing_status,
-          hlsReady: p.hlsReady || false,
-          thumbnail_url: p.thumbnail_url || p.thumbnailUrl || '',
-          thumbnailUrl: p.thumbnailUrl || p.thumbnail_url || '',
-          thumbnail: p.thumbnail || p.thumbnail_url || p.thumbnailUrl || '',
-          likes: p.like_count ?? p.likes ?? p.likesCount ?? 0,
-          comments_count: p.comments_count ?? p.commentsCount ?? p.comment_count ?? 0,
-          createdAt: p.createdAt || p.created_at,
           user: p.user || {
             id: p.user_id || p.userId || userId,
             username: p.authorName || p.username || '',
             profile_picture: p.authorProfilePicture || p.profile_picture || '',
           },
-          // Explicitly promote challenge metadata so the fullscreen component
-          // can always see that this is a competition post.
-          challenge: nestedChallenge || p.challenge || p.competition,
-          challenge_id: challengeId,
-          challengeId: challengeId,
-          challenge_name: challengeName,
-          challengeName: challengeName,
-        };
+        });
       });
 
       // CRITICAL ENRICHMENT: The user-post endpoints return hlsReady:true but
       // OMIT hls_url and thumbnail_url. Enrich from individual post endpoint.
       const postsNeedingEnrichment = postsArray.filter(
-        (p: any) => p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8')
+        (p: any) => {
+          const missingChallengeMeta = !p.challengeName && !p.challenge?.name && !Array.isArray(p.challengePosts) && !Array.isArray(p.challenge_posts);
+          const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
+          const missingImageMedia = p.type === 'image' && !p.image && !p.imageUrl && !p.fullUrl;
+          return needsPlaybackData || missingChallengeMeta || missingImageMedia;
+        }
       );
 
       if (postsNeedingEnrichment.length > 0) {
@@ -415,23 +376,16 @@ function ProfileFeedContent({
             enrichedChallenge?.name;
 
           return {
-            ...p,
-            hls_url: enriched.hls_url || enriched.hlsUrl || p.hls_url,
-            hlsUrl: enriched.hlsUrl || enriched.hls_url || p.hlsUrl,
-            fullUrl: enriched.fullUrl || enriched.hls_url || enriched.hlsUrl || p.fullUrl,
-            thumbnail_url: enriched.thumbnail_url || enriched.thumbnailUrl || p.thumbnail_url,
-            thumbnailUrl: enriched.thumbnailUrl || enriched.thumbnail_url || p.thumbnailUrl,
-            thumbnail: enriched.thumbnail || enriched.thumbnail_url || enriched.thumbnailUrl || p.thumbnail,
-            processing_status: enriched.processing_status || enriched.processingStatus || p.processing_status,
-            video_url: enriched.video_url || enriched.videoUrl || p.video_url,
-            user: enriched.user || p.user,
-            // Promote challenge metadata from enriched post so the profile feed
-            // sees the same competition info as the challenge posts screen.
-            challenge: enrichedChallenge || p.challenge || p.competition,
-            challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
-            challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
-            challenge_name: enrichedChallengeName || p.challenge_name || p.challengeName,
-            challengeName: enrichedChallengeName || p.challengeName || p.challenge_name,
+            ...normalizePost({
+              ...p,
+              ...enriched,
+              user: enriched.user || p.user,
+              challenge: enrichedChallenge || p.challenge || p.competition,
+              challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
+              challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
+              challenge_name: enrichedChallengeName || p.challenge_name || p.challengeName,
+              challengeName: enrichedChallengeName || p.challengeName || p.challenge_name,
+            }),
           };
         });
 
