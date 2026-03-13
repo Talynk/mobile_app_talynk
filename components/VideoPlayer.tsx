@@ -3,6 +3,7 @@ import { View, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Feather } from '@expo/vector-icons';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 
 interface VideoPlayerProps {
   source: string | { uri: string };
@@ -34,6 +35,7 @@ export const VideoPlayer = ({
   testID,
 }: VideoPlayerProps) => {
   const { isMuted, toggleMute } = useVideoMute();
+  const isAppActive = useAppActive();
   const muteOpacity = React.useRef(new Animated.Value(0)).current;
 
   // Resolve source URI
@@ -55,6 +57,18 @@ export const VideoPlayer = ({
       player.muted = effectiveIsMuted;
     }
   }, [effectiveIsMuted, player]);
+
+  React.useEffect(() => {
+    if (!player) return;
+
+    try {
+      if (shouldPlay && isAppActive) {
+        player.play();
+      } else {
+        player.pause();
+      }
+    } catch (_) {}
+  }, [isAppActive, player, shouldPlay]);
 
   const handleVideoPress = () => {
     if (showMuteToggle) {

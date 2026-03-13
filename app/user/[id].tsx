@@ -35,6 +35,7 @@ import { timeAgo } from '@/lib/utils/time-ago';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { useCache } from '@/lib/cache-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -179,10 +180,19 @@ export default function ExternalUserProfileScreen() {
 }
 
 const ModalVideoPlayer = ({ source }: { source: string }) => {
+  const isAppActive = useAppActive();
   const player = useVideoPlayer(source, (player) => {
     player.play();
     player.loop = true;
   });
+
+  useEffect(() => {
+    if (!player || isAppActive) return;
+    try {
+      player.pause();
+    } catch (_) {}
+  }, [isAppActive, player]);
+
   return <VideoView player={player} style={styles.overlayMedia} contentFit="contain" nativeControls={true} />;
 };
 

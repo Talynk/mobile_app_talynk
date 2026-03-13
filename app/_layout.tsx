@@ -22,6 +22,9 @@ import talynkLogo from '@/assets/images/mobile-app-logo.png';
 import { MuteProvider } from '@/lib/mute-context';
 import { CreateFocusProvider } from '@/lib/create-focus-context';
 import { VideoReadyWatcher } from '@/components/VideoReadyWatcher';
+import NetworkBanner from '@/components/NetworkBanner';
+import { API_BASE_URL } from '@/lib/config';
+import { networkStatus } from '@/lib/network-status';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -169,6 +172,88 @@ function RootLayoutNav() {
     return () => subscription.remove();
   }, []);
 
+  useEffect(() => {
+    let isDisposed = false;
+    let inFlight = false;
+    let retryIntervalId: ReturnType<typeof setInterval> | null = null;
+
+    const stopRetryLoop = () => {
+      if (retryIntervalId) {
+        clearInterval(retryIntervalId);
+        retryIntervalId = null;
+      }
+    };
+
+    const checkConnectivity = async () => {
+      if (
+        isDisposed ||
+        inFlight ||
+        AppState.currentState !== 'active' ||
+        networkStatus.getStatus() !== 'offline'
+      ) {
+        return;
+      }
+
+      inFlight = true;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/categories?t=${Date.now()}`, {
+          method: 'GET',
+          signal: controller.signal,
+        });
+
+        if (response.ok) {
+          networkStatus.reportOnline({ source: 'offline-probe' });
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        inFlight = false;
+      }
+    };
+
+    const startRetryLoop = () => {
+      if (retryIntervalId) {
+        return;
+      }
+
+      retryIntervalId = setInterval(() => {
+        void checkConnectivity();
+      }, 12000);
+    };
+
+    const unsubscribe = networkStatus.subscribe((status, meta) => {
+      if (meta?.source === 'subscribe') {
+        if (status === 'offline') {
+          startRetryLoop();
+          void checkConnectivity();
+        }
+        return;
+      }
+
+      if (status === 'offline') {
+        startRetryLoop();
+        void checkConnectivity();
+      } else {
+        stopRetryLoop();
+      }
+    });
+
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active' && networkStatus.getStatus() === 'offline') {
+        void checkConnectivity();
+      }
+    });
+
+    return () => {
+      isDisposed = true;
+      stopRetryLoop();
+      appStateSubscription.remove();
+      unsubscribe();
+    };
+  }, []);
+
   // Ignore dev-only warnings
   useEffect(() => {
     LogBox.ignoreLogs([
@@ -187,6 +272,7 @@ function RootLayoutNav() {
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
                 <VideoReadyWatcher />
+                <NetworkBanner />
                 <Stack
                   screenOptions={{
                     headerShown: false,

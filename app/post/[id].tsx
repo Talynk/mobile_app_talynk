@@ -32,6 +32,7 @@ import { getPostMediaUrl, getProfilePictureUrl, getThumbnailUrl, getPlaybackUrl 
 import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -59,6 +60,7 @@ export default function PostDetailScreen() {
   const { user } = useAuth();
   const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
   const { isMuted, toggleMute } = useVideoMute();
+  const isAppActive = useAppActive();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const [videoReady, setVideoReady] = useState(false);
@@ -318,6 +320,13 @@ export default function PostDetailScreen() {
       videoPlayer.play();
     } catch { }
   }, [videoPlayer]);
+
+  useEffect(() => {
+    if (!videoPlayer || isAppActive) return;
+    try {
+      videoPlayer.pause();
+    } catch { }
+  }, [isAppActive, videoPlayer]);
   const isLiked = likedPosts.has(post.id);
   const isFollowing = followedUsers.has(post.user?.id || '');
 
@@ -326,7 +335,7 @@ export default function PostDetailScreen() {
   const handleTapToPause = () => {
     if (!isVideo || !videoPlayer) return;
     try {
-      if (videoPlayer.playing) {
+      if (isPlaying) {
         videoPlayer.pause();
         pauseIndicatorOpacity.setValue(1);
       } else {
@@ -337,7 +346,8 @@ export default function PostDetailScreen() {
   };
 
   const handleMuteToggle = () => {
-    const newMuted = toggleMute();
+    const newMuted = !isMuted;
+    toggleMute();
     if (videoPlayer) {
       try { videoPlayer.muted = newMuted; } catch (_) {}
     }

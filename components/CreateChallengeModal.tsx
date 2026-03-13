@@ -19,6 +19,11 @@ import { Feather } from '@expo/vector-icons';
 import { challengesApi, countriesApi } from '@/lib/api';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Country } from '@/types';
+import {
+    formatChallengeDateTime,
+    getCurrentTimeZoneLabel,
+    parseChallengeDate,
+} from '@/lib/utils/challenge';
 
 export interface ChallengeForEdit {
     id: string;
@@ -48,23 +53,23 @@ interface CreateChallengeModalProps {
 
 type FieldErrorKey = 'name' | 'description' | 'organizer_name' | 'organizer_contact' | 'contact_email' | 'rewards' | 'start_date' | 'end_date' | 'min_content_per_account' | 'scoring_criteria' | 'eligibility_criteria' | 'what_you_do';
 
-function formatDateForInput(date: Date): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
 function parseDateInput(value: string): Date {
-    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date();
-    const [y, m, d] = value.split('-').map(Number);
-    return new Date(y, m - 1, d);
+    if (!value) return new Date();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [y, m, d] = value.split('-').map(Number);
+        return new Date(y, m - 1, d, 0, 0, 0, 0);
+    }
+    return parseChallengeDate(value) || new Date();
 }
 
 const tomorrow = new Date();
 tomorrow.setDate(tomorrow.getDate() + 1);
-const defaultStartDate = tomorrow.toISOString().split('T')[0];
-const defaultEndDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+tomorrow.setHours(9, 0, 0, 0);
+const oneWeekLater = new Date(tomorrow);
+oneWeekLater.setDate(oneWeekLater.getDate() + 7);
+oneWeekLater.setHours(23, 59, 0, 0);
+const defaultStartDate = tomorrow.toISOString();
+const defaultEndDate = oneWeekLater.toISOString();
 
 const defaultFormData = {
     name: '',
@@ -96,27 +101,14 @@ function parseOrganizerContact(full: string): { code: string; digits: string } {
 
 export default function CreateChallengeModal({ visible, onClose, onCreated, editChallenge, onUpdated }: CreateChallengeModalProps) {
     const insets = useSafeAreaInsets();
+    const localTimeZoneLabel = useMemo(() => getCurrentTimeZoneLabel(), []);
     const [loading, setLoading] = useState(false);
     const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldErrorKey, string>>>({});
-    const [showStartPicker, setShowStartPicker] = useState(false);
-    const [showEndPicker, setShowEndPicker] = useState(false);
+    const [activePickerField, setActivePickerField] = useState<'start_date' | 'end_date' | null>(null);
+    const [activePickerMode, setActivePickerMode] = useState<'date' | 'time' | 'datetime' | null>(null);
+    const [androidPickerDraft, setAndroidPickerDraft] = useState<Date | null>(null);
 
-    const [formData, setFormData] = useState({
-        name: '',
-        description: '',
-        has_rewards: false,
-        rewards: '',
-        organizer_name: '',
-        organizer_contact: '',
-        contact_country_code: '+250',
-        contact_phone_digits: '',
-        contact_email: '',
-        eligibility_criteria: '',
-        what_you_do: '',
-        start_date: defaultStartDate,
-        end_date: defaultEndDate,
-        ...defaultFormData,
-    });
+    const [formData, setFormData] = useState({ ...defaultFormData });
     const [showCountryPicker, setShowCountryPicker] = useState(false);
     const [countries, setCountries] = useState<Country[]>([]);
     const [countrySearchQuery, setCountrySearchQuery] = useState('');
@@ -140,8 +132,8 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
 
     useEffect(() => {
         if (visible && editChallenge?.id) {
-            const start = editChallenge.start_date ? new Date(editChallenge.start_date).toISOString().split('T')[0] : defaultFormData.start_date;
-            const end = editChallenge.end_date ? new Date(editChallenge.end_date).toISOString().split('T')[0] : defaultFormData.end_date;
+            const start = editChallenge.start_date ? parseDateInput(editChallenge.start_date).toISOString() : defaultFormData.start_date;
+            const end = editChallenge.end_date ? parseDateInput(editChallenge.end_date).toISOString() : defaultFormData.end_date;
             const { code, digits } = parseOrganizerContact(editChallenge.organizer_contact ?? '');
             setFormData({
                 name: editChallenge.name ?? '',
@@ -166,6 +158,18 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
             setFieldErrors({});
         }
     }, [visible, editChallenge?.id]);
+
+    const closeDatePicker = useCallback(() => {
+        setActivePickerField(null);
+        setActivePickerMode(null);
+        setAndroidPickerDraft(null);
+    }, []);
+
+    const openDatePicker = useCallback((field: 'start_date' | 'end_date') => {
+        setActivePickerField(field);
+        setAndroidPickerDraft(parseDateInput(formData[field]));
+        setActivePickerMode(Platform.OS === 'ios' ? 'datetime' : 'date');
+    }, [formData]);
 
     useEffect(() => {
         if (!showCountryPicker) return;
@@ -200,7 +204,11 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         });
     }, []);
 
-    const validate = useCallback((): boolean => {
+    const validate = useCallback((): {
+        valid: boolean;
+        errors: Partial<Record<FieldErrorKey, string>>;
+        firstKey: FieldErrorKey | null;
+    } => {
         const errors: Partial<Record<FieldErrorKey, string>> = {};
 
         const name = (formData.name || '').trim();
@@ -248,31 +256,29 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
 
         const startStr = (formData.start_date || '').trim();
         if (!startStr) {
-            errors.start_date = 'Start date is required';
+            errors.start_date = 'Start date and time are required';
         } else {
             const startDate = parseDateInput(startStr);
             if (isNaN(startDate.getTime())) {
-                errors.start_date = 'Please enter a valid start date';
+                errors.start_date = 'Please enter a valid start date and time';
             } else if (!isEditMode) {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                if (startDate < today) {
-                    errors.start_date = 'Start date must be today or in the future';
+                if (startDate.getTime() < Date.now()) {
+                    errors.start_date = 'Start date and time must be now or in the future';
                 }
             }
         }
 
         const endStr = (formData.end_date || '').trim();
         if (!endStr) {
-            errors.end_date = 'End date is required';
+            errors.end_date = 'End date and time are required';
         } else {
             const endDate = parseDateInput(endStr);
             if (isNaN(endDate.getTime())) {
-                errors.end_date = 'Please enter a valid end date';
+                errors.end_date = 'Please enter a valid end date and time';
             } else if (startStr) {
                 const startDate = parseDateInput(startStr);
                 if (endDate < startDate) {
-                    errors.end_date = 'End date must be on or after start date';
+                    errors.end_date = 'End date and time must be after the start date and time';
                 }
             }
         }
@@ -289,8 +295,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
     }, [formData, isEditMode]);
 
     const handleSubmit = async () => {
-        setShowStartPicker(false);
-        setShowEndPicker(false);
+        closeDatePicker();
         const result = validate();
         if (!result.valid) {
             if (result.firstKey) {
@@ -313,8 +318,8 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 eligibility_criteria: (formData.eligibility_criteria || '').trim() || null,
                 what_you_do: (formData.what_you_do || '').trim() || null,
                 min_content_per_account: parseInt(formData.min_content_per_account, 10) || 1,
-                start_date: new Date(formData.start_date).toISOString(),
-                end_date: new Date(formData.end_date).toISOString(),
+                start_date: parseDateInput(formData.start_date).toISOString(),
+                end_date: parseDateInput(formData.end_date).toISOString(),
                 scoring_criteria: (formData.scoring_criteria || '').trim() || null,
             };
 
@@ -351,23 +356,49 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
         }
     };
 
-    const handleStartDateChange = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') setShowStartPicker(false);
-        if (event?.type === 'dismissed') return;
-        if (selectedDate) {
-            updateField('start_date', formatDateForInput(selectedDate));
+    const handleDatePickerChange = (event: any, selectedDate?: Date) => {
+        if (!activePickerField || !activePickerMode) {
+            return;
         }
+
+        if (event?.type === 'dismissed') {
+            closeDatePicker();
+            return;
+        }
+
+        if (!selectedDate) {
+            return;
+        }
+
+        if (Platform.OS === 'ios') {
+            updateField(activePickerField, selectedDate.toISOString());
+            return;
+        }
+
+        if (activePickerMode === 'date') {
+            const currentValue = parseDateInput(formData[activePickerField]);
+            const merged = new Date(currentValue);
+            merged.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+            setAndroidPickerDraft(merged);
+            setActivePickerMode('time');
+            return;
+        }
+
+        const base = androidPickerDraft ? new Date(androidPickerDraft) : parseDateInput(formData[activePickerField]);
+        base.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
+        updateField(activePickerField, base.toISOString());
+        closeDatePicker();
     };
 
-    const handleEndDateChange = (event: any, selectedDate?: Date) => {
-        if (Platform.OS === 'android') setShowEndPicker(false);
-        if (event?.type === 'dismissed') return;
-        if (selectedDate) {
-            updateField('end_date', formatDateForInput(selectedDate));
-        }
-    };
+    const pickerValue = activePickerField
+        ? (activePickerMode === 'time' && androidPickerDraft
+            ? androidPickerDraft
+            : parseDateInput(formData[activePickerField]))
+        : new Date();
 
+    const minStartDate = isEditMode ? undefined : new Date();
     const minEndDate = formData.start_date ? parseDateInput(formData.start_date) : new Date();
+    const showActivePicker = !!activePickerField && !!activePickerMode;
 
     return (
         <Modal
@@ -517,62 +548,59 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
 
                         <View style={styles.row}>
                             <View onLayout={saveFieldLayout('start_date')} style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                                <Text style={styles.label}>Start Date *</Text>
+                                <Text style={styles.label}>Start Date & Time *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.start_date && styles.inputError]}
-                                    onPress={() => { setShowEndPicker(false); setShowStartPicker(true); }}
+                                    onPress={() => openDatePicker('start_date')}
                                     activeOpacity={0.8}
                                 >
-                                    <Text style={styles.dateText}>{formData.start_date || 'Pick date'}</Text>
+                                    <Text style={styles.dateText}>
+                                        {formatChallengeDateTime(formData.start_date, { month: 'short', includeTimeZone: false })}
+                                    </Text>
                                     <Feather name="calendar" size={20} color="#888" />
                                 </TouchableOpacity>
                                 {fieldErrors.start_date ? <Text style={styles.errorText}>{fieldErrors.start_date}</Text> : null}
-                                {showStartPicker && (
-                                    <View style={styles.pickerWrapper}>
-                                        <DateTimePicker
-                                            value={parseDateInput(formData.start_date)}
-                                            mode="date"
-                                            display={Platform.OS === 'ios' ? 'calendar' : 'default'}
-                                            onChange={handleStartDateChange}
-                                            minimumDate={new Date()}
-                                        />
-                                        {Platform.OS === 'ios' && (
-                                            <TouchableOpacity style={styles.pickerDoneButton} onPress={() => setShowStartPicker(false)}>
-                                                <Text style={styles.pickerDoneText}>Done</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                )}
                             </View>
                             <View onLayout={saveFieldLayout('end_date')} style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                                <Text style={styles.label}>End Date *</Text>
+                                <Text style={styles.label}>End Date & Time *</Text>
                                 <TouchableOpacity
                                     style={[styles.input, styles.dateTouchable, fieldErrors.end_date && styles.inputError]}
-                                    onPress={() => { setShowStartPicker(false); setShowEndPicker(true); }}
+                                    onPress={() => openDatePicker('end_date')}
                                     activeOpacity={0.8}
                                 >
-                                    <Text style={styles.dateText}>{formData.end_date || 'Pick date'}</Text>
+                                    <Text style={styles.dateText}>
+                                        {formatChallengeDateTime(formData.end_date, { month: 'short', includeTimeZone: false })}
+                                    </Text>
                                     <Feather name="calendar" size={20} color="#888" />
                                 </TouchableOpacity>
                                 {fieldErrors.end_date ? <Text style={styles.errorText}>{fieldErrors.end_date}</Text> : null}
-                                {showEndPicker && (
-                                    <View style={styles.pickerWrapper}>
-                                        <DateTimePicker
-                                            value={parseDateInput(formData.end_date)}
-                                            mode="date"
-                                            display={Platform.OS === 'ios' ? 'calendar' : 'default'}
-                                            onChange={handleEndDateChange}
-                                            minimumDate={minEndDate}
-                                        />
-                                        {Platform.OS === 'ios' && (
-                                            <TouchableOpacity style={styles.pickerDoneButton} onPress={() => setShowEndPicker(false)}>
-                                                <Text style={styles.pickerDoneText}>Done</Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </View>
-                                )}
                             </View>
                         </View>
+                        <Text style={styles.dateHelperText}>
+                            Times are saved exactly and shown in your local time zone ({localTimeZoneLabel}).
+                        </Text>
+                        {showActivePicker && (
+                            <View style={styles.pickerWrapper}>
+                                <DateTimePicker
+                                    value={pickerValue}
+                                    mode={activePickerMode as 'date' | 'time' | 'datetime'}
+                                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                    onChange={handleDatePickerChange}
+                                    minimumDate={
+                                        activePickerMode === 'time'
+                                            ? undefined
+                                            : activePickerField === 'start_date'
+                                                ? minStartDate
+                                                : minEndDate
+                                    }
+                                />
+                                {Platform.OS === 'ios' && (
+                                    <TouchableOpacity style={styles.pickerDoneButton} onPress={closeDatePicker}>
+                                        <Text style={styles.pickerDoneText}>Done</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        )}
 
                         <View onLayout={saveFieldLayout('eligibility_criteria')} style={styles.inputGroup}>
                             <Text style={styles.label}>Participant eligibility criteria</Text>
@@ -880,6 +908,15 @@ const styles = StyleSheet.create({
     dateText: {
         color: '#fff',
         fontSize: 16,
+        flex: 1,
+        paddingRight: 12,
+    },
+    dateHelperText: {
+        color: '#9ca3af',
+        fontSize: 12,
+        lineHeight: 18,
+        marginTop: -4,
+        marginBottom: 12,
     },
     pickerWrapper: {
         marginTop: 8,

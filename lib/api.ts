@@ -1578,6 +1578,35 @@ export const challengesApi = {
     }
   },
 
+  getParticipantsRanking: async (
+    challengeId: string,
+    page = 1,
+    limit = 10,
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(
+        `/api/challenges/${challengeId}/participants/ranking?page=${page}&limit=${limit}`,
+      );
+      const apiResponse = response.data;
+      const rows = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
+
+      return {
+        status: apiResponse?.status ?? 'success',
+        message: apiResponse?.message || 'Participants ranking fetched successfully',
+        data: {
+          participants: rows,
+          pagination: apiResponse?.pagination || {},
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch participants ranking',
+        data: { participants: [], pagination: {} },
+      };
+    }
+  },
+
   getPosts: async (challengeId: string, page = 1, limit = 20): Promise<ApiResponse<any>> => {
     try {
       const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
@@ -1605,6 +1634,9 @@ export const challengesApi = {
             rawItems,
             pagination: apiResponse.pagination || {},
             ordered_by: apiResponse.ordered_by,
+            winners_visible: apiResponse.winners_visible,
+            winners_confirmed_at: apiResponse.winners_confirmed_at ?? null,
+            challenge_status: apiResponse.challenge_status,
           }
         };
       }
@@ -1612,13 +1644,117 @@ export const challengesApi = {
       return {
         status: 'error',
         message: apiResponse?.message || 'Failed to fetch challenge posts',
-        data: { posts: [], rawItems: [], pagination: {}, ordered_by: undefined },
+        data: {
+          posts: [],
+          rawItems: [],
+          pagination: {},
+          ordered_by: undefined,
+          winners_visible: false,
+          winners_confirmed_at: null,
+          challenge_status: undefined,
+        },
       };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch challenge posts',
-        data: { posts: [], rawItems: [], pagination: {}, ordered_by: undefined },
+        data: {
+          posts: [],
+          rawItems: [],
+          pagination: {},
+          ordered_by: undefined,
+          winners_visible: false,
+          winners_confirmed_at: null,
+          challenge_status: undefined,
+        },
+      };
+    }
+  },
+
+  getWinners: async (
+    challengeId: string,
+    page = 1,
+    limit = 10,
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(
+        `/api/challenges/${challengeId}/winners?page=${page}&limit=${limit}`,
+      );
+      const apiResponse = response.data;
+      const winners = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
+
+      return {
+        status: apiResponse?.status ?? 'success',
+        message: apiResponse?.message || 'Challenge winners fetched successfully',
+        data: {
+          winners,
+          pagination: apiResponse?.pagination || {},
+          winners_visible: apiResponse?.winners_visible ?? winners.length > 0,
+          winners_confirmed_at: apiResponse?.winners_confirmed_at ?? null,
+          challenge_status: apiResponse?.challenge_status,
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch challenge winners',
+        data: {
+          winners: [],
+          pagination: {},
+          winners_visible: false,
+          winners_confirmed_at: null,
+          challenge_status: undefined,
+        },
+      };
+    }
+  },
+
+  getWinnerPosts: async (
+    challengeId: string,
+    userId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(
+        `/api/challenges/${challengeId}/winners/${userId}/posts?page=${page}&limit=${limit}`,
+      );
+      const apiResponse = response.data;
+      const rawItems = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
+      const posts = rawItems.map((item: any) => {
+        const post = item.post || item;
+        return {
+          ...post,
+          winner_rank: item.winner_rank ?? post.winner_rank,
+          likes_during_challenge: item.likes_during_challenge ?? item.likes_at_challenge_end ?? post.likes_during_challenge,
+          total_likes: item.total_likes ?? post.total_likes ?? post.likes,
+        };
+      });
+
+      return {
+        status: apiResponse?.status ?? 'success',
+        message: apiResponse?.message || 'Winner posts fetched successfully',
+        data: {
+          posts,
+          rawItems,
+          pagination: apiResponse?.pagination || {},
+          winners_visible: apiResponse?.winners_visible ?? true,
+          winners_confirmed_at: apiResponse?.winners_confirmed_at ?? null,
+          challenge_status: apiResponse?.challenge_status,
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch winner posts',
+        data: {
+          posts: [],
+          rawItems: [],
+          pagination: {},
+          winners_visible: false,
+          winners_confirmed_at: null,
+          challenge_status: undefined,
+        },
       };
     }
   },

@@ -52,6 +52,13 @@ export interface LikeUpdate {
   likeCount: number;
 }
 
+export interface ChallengeLikesUpdate {
+  challengeId: string;
+  postId: string;
+  userIdOwner: string;
+  likeCount: number;
+}
+
 class WebSocketService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -212,6 +219,10 @@ class WebSocketService extends SimpleEventEmitter {
           likes: data.likeCount,
           isLiked: data.isLiked,
         } as PostUpdate);
+        break;
+
+      case 'challenge:likesUpdated':
+        this.emit('challengeLikesUpdated', data as ChallengeLikesUpdate);
         break;
 
       case 'comment':

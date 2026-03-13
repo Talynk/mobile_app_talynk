@@ -33,6 +33,7 @@ import CreateChallengeModal from '@/components/CreateChallengeModal';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
+import { useNetworkStatus } from '@/lib/hooks/use-network-status';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -61,6 +62,7 @@ export default function FeedScreen() {
   const flatListRef = useRef<FlatList<Post>>(null);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
+  const { isOffline } = useNetworkStatus();
   const { followedUsers, updateFollowedUsers } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
@@ -409,20 +411,24 @@ export default function FeedScreen() {
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
                   <Feather name={activeTab === 'following' ? "user-plus" : "video"} size={64} color="#666" />
                   <Text style={styles.emptyText}>
-                    {activeTab === 'following' && !user
-                      ? 'Sign in to see posts from people you follow'
-                      : activeTab === 'following'
-                        ? 'No posts here yet'
-                        : 'No posts available'}
+                    {isOffline
+                      ? 'No internet connection'
+                      : activeTab === 'following' && !user
+                        ? 'Sign in to see posts from people you follow'
+                        : activeTab === 'following'
+                          ? 'No posts here yet'
+                          : 'No posts available'}
                   </Text>
                   <Text style={styles.emptySubtext}>
-                    {activeTab === 'following' && !user
-                      ? 'Sign in to see posts from people you follow'
-                      : activeTab === 'following'
-                        ? 'Follow people to see their posts here'
-                        : 'Pull down to refresh or check back later'}
+                    {isOffline
+                      ? 'Please reconnect to load posts.'
+                      : activeTab === 'following' && !user
+                        ? 'Sign in to see posts from people you follow'
+                        : activeTab === 'following'
+                          ? 'Follow people to see their posts here'
+                          : 'Pull down to refresh or check back later'}
                   </Text>
-                  {activeTab === 'following' && !user && (
+                  {activeTab === 'following' && !user && !isOffline && (
                     <TouchableOpacity
                       style={styles.emptyLoginButton}
                       onPress={() => router.push('/auth/login' as any)}

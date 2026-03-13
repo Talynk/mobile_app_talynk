@@ -5,6 +5,7 @@ type Listener = (status: NetworkStatus, meta?: { at: number; source?: string; me
 let currentStatus: NetworkStatus = 'online';
 let lastChangedAt = Date.now();
 const listeners = new Set<Listener>();
+let pendingOfflineTimer: ReturnType<typeof setTimeout> | null = null;
 
 function notify(meta?: { at: number; source?: string; message?: string }) {
   listeners.forEach((fn) => {
@@ -32,12 +33,22 @@ export const networkStatus = {
     };
   },
   reportOffline(meta?: { source?: string; message?: string }) {
-    if (currentStatus === 'offline') return;
-    currentStatus = 'offline';
-    lastChangedAt = Date.now();
-    notify({ at: lastChangedAt, source: meta?.source, message: meta?.message });
+    if (currentStatus === 'offline' || pendingOfflineTimer) return;
+
+    // Guard against transient request hiccups on otherwise healthy connections.
+    pendingOfflineTimer = setTimeout(() => {
+      pendingOfflineTimer = null;
+      if (currentStatus === 'offline') return;
+      currentStatus = 'offline';
+      lastChangedAt = Date.now();
+      notify({ at: lastChangedAt, source: meta?.source, message: meta?.message });
+    }, 1500);
   },
   reportOnline(meta?: { source?: string }) {
+    if (pendingOfflineTimer) {
+      clearTimeout(pendingOfflineTimer);
+      pendingOfflineTimer = null;
+    }
     if (currentStatus === 'online') return;
     currentStatus = 'online';
     lastChangedAt = Date.now();

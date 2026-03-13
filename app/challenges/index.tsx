@@ -21,6 +21,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
+import {
+  formatChallengeDateTime,
+  getChallengeDateInfo,
+  getChallengeDisplayStatus,
+} from '@/lib/utils/challenge';
 
 const COLORS = {
   light: {
@@ -184,7 +189,7 @@ export default function ChallengesScreen() {
       } else {
         setParticipants([]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Error loading participants:', err?.message);
       setParticipants([]);
     } finally {
@@ -193,78 +198,31 @@ export default function ChallengesScreen() {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    return formatChallengeDateTime(dateString, { month: 'short' });
   };
 
   const getChallengeStatus = (challenge: any) => {
-    // Check explicit status field first (important for "Created by Me" tab)
-    if (challenge.status === 'pending' || challenge.status === 'draft') {
-      return { label: 'Pending Review', color: C.warning };
+    const status = getChallengeDisplayStatus(challenge);
+    switch (status.key) {
+      case 'pending':
+        return { label: status.label, color: C.warning };
+      case 'rejected':
+        return { label: status.label, color: '#ef4444' };
+      case 'ongoing':
+        return { label: status.label, color: C.success };
+      case 'upcoming':
+        return { label: status.label, color: C.warning };
+      case 'ended_early':
+        return { label: status.label, color: C.textSecondary };
+      case 'ended':
+      case 'inactive':
+      default:
+        return { label: status.label, color: C.textSecondary };
     }
-    if (challenge.status === 'rejected') {
-      return { label: 'Rejected', color: '#ef4444' };
-    }
-
-    // Use is_currently_active field from API if available
-    if (challenge.is_currently_active !== undefined) {
-      if (challenge.is_currently_active) {
-        return { label: 'Active', color: C.success };
-      } else {
-        const now = new Date();
-        const startDate = new Date(challenge.start_date);
-        const endDate = new Date(challenge.end_date);
-
-        if (now < startDate) return { label: 'Upcoming', color: C.warning };
-        if (now > endDate) return { label: 'Ended', color: C.textSecondary };
-        return { label: 'Inactive', color: C.textSecondary };
-      }
-    }
-
-    // Fallback to date-based logic if is_currently_active not available
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    const endDate = new Date(challenge.end_date);
-
-    if (now < startDate) return { label: 'Upcoming', color: C.warning };
-    if (now > endDate) return { label: 'Ended', color: C.textSecondary };
-    return { label: 'Active', color: C.success };
   };
 
   const getDateInfo = (challenge: any) => {
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    const endDate = new Date(challenge.end_date);
-
-    if (now >= startDate && now <= endDate) {
-      // Challenge has started
-      return {
-        label: 'Started on',
-        date: startDate,
-        showEndDate: true,
-        endDate: endDate,
-      };
-    } else if (now < startDate) {
-      // Challenge hasn't started yet
-      return {
-        label: 'Starts on',
-        date: startDate,
-        showEndDate: true,
-        endDate: endDate,
-      };
-    } else {
-      // Challenge has ended
-      return {
-        label: 'Ended on',
-        date: endDate,
-        showEndDate: false,
-        endDate: endDate,
-      };
-    }
+    return getChallengeDateInfo(challenge);
   };
 
   const renderChallenge = ({ item }: { item: any }) => {
@@ -343,19 +301,21 @@ export default function ChallengesScreen() {
           </View>
 
           {/* Date Information */}
-          <View style={styles.dateRow}>
-            <MaterialIcons name="event" size={14} color={C.textSecondary} />
-            <View style={styles.dateInfo}>
-              <Text style={[styles.dateLabel, { color: C.textSecondary }]}>
-                {dateInfo.label} {formatDate(dateInfo.date.toISOString())}
-              </Text>
-              {dateInfo.showEndDate && (
-                <Text style={[styles.dateText, { color: C.textSecondary }]}>
-                  Ends {formatDate(dateInfo.endDate.toISOString())}
+          {dateInfo ? (
+            <View style={styles.dateRow}>
+              <MaterialIcons name="event" size={14} color={C.textSecondary} />
+              <View style={styles.dateInfo}>
+                <Text style={[styles.dateLabel, { color: C.textSecondary }]}>
+                  {dateInfo.label} {formatDate(dateInfo.date.toISOString())}
                 </Text>
-              )}
+                {dateInfo.showEndDate && dateInfo.endDate && (
+                  <Text style={[styles.dateText, { color: C.textSecondary }]}>
+                    Ends {formatDate(dateInfo.endDate.toISOString())}
+                  </Text>
+                )}
+              </View>
             </View>
-          </View>
+          ) : null}
 
           {/* Organizer Information */}
           {(item.organizer || item.organizer_name) && (

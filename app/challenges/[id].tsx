@@ -13,11 +13,9 @@ import {
   Modal,
   useWindowDimensions,
   StatusBar,
-  Animated,
-  InteractionManager,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { challengesApi, postsApi, followsApi, likesApi } from '@/lib/api';
+import { challengesApi, followsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -32,12 +30,27 @@ import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 import { useCache } from '@/lib/cache-context';
-import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
+import { useAppSelector } from '@/lib/store/hooks';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { Share } from 'react-native';
+import { useRealtime } from '@/lib/realtime-context';
+import {
+  formatChallengeDateTime,
+  getChallengeDateInfo,
+  getChallengeDisplayStatus,
+  getCurrentTimeZoneLabel,
+  isChallengeOver,
+  isChallengeRunning,
+} from '@/lib/utils/challenge';
+import {
+  buildWinnerEntriesFromPosts,
+  getChallengePostSnapshotLikes,
+  getChallengePostTimestamp,
+  loadFallbackChallengePosts,
+  sortChallengePostsByLikes,
+} from '@/lib/utils/challenge-post-fallback';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
 const POST_ITEM_SIZE = (screenWidth - 4) / 3;
 
@@ -60,24 +73,26 @@ const COLORS = {
   },
 };
 
-const getChallengeSortTimestamp = (post: any) =>
-  new Date(post?.createdAt || post?.uploadDate || post?.created_at || 0).getTime();
-
-const sortChallengePosts = (posts: any[], likesMap: Record<string, number>, useChallengeLikes: boolean) =>
-  [...posts].sort((a, b) => {
-    const likesA = useChallengeLikes
-      ? likesMap[a.id] ?? 0
-      : Number(a.likes ?? a.like_count ?? 0);
-    const likesB = useChallengeLikes
-      ? likesMap[b.id] ?? 0
-      : Number(b.likes ?? b.like_count ?? 0);
-
-    if (likesB !== likesA) {
-      return likesB - likesA;
-    }
-
-    return getChallengeSortTimestamp(b) - getChallengeSortTimestamp(a);
-  });
+const WINNER_MEDALS = {
+  1: {
+    colors: ['#fef3c7', '#f59e0b'],
+    badge: '#f59e0b',
+    text: '#78350f',
+    title: 'Gold',
+  },
+  2: {
+    colors: ['#e5e7eb', '#94a3b8'],
+    badge: '#94a3b8',
+    text: '#1f2937',
+    title: 'Silver',
+  },
+  3: {
+    colors: ['#fed7aa', '#c2410c'],
+    badge: '#c2410c',
+    text: '#431407',
+    title: 'Bronze',
+  },
+} as const;
 
 export default function ChallengeDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -107,38 +122,47 @@ export default function ChallengeDetailScreen() {
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const { followedUsers, updateFollowedUsers } = useCache();
-  const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
-  const challengeEnded = challenge ? new Date() > new Date(challenge.end_date) : false;
+  const { onChallengeLikesUpdated } = useRealtime();
+  const localTimeZoneLabel = useMemo(() => getCurrentTimeZoneLabel(), []);
+  const challengeEnded = useMemo(() => isChallengeOver(challenge), [challenge]);
   const [activeTab, setActiveTab] = useState<'posts' | 'participants' | 'winners'>('posts');
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
   const [editChallengeModalVisible, setEditChallengeModalVisible] = useState(false);
   const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
-  const [challengePostsOrderedBy, setChallengePostsOrderedBy] = useState<string | undefined>(undefined);
+  const [challengeLikesMap, setChallengeLikesMap] = useState<Record<string, number>>({});
+  const [useChallengeSnapshotLikes, setUseChallengeSnapshotLikes] = useState(false);
+  const [, setWinnersVisible] = useState(false);
+  const [winnersConfirmedAt, setWinnersConfirmedAt] = useState<string | null>(null);
+  const [winners, setWinners] = useState<any[]>([]);
+  const [loadingWinners, setLoadingWinners] = useState(false);
+  const [winnersFetched, setWinnersFetched] = useState(false);
+  const [winnerSource, setWinnerSource] = useState<'official' | 'ranking'>('official');
+  const [postsWindowMessage, setPostsWindowMessage] = useState<string | null>(null);
+  const [postsFetched, setPostsFetched] = useState(false);
+  const [participantsFetched, setParticipantsFetched] = useState(false);
+  const fallbackChallengeDataRef = useRef<any>(null);
 
   useRefetchOnReconnect(() => {
-    fetchChallenge();
-    fetchPosts();
+    fetchChallenge({ showLoader: false });
+    if (activeTab === 'participants' && participantsFetched) {
+      fetchParticipants();
+    } else if (activeTab === 'winners' && winnersFetched) {
+      fetchWinners({ forceRefresh: true });
+    } else {
+      fetchPosts({ forceRefresh: true });
+    }
   });
 
-  const handleTabChange = useCallback((tab: 'posts' | 'participants' | 'winners') => {
-    if (tab === activeTab) return;
-    setActiveTab(tab);
-    // Only fetch the specific tab data; no full page reload, no auto-scroll.
-    if (tab === 'posts') {
-      fetchPosts();
-    } else if (tab === 'participants') {
-      fetchParticipants();
-    }
-    // Winners uses rawChallengePosts that come from fetchPosts().
-  }, [activeTab]);
-
-  const fetchChallenge = async () => {
+  const fetchChallenge = async (options?: { showLoader?: boolean }) => {
     if (!id) return;
 
-    setLoading(true);
+    const showLoader = options?.showLoader ?? true;
+    if (showLoader) {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -152,29 +176,162 @@ export default function ChallengeDetailScreen() {
     } catch (err: any) {
       setError(err.message || 'Failed to fetch challenge');
     } finally {
-      setLoading(false);
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchPosts = async () => {
+  const buildLikesMapFromRawItems = useCallback((rawItems: any[]) => {
+    const map: Record<string, number> = {};
+
+    rawItems.forEach((challengePost: any) => {
+      const postId = challengePost?.post?.id ?? challengePost?.post_id;
+      const hasSnapshotLikes =
+        challengePost?.likes_during_challenge != null || challengePost?.likes_at_challenge_end != null;
+
+      if (postId && hasSnapshotLikes) {
+        map[postId] = Number(
+          challengePost?.likes_during_challenge ?? challengePost?.likes_at_challenge_end ?? 0,
+        );
+      }
+    });
+
+    return map;
+  }, []);
+
+  const getFallbackChallengeData = useCallback(async (options?: { forceRefresh?: boolean }) => {
+    if (!id) {
+      return {
+        posts: [],
+        likesMap: {},
+        participants: [],
+        winners: [],
+      };
+    }
+
+    if (
+      !options?.forceRefresh &&
+      fallbackChallengeDataRef.current?.challengeId === String(id)
+    ) {
+      return fallbackChallengeDataRef.current;
+    }
+
+    const participantSeed =
+      challenge?._count?.participants &&
+      allParticipants.length >= Number(challenge._count.participants)
+        ? allParticipants
+        : undefined;
+
+    const fallbackData = await loadFallbackChallengePosts(String(id), participantSeed);
+
+    const payload = {
+      challengeId: String(id),
+      ...fallbackData,
+      winners: buildWinnerEntriesFromPosts(fallbackData.posts, fallbackData.likesMap),
+    };
+
+    fallbackChallengeDataRef.current = payload;
+
+    if (fallbackData.participants.length > 0) {
+      setAllParticipants(fallbackData.participants);
+      setParticipants(fallbackData.participants);
+      setParticipantsFetched(true);
+    }
+
+    return payload;
+  }, [allParticipants, challenge?._count?.participants, id]);
+
+  useEffect(() => {
+    fallbackChallengeDataRef.current = null;
+  }, [id]);
+
+  const fetchPosts = async (options?: { forceRefresh?: boolean }) => {
     if (!id) return;
 
     setPostsLoading(true);
+    setPostsWindowMessage(null);
 
     try {
-      const response = await challengesApi.getPosts(id as string, 1, 20);
+      const response = await challengesApi.getPosts(id as string, 1, 100);
 
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
-        const orderedBy = response.data?.ordered_by;
         const normalizedPosts = filterHlsReady(Array.isArray(postsList) ? postsList : []);
+        const likesMapFromResponse = buildLikesMapFromRawItems(Array.isArray(rawItems) ? rawItems : []);
+        const challengeStatus = response.data?.challenge_status;
+        const shouldUseFallback =
+          normalizedPosts.length === 0 &&
+          Array.isArray(rawItems) &&
+          rawItems.length === 0 &&
+          response.data?.winners_visible === false &&
+          (challengeStatus === 'ended' || challengeStatus === 'stopped');
+
+        if (shouldUseFallback) {
+          const fallbackData = await getFallbackChallengeData(options);
+
+          setPosts(fallbackData.posts);
+          setRawChallengePosts([]);
+          setChallengeLikesMap(fallbackData.likesMap);
+          setUseChallengeSnapshotLikes(fallbackData.posts.length > 0);
+          setPostsWindowMessage(fallbackData.posts.length > 0 ? null : 'No posts yet');
+          setPostsFetched(true);
+          return;
+        }
+
+        const hasSnapshotLikes = Object.keys(likesMapFromResponse).length > 0;
+
         setPosts(normalizedPosts);
         setRawChallengePosts(Array.isArray(rawItems) ? rawItems : []);
-        setChallengePostsOrderedBy(orderedBy);
+        setChallengeLikesMap(likesMapFromResponse);
+        setUseChallengeSnapshotLikes(hasSnapshotLikes);
+        setWinnersVisible(response.data?.winners_visible === true);
+        setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
+        setPostsWindowMessage(normalizedPosts.length > 0 ? null : 'No posts yet');
+        setPostsFetched(true);
+      } else {
+        const fallbackData =
+          challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
+            ? await getFallbackChallengeData(options)
+            : null;
+
+        if (fallbackData && fallbackData.posts.length > 0) {
+          setPosts(fallbackData.posts);
+          setRawChallengePosts([]);
+          setChallengeLikesMap(fallbackData.likesMap);
+          setUseChallengeSnapshotLikes(true);
+          setPostsWindowMessage(null);
+          setPostsFetched(true);
+        } else {
+          setPosts([]);
+          setRawChallengePosts([]);
+          setChallengeLikesMap({});
+          setUseChallengeSnapshotLikes(false);
+          setPostsWindowMessage(response?.message || 'Failed to fetch challenge posts');
+        }
       }
     } catch (err: any) {
       console.warn('Error fetching challenge posts:', err?.message);
+      const fallbackData =
+        challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
+          ? await getFallbackChallengeData(options)
+          : null;
+
+      if (fallbackData && fallbackData.posts.length > 0) {
+        setPosts(fallbackData.posts);
+        setRawChallengePosts([]);
+        setChallengeLikesMap(fallbackData.likesMap);
+        setUseChallengeSnapshotLikes(true);
+        setPostsWindowMessage(null);
+        setPostsFetched(true);
+      } else {
+        setPosts([]);
+        setRawChallengePosts([]);
+        setChallengeLikesMap({});
+        setUseChallengeSnapshotLikes(false);
+        setPostsWindowMessage(err?.message || 'Failed to fetch challenge posts');
+      }
     } finally {
       setPostsLoading(false);
     }
@@ -184,26 +341,202 @@ export default function ChallengeDetailScreen() {
     if (!id) return;
 
     setLoadingAllParticipants(true);
+    setLoadingParticipants(true);
 
     try {
-      const response = await challengesApi.getParticipants(id as string);
+      const response = await challengesApi.getParticipantsRanking(id as string, 1, 10);
 
       if (response?.status === 'success') {
-        const participantsList = response.data || [];
-        const normalizedParticipants = Array.isArray(participantsList)
-          ? participantsList
-          : (participantsList.participants || []);
+        const participantsList = response.data?.participants || [];
+        const normalizedParticipants = Array.isArray(participantsList) ? participantsList : [];
         setAllParticipants(normalizedParticipants);
+        setParticipants(normalizedParticipants);
+        setParticipantsFetched(true);
       } else {
         setAllParticipants([]);
+        setParticipants([]);
       }
     } catch (err: any) {
       console.warn('Error fetching challenge participants:', err?.message);
       setAllParticipants([]);
+      setParticipants([]);
     } finally {
       setLoadingAllParticipants(false);
+      setLoadingParticipants(false);
     }
   };
+
+  const fetchWinners = useCallback(async (options?: { forceRefresh?: boolean }) => {
+    if (!id) return;
+
+    setLoadingWinners(true);
+
+    try {
+      const response = await challengesApi.getPosts(id as string, 1, 100);
+
+      if (response?.status === 'success') {
+        const rawItems = Array.isArray(response.data?.rawItems) ? response.data.rawItems : [];
+        const postsList = filterHlsReady(Array.isArray(response.data?.posts) ? response.data.posts : []);
+        const likesMapFromResponse = buildLikesMapFromRawItems(rawItems);
+
+        const rawItemsByPostId = new Map<string, any>();
+        rawItems.forEach((item: any) => {
+          const postId = item?.post?.id ?? item?.post_id;
+          if (postId) {
+            rawItemsByPostId.set(postId, item);
+          }
+        });
+
+        const officialWinners = [...postsList]
+          .map((post: any, index: number) => {
+            const rawItem = rawItemsByPostId.get(post.id);
+            const rankValue = Number(rawItem?.winner_rank ?? post?.winner_rank ?? index + 1);
+            const challengeLikes =
+              likesMapFromResponse[post.id] ??
+              getChallengePostSnapshotLikes(post) ??
+              Number(post?.total_likes ?? post?.likes ?? post?.like_count ?? 0);
+
+            return {
+              ...post,
+              winner_rank: rankValue,
+              likes_during_challenge: challengeLikes,
+              likes_at_challenge_end: challengeLikes,
+              total_likes: Number(post?.total_likes ?? post?.likes ?? post?.like_count ?? 0),
+              submitted_at:
+                rawItem?.submitted_at ||
+                post?.submitted_at ||
+                post?.createdAt ||
+                post?.uploadDate ||
+                post?.created_at,
+            };
+          })
+          .sort((a: any, b: any) => {
+            const rankA = Number(a?.winner_rank ?? Number.MAX_SAFE_INTEGER);
+            const rankB = Number(b?.winner_rank ?? Number.MAX_SAFE_INTEGER);
+            if (rankA !== rankB) {
+              return rankA - rankB;
+            }
+
+            const likesA = Number(a?.likes_during_challenge ?? 0);
+            const likesB = Number(b?.likes_during_challenge ?? 0);
+            if (likesB !== likesA) {
+              return likesB - likesA;
+            }
+
+            return getChallengePostTimestamp(b) - getChallengePostTimestamp(a);
+          });
+
+        if (officialWinners.length > 0) {
+          if (!postsFetched && posts.length === 0) {
+            setPosts(sortChallengePostsByLikes(officialWinners, likesMapFromResponse, Object.keys(likesMapFromResponse).length > 0));
+            setChallengeLikesMap(likesMapFromResponse);
+            setUseChallengeSnapshotLikes(Object.keys(likesMapFromResponse).length > 0);
+            setPostsFetched(true);
+          }
+          setWinners(officialWinners);
+          setWinnersVisible(true);
+          setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
+          setWinnerSource(response.data?.winners_visible === true ? 'official' : 'ranking');
+          setWinnersFetched(true);
+          return;
+        }
+
+        const challengeStatus = response.data?.challenge_status;
+        if (challengeStatus === 'ended' || challengeStatus === 'stopped' || challengeEnded) {
+          const fallbackData = await getFallbackChallengeData(options);
+          if (!postsFetched && posts.length === 0) {
+            setPosts(fallbackData.posts);
+            setChallengeLikesMap(fallbackData.likesMap);
+            setUseChallengeSnapshotLikes(fallbackData.posts.length > 0);
+            setPostsFetched(true);
+          }
+          setWinners(fallbackData.winners);
+          setWinnersVisible(fallbackData.winners.length > 0);
+          setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
+          setWinnerSource('ranking');
+          setWinnersFetched(true);
+          return;
+        }
+
+        setWinners([]);
+        setWinnersVisible(false);
+        setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
+        setWinnersFetched(true);
+      } else {
+        const fallbackData =
+          challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
+            ? await getFallbackChallengeData(options)
+            : null;
+
+        if (fallbackData && fallbackData.winners.length > 0) {
+          if (!postsFetched && posts.length === 0) {
+            setPosts(fallbackData.posts);
+            setChallengeLikesMap(fallbackData.likesMap);
+            setUseChallengeSnapshotLikes(true);
+            setPostsFetched(true);
+          }
+          setWinners(fallbackData.winners);
+          setWinnersVisible(true);
+          setWinnerSource('ranking');
+          setWinnersFetched(true);
+        } else {
+          setWinners([]);
+          setWinnersVisible(false);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Error fetching challenge winners:', err?.message);
+      const fallbackData =
+        challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
+          ? await getFallbackChallengeData(options)
+          : null;
+
+      if (fallbackData && fallbackData.winners.length > 0) {
+        if (!postsFetched && posts.length === 0) {
+          setPosts(fallbackData.posts);
+          setChallengeLikesMap(fallbackData.likesMap);
+          setUseChallengeSnapshotLikes(true);
+          setPostsFetched(true);
+        }
+        setWinners(fallbackData.winners);
+        setWinnersVisible(true);
+        setWinnerSource('ranking');
+        setWinnersFetched(true);
+      } else {
+        setWinners([]);
+        setWinnersVisible(false);
+      }
+    } finally {
+      setLoadingWinners(false);
+    }
+  }, [buildLikesMapFromRawItems, challenge?.status, challengeEnded, getFallbackChallengeData, id, posts.length, postsFetched]);
+
+  const handleTabChange = useCallback((
+    tab: 'posts' | 'participants' | 'winners',
+    options?: { forceRefresh?: boolean }
+  ) => {
+    if (tab !== activeTab) {
+      setActiveTab(tab);
+    }
+
+    if (tab === 'participants') {
+      if (!participantsFetched || options?.forceRefresh) {
+        fetchParticipants();
+      }
+      return;
+    }
+
+    if (tab === 'winners') {
+      if (!winnersFetched || options?.forceRefresh) {
+        fetchWinners(options);
+      }
+      return;
+    }
+
+    if (!postsFetched || options?.forceRefresh) {
+      fetchPosts(options);
+    }
+  }, [activeTab, participantsFetched, postsFetched, winnersFetched]);
 
   // Initial load when screen mounts or challenge id changes.
   useEffect(() => {
@@ -214,20 +547,48 @@ export default function ChallengeDetailScreen() {
   // Refresh challenge + posts when screen regains focus (not on every tab change).
   useFocusEffect(
     useCallback(() => {
-      fetchChallenge();
-      fetchPosts();
-    }, [id])
+      fetchChallenge({ showLoader: false });
+      if (activeTab === 'participants') {
+        fetchParticipants();
+      } else if (activeTab === 'winners') {
+        fetchWinners();
+      } else {
+        fetchPosts();
+      }
+    }, [id, activeTab])
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
-    if (activeTab === 'posts') {
-      await Promise.all([fetchChallenge(), fetchPosts()]);
+    if (activeTab === 'participants') {
+      await Promise.all([fetchChallenge({ showLoader: false }), fetchParticipants()]);
+    } else if (activeTab === 'winners') {
+      await Promise.all([fetchChallenge({ showLoader: false }), fetchWinners({ forceRefresh: true })]);
     } else {
-      await Promise.all([fetchChallenge(), fetchParticipants()]);
+      await Promise.all([fetchChallenge({ showLoader: false }), fetchPosts({ forceRefresh: true })]);
     }
     setRefreshing(false);
   };
+
+  useEffect(() => {
+    return onChallengeLikesUpdated((update) => {
+      if (!id || update.challengeId !== id) {
+        return;
+      }
+
+      setPosts((prev) =>
+        prev.map((post: any) =>
+          post.id === update.postId
+            ? { ...post, likes: update.likeCount, like_count: update.likeCount, total_likes: update.likeCount }
+            : post
+        ),
+      );
+
+      if (!challengeEnded && participantsFetched) {
+        fetchParticipants();
+      }
+    });
+  }, [challengeEnded, id, onChallengeLikesUpdated, participantsFetched]);
 
   const handleJoinChallenge = async () => {
     if (!isAuthenticated) {
@@ -240,6 +601,16 @@ export default function ChallengeDetailScreen() {
 
     if (!id) {
       Alert.alert('Error', 'Competition ID is missing');
+      return;
+    }
+
+    if (challenge?.organizer_id === user?.id || challenge?.organizer?.id === user?.id) {
+      Alert.alert('Cannot Join', 'You cannot join a competition that you organized.');
+      return;
+    }
+
+    if (challengeEnded) {
+      Alert.alert('Competition Ended', 'This competition has already ended. You cannot join it anymore.');
       return;
     }
 
@@ -296,6 +667,16 @@ export default function ChallengeDetailScreen() {
   };
 
   const handleCreatePost = () => {
+    if (challenge?.organizer_id === user?.id || challenge?.organizer?.id === user?.id) {
+      Alert.alert('Not Allowed', 'You cannot create a post in a competition that you organized.');
+      return;
+    }
+
+    if (challengeEnded) {
+      Alert.alert('Competition Ended', 'This competition has ended, so new posts are no longer allowed.');
+      return;
+    }
+
     if (!challenge?.is_participant) {
       Alert.alert('Join Required', 'You must join the competition before posting');
       return;
@@ -308,153 +689,117 @@ export default function ChallengeDetailScreen() {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
+    return formatChallengeDateTime(dateString, { month: 'short' });
   };
 
   const getChallengeStatus = () => {
-    if (!challenge) return { label: 'Unknown', color: C.textSecondary };
+    const status = getChallengeDisplayStatus(challenge);
 
-    if (challenge.status === 'pending' || challenge.status === 'draft') {
-      return { label: 'Pending Review', color: C.warning };
+    switch (status.key) {
+      case 'pending':
+        return { label: status.label, color: C.warning };
+      case 'rejected':
+        return { label: status.label, color: C.error };
+      case 'ongoing':
+        return { label: status.label, color: C.success };
+      case 'upcoming':
+        return { label: status.label, color: C.warning };
+      case 'ended_early':
+        return { label: status.label, color: C.textSecondary };
+      case 'ended':
+      case 'inactive':
+      default:
+        return { label: status.label, color: C.textSecondary };
     }
-    if (challenge.status === 'rejected') {
-      return { label: 'Rejected', color: C.error };
-    }
-
-    if (challenge.is_currently_active !== undefined) {
-      if (challenge.is_currently_active) {
-        return { label: 'Active', color: C.success };
-      } else {
-        const now = new Date();
-        const startDate = new Date(challenge.start_date);
-        const endDate = new Date(challenge.end_date);
-
-        if (now < startDate) return { label: 'Upcoming', color: C.warning };
-        if (now > endDate) return { label: 'Ended', color: C.textSecondary };
-        return { label: 'Inactive', color: C.textSecondary };
-      }
-    }
-
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    const endDate = new Date(challenge.end_date);
-
-    if (now < startDate) return { label: 'Upcoming', color: C.warning };
-    if (now > endDate) return { label: 'Ended', color: C.textSecondary };
-    return { label: 'Active', color: C.success };
   };
 
   const isActive = () => {
-    if (!challenge) return false;
-
-    if (challenge.is_currently_active !== undefined) {
-      return challenge.is_currently_active;
-    }
-
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    const endDate = new Date(challenge.end_date);
-    return now >= startDate && now <= endDate;
+    return isChallengeRunning(challenge);
   };
 
   const hasStarted = () => {
     if (!challenge) return false;
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    return now >= startDate;
+    return new Date() >= new Date(challenge.start_date);
   };
 
   const canJoin = () => {
     if (!challenge) return false;
-    const status = challenge.status;
-    const now = new Date();
-    const endDate = new Date(challenge.end_date);
-
-    // Cannot join if ended
-    if (now > endDate) return false;
-
-    return (status === 'approved' || status === 'active') && !challenge.is_participant;
+    if (challenge.organizer_id === user?.id || challenge.organizer?.id === user?.id) return false;
+    return isChallengeRunning(challenge) && !challenge.is_participant;
   };
 
   const getDateInfo = () => {
-    if (!challenge) return null;
-
-    const now = new Date();
-    const startDate = new Date(challenge.start_date);
-    const endDate = new Date(challenge.end_date);
-
-    if (now >= startDate && now <= endDate) {
-      return {
-        label: 'Started on',
-        date: startDate,
-        showEndDate: true,
-        endDate: endDate,
-      };
-    } else if (now < startDate) {
-      return {
-        label: 'Starts on',
-        date: startDate,
-        showEndDate: true,
-        endDate: endDate,
-      };
-    } else {
-      return {
-        label: 'Ended on',
-        date: endDate,
-        showEndDate: false,
-        endDate: endDate,
-      };
-    }
+    return getChallengeDateInfo(challenge);
   };
 
-  const isChallengeEnded = challenge && new Date() > new Date(challenge.end_date);
+  const isChallengeEnded = challengeEnded;
   const likesDuringChallengeMap = useMemo(() => {
+    if (Object.keys(challengeLikesMap).length > 0) {
+      return challengeLikesMap;
+    }
+
     const map: Record<string, number> = {};
     rawChallengePosts.forEach((cp: any) => {
       const postId = cp.post?.id ?? cp.post_id;
-      if (postId) map[postId] = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
-    });
-    return map;
-  }, [rawChallengePosts]);
-
-  // When backend returns winner_rank order, keep API order; otherwise sort by likes
-  const sortedPosts = useMemo(() => {
-    if (!posts.length) return posts;
-    if (challengePostsOrderedBy === 'winner_rank') return posts;
-    return sortChallengePosts(posts, likesDuringChallengeMap, rawChallengePosts.length > 0);
-  }, [posts, rawChallengePosts.length, likesDuringChallengeMap, challengePostsOrderedBy]);
-
-  // Rank participants by total likes on their posts in this challenge
-  const participantTotalLikesMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    rawChallengePosts.forEach((cp: any) => {
-      const uid = cp.user_id ?? cp.user?.id ?? cp.post?.user_id ?? cp.post?.user?.id;
-      if (uid) {
-        const key = String(uid);
-        const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? cp.post?.likes ?? 0;
-        map[key] = (map[key] ?? 0) + Number(likes);
+      const hasSnapshotLikes = cp?.likes_during_challenge != null || cp?.likes_at_challenge_end != null;
+      if (postId && hasSnapshotLikes) {
+        map[postId] = Number(cp?.likes_during_challenge ?? cp?.likes_at_challenge_end ?? 0);
       }
     });
     return map;
-  }, [rawChallengePosts]);
+  }, [challengeLikesMap, rawChallengePosts]);
+
+  const hasChallengeSnapshotLikes = useMemo(
+    () =>
+      useChallengeSnapshotLikes ||
+      rawChallengePosts.some(
+        (challengePost: any) =>
+          challengePost?.likes_during_challenge != null || challengePost?.likes_at_challenge_end != null,
+      ),
+    [rawChallengePosts, useChallengeSnapshotLikes],
+  );
+
+  const sortedPosts = useMemo(() => {
+    if (!posts.length) return posts;
+    return sortChallengePostsByLikes(posts, likesDuringChallengeMap, hasChallengeSnapshotLikes);
+  }, [posts, hasChallengeSnapshotLikes, likesDuringChallengeMap]);
+
   const sortedParticipants = useMemo(() => {
     if (!allParticipants.length) return allParticipants;
     return [...allParticipants].sort((a, b) => {
-      const uidA = String(a.user?.id ?? a.user_id ?? a.id ?? '');
-      const uidB = String(b.user?.id ?? b.user_id ?? b.id ?? '');
-      const totalA = participantTotalLikesMap[uidA] ?? 0;
-      const totalB = participantTotalLikesMap[uidB] ?? 0;
-      if (totalB !== totalA) return totalB - totalA;
-      return 0;
+      const likesA = Number(a.total_likes ?? 0);
+      const likesB = Number(b.total_likes ?? 0);
+      if (likesB !== likesA) return likesB - likesA;
+      return new Date(b.latest_submission_at || 0).getTime() - new Date(a.latest_submission_at || 0).getTime();
     });
-  }, [allParticipants, participantTotalLikesMap]);
+  }, [allParticipants]);
 
-  const isOrganizer = challenge?.organizer_id === user?.id;
+  const sortedWinners = useMemo(() => {
+    if (!winners.length) return winners;
+    return [...winners].sort((a, b) => {
+      const rankA = Number(a.winner_rank ?? 999);
+      const rankB = Number(b.winner_rank ?? 999);
+      if (rankA !== rankB) return rankA - rankB;
+
+      const likesA = Number(a.total_likes_during_challenge ?? 0);
+      const likesB = Number(b.total_likes_during_challenge ?? 0);
+      if (likesB !== likesA) return likesB - likesA;
+
+      return getChallengePostTimestamp(b) - getChallengePostTimestamp(a);
+    });
+  }, [winners]);
+
+  const winnersAnnounced = sortedWinners.length > 0;
+
+  const podiumWinners = useMemo(() => {
+    return sortedWinners.slice(0, 3);
+  }, [sortedWinners]);
+
+  const remainingWinners = useMemo(() => {
+    return sortedWinners.slice(3);
+  }, [sortedWinners]);
+
+  const isOrganizer = challenge?.organizer_id === user?.id || challenge?.organizer?.id === user?.id;
 
   const handleLike = async (postId: string) => {
     if (!user) {
@@ -525,6 +870,32 @@ export default function ChallengeDetailScreen() {
     }
   };
 
+  const openWinnerPost = useCallback((winner: any) => {
+    const winnerIndex = sortedPosts.findIndex((post: any) => post.id === winner?.id);
+    if (winnerIndex < 0) {
+      return;
+    }
+
+    setFullscreenIndex(winnerIndex);
+    setShowFullscreen(true);
+    setTimeout(() => {
+      fullscreenListRef.current?.scrollToIndex({ index: winnerIndex, animated: false });
+    }, 100);
+  }, [sortedPosts]);
+
+  const postRows = useMemo(() => {
+    const rows: Array<{ id: string; items: any[]; startIndex: number }> = [];
+    for (let index = 0; index < sortedPosts.length; index += 3) {
+      const items = sortedPosts.slice(index, index + 3);
+      rows.push({
+        id: items.map((post: any) => post.id).join('-') || `row-${index}`,
+        items,
+        startIndex: index,
+      });
+    }
+    return rows;
+  }, [sortedPosts]);
+
   const GridPostCard = ({ item, index }: { item: any; index: number }) => {
     const mediaUrl = getPostMediaUrl(item) || '';
     const isHls = mediaUrl.endsWith('.m3u8');
@@ -544,6 +915,9 @@ export default function ChallengeDetailScreen() {
     const staticThumbnailUrl = isVideo
       ? (serverThumbnail || fallbackImageUrl)
       : (mediaUrl || fallbackImageUrl);
+    const visibleLikes = hasChallengeSnapshotLikes
+      ? likesDuringChallengeMap[item.id] ?? 0
+      : Number(item.likes ?? item.like_count ?? 0);
 
     return (
       <TouchableOpacity
@@ -573,11 +947,17 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
-        {isVideo && (
-          <View style={styles.gridPlayBadge}>
-            <Feather name="play" size={14} color="#fff" />
+        <View style={styles.gridCardMeta}>
+          <View style={styles.gridLikesBadge}>
+            <Feather name="heart" size={12} color="#fff" />
+            <Text style={styles.gridLikesText}>{visibleLikes}</Text>
           </View>
-        )}
+          {isVideo && (
+            <View style={styles.gridPlayBadge}>
+              <Feather name="play" size={14} color="#fff" />
+            </View>
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
@@ -673,7 +1053,7 @@ export default function ChallengeDetailScreen() {
           <View style={[styles.actionsSection, { backgroundColor: C.card, borderTopColor: C.border }]}>
             {!challenge.is_participant ? (
               <>
-                {new Date() <= new Date(challenge.end_date) ? (
+                {!challengeEnded ? (
                   <TouchableOpacity
                     style={[
                       styles.joinButton,
@@ -702,7 +1082,7 @@ export default function ChallengeDetailScreen() {
                   </View>
                 )}
 
-                {!hasStarted() && new Date() <= new Date(challenge.end_date) && (
+                {!hasStarted() && !challengeEnded && (
                   <View style={styles.infoMessage}>
                     <MaterialIcons name="info-outline" size={16} color={C.textSecondary} />
                     <Text style={[styles.infoText, { color: C.textSecondary }]}>
@@ -717,13 +1097,20 @@ export default function ChallengeDetailScreen() {
                   <MaterialIcons name="check-circle" size={18} color={C.success} />
                   <Text style={[styles.joinedText, { color: C.success }]}>Joined</Text>
                 </View>
-                <TouchableOpacity
-                  style={[styles.createPostButton, { backgroundColor: C.primary }]}
-                  onPress={handleCreatePost}
-                >
-                  <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.createPostText}>Create Post</Text>
-                </TouchableOpacity>
+                {challengeEnded ? (
+                  <View style={styles.challengeEndedBadge}>
+                    <MaterialIcons name="event-busy" size={18} color={C.textSecondary} />
+                    <Text style={[styles.challengeEndedBadgeText, { color: C.textSecondary }]}>Competition Ended</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.createPostButton, { backgroundColor: C.primary }]}
+                    onPress={handleCreatePost}
+                  >
+                    <MaterialIcons name="add-circle-outline" size={20} color="#fff" />
+                    <Text style={styles.createPostText}>Create Post</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -740,20 +1127,27 @@ export default function ChallengeDetailScreen() {
 
           <View style={styles.detailBlock}>
             <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Duration</Text>
-            <Text style={[styles.detailText, { color: C.text }]}>
+            <View style={styles.durationBlock}>
               {(() => {
                 const dateInfo = getDateInfo();
                 if (!dateInfo) return null;
                 return (
                   <>
-                    <Text>{dateInfo.label} {formatDate(dateInfo.date.toISOString())}</Text>
-                    {dateInfo.showEndDate && (
-                      <Text> • Ends {formatDate(dateInfo.endDate.toISOString())}</Text>
+                    <Text style={[styles.detailText, { color: C.text }]}>
+                      {dateInfo.label} {formatDate(dateInfo.date.toISOString())}
+                    </Text>
+                    {dateInfo.showEndDate && dateInfo.endDate && (
+                      <Text style={[styles.detailText, { color: C.text }]}>
+                        Ends {formatDate(dateInfo.endDate.toISOString())}
+                      </Text>
                     )}
+                    <Text style={[styles.detailMetaText, { color: C.textSecondary }]}>
+                      Times shown in your local time zone ({localTimeZoneLabel})
+                    </Text>
                   </>
                 );
               })()}
-            </Text>
+            </View>
           </View>
 
           {challenge.has_rewards && challenge.rewards && (
@@ -888,54 +1282,128 @@ export default function ChallengeDetailScreen() {
           </View>
         )}
 
-        {/* Winners (Top 10) - from API when ordered_by winner_rank, else by likes */}
-        {activeTab === 'winners' && challengeEnded && rawChallengePosts.length > 0 && (
-          <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
-            <Text style={[styles.winnersTitle, { color: C.text }]}>Winners (Top 10)</Text>
-            <View style={styles.winnersGrid}>
-              {(challengePostsOrderedBy === 'winner_rank'
-                ? [...rawChallengePosts].sort((a: any, b: any) => (a.winner_rank ?? 999) - (b.winner_rank ?? 999)).slice(0, 10)
-                : [...rawChallengePosts]
-                    .sort((a: any, b: any) => {
-                      const likesA = a.likes_during_challenge ?? a.likes_at_challenge_end ?? 0;
-                      const likesB = b.likes_during_challenge ?? b.likes_at_challenge_end ?? 0;
-                      if (likesB !== likesA) return likesB - likesA;
-                      return getChallengeSortTimestamp(b.post || b) - getChallengeSortTimestamp(a.post || a);
-                    })
-                    .slice(0, 10)
-              ).map((cp: any, idx: number) => {
-                const post = cp.post || cp;
-                const likesDuring = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
-                const rank = cp.winner_rank != null ? cp.winner_rank : idx + 1;
-                const thumbUrl = getThumbnailUrl(post) || getPostMediaUrl(post) || '';
-                return (
-                  <TouchableOpacity
-                    key={post?.id || idx}
-                    style={styles.winnerCard}
-                    onPress={() => {
-                      const openIndex = sortedPosts.findIndex((p: any) => p.id === post?.id);
-                      router.push({
-                        pathname: '/challenges/[id]/posts',
-                        params: { id: challenge.id, open: '1', openIndex: String(openIndex >= 0 ? openIndex : 0) }
-                      });
-                    }}
-                  >
-                    <View style={styles.winnerRank}>
-                      <Text style={styles.winnerRankText}>#{rank}</Text>
-                    </View>
-                    {thumbUrl ? (
-                      <Image source={{ uri: thumbUrl }} style={styles.winnerThumb} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.winnerThumb, styles.winnerThumbPlaceholder]}>
-                        <MaterialIcons name="video-library" size={20} color={C.textSecondary} />
-                      </View>
-                    )}
-                    <Text style={[styles.winnerLikes, { color: C.textSecondary }]}>{likesDuring} likes</Text>
-                  </TouchableOpacity>
-                );
-              })}
+        {activeTab === 'winners' && challengeEnded && (
+          loadingWinners ? (
+            <View style={[styles.winnersAnnouncement, { backgroundColor: C.card, borderColor: C.border }]}>
+              <ActivityIndicator size="small" color={C.primary} />
+              <Text style={[styles.winnersAnnouncementText, { color: C.text }]}>
+                Loading winners...
+              </Text>
             </View>
-          </View>
+          ) : winnersAnnounced ? (
+            <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={[styles.winnersTitle, { color: C.text }]}>
+                {winnerSource === 'official' ? 'Official Winners' : 'Winner Ranking'}
+              </Text>
+              <Text style={[styles.winnersSubtitle, { color: C.textSecondary }]}>
+                {winnerSource === 'official'
+                  ? `Confirmed winner order from the competition dashboard.${winnersConfirmedAt ? ` Announced ${formatDate(winnersConfirmedAt)}.` : ''}`
+                  : 'Ordered by likes and submission time from competition posts.'}
+              </Text>
+
+              <View style={styles.winnerPodiumRow}>
+                {podiumWinners.map((winner: any) => {
+                  const rank = Number(winner.winner_rank ?? 0) as 1 | 2 | 3;
+                  const medal = WINNER_MEDALS[rank];
+                  const winnerUser = winner.user || {};
+                  const thumbUrl = getThumbnailUrl(winner) || getPostMediaUrl(winner) || '';
+                  const winnerLikes = Number(
+                    winner?.likes_during_challenge ??
+                      winner?.likes_at_challenge_end ??
+                      winner?.total_likes ??
+                      winner?.likes ??
+                      winner?.like_count ??
+                      0,
+                  );
+
+                  return (
+                    <TouchableOpacity
+                      key={winner.id || winnerUser?.id || `winner-${rank}`}
+                      style={[
+                        styles.podiumCard,
+                        rank === 1 && styles.podiumCardFirst,
+                      ]}
+                      activeOpacity={0.9}
+                      onPress={() => openWinnerPost(winner)}
+                    >
+                      <LinearGradient colors={medal.colors} style={styles.podiumBadge}>
+                        <MaterialIcons name="workspace-premium" size={16} color={medal.text} />
+                        <Text style={[styles.podiumBadgeRank, { color: medal.text }]}>{rank}</Text>
+                      </LinearGradient>
+                      <Text style={[styles.podiumMedalLabel, { color: medal.badge }]}>{medal.title}</Text>
+                      {thumbUrl ? (
+                        <Image source={{ uri: thumbUrl }} style={styles.podiumThumb} resizeMode="cover" />
+                      ) : (
+                        <Avatar user={winnerUser} size={88} style={styles.podiumAvatarFallback} />
+                      )}
+                      <Text style={[styles.podiumWinnerName, { color: C.text }]} numberOfLines={1}>
+                        @{winnerUser.username || 'winner'}
+                      </Text>
+                      <Text style={[styles.podiumWinnerLikes, { color: C.textSecondary }]}>
+                        {winnerLikes} likes
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {remainingWinners.length > 0 && (
+                <View style={styles.winnerList}>
+                  {remainingWinners.map((winner: any) => {
+                    const winnerUser = winner.user || {};
+                    const thumbUrl = getThumbnailUrl(winner) || getPostMediaUrl(winner) || '';
+                    const winnerLikes = Number(
+                      winner?.likes_during_challenge ??
+                        winner?.likes_at_challenge_end ??
+                        winner?.total_likes ??
+                        winner?.likes ??
+                        winner?.like_count ??
+                        0,
+                    );
+                    return (
+                      <TouchableOpacity
+                        key={winner.id || winnerUser?.id || `winner-${winner.winner_rank}`}
+                        style={[styles.winnerListItem, { borderColor: C.border }]}
+                        activeOpacity={0.9}
+                        onPress={() => openWinnerPost(winner)}
+                      >
+                        <View style={styles.winnerListRank}>
+                          <Text style={styles.winnerListRankText}>#{winner.winner_rank}</Text>
+                        </View>
+                        {thumbUrl ? (
+                          <Image source={{ uri: thumbUrl }} style={styles.winnerListThumb} resizeMode="cover" />
+                        ) : (
+                          <Avatar user={winnerUser} size={54} style={styles.winnerListThumb} />
+                        )}
+                        <View style={styles.winnerListInfo}>
+                          <Text style={[styles.winnerListName, { color: C.text }]} numberOfLines={1}>
+                            @{winnerUser.username || 'winner'}
+                          </Text>
+                          <Text style={[styles.winnerListLikes, { color: C.textSecondary }]}>
+                            {winnerLikes} likes
+                          </Text>
+                          {(winner.submitted_at || winner.createdAt || winner.uploadDate || winner.created_at) && (
+                            <Text style={[styles.winnerListMeta, { color: C.textSecondary }]}>
+                              Submitted {formatDate(
+                                winner.submitted_at || winner.createdAt || winner.uploadDate || winner.created_at,
+                              )}
+                            </Text>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={[styles.winnersAnnouncement, { backgroundColor: C.card, borderColor: C.border }]}>
+              <MaterialIcons name="emoji-events" size={44} color={C.textSecondary} />
+              <Text style={[styles.winnersAnnouncementText, { color: C.text }]}>
+                The winners are not yet announced
+              </Text>
+            </View>
+          )
         )}
       </View>
     );
@@ -943,78 +1411,86 @@ export default function ChallengeDetailScreen() {
 
   // Render item for the main FlatList
   const renderItem = ({ item, index }: { item: any; index: number }) => {
+    const row = item as { items: any[]; startIndex: number };
     if (activeTab === 'posts') {
-      // Render posts in grid - 3 columns
-      return <GridPostCard item={item} index={index} />;
-    } else {
-      // Render participant
-      const participantUser = item.user || item;
-      const postCount = item.post_count || 0;
-      const joinedAt = item.joined_at || item.createdAt;
-      const participantId = String(
-        participantUser.id || item.user_id || item.id || ''
-      );
-      const totalLikesInChallenge =
-        participantTotalLikesMap[participantId] ?? 0;
-
       return (
-        <TouchableOpacity
-          style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
-          onPress={() => {
-            const uid = participantUser.id || item.user_id;
-            if (uid) {
-              router.push({
-                pathname: '/profile-feed/[userId]',
-                params: { userId: String(uid), challengeId: String(challenge.id) }
-              });
-            }
-          }}
-        >
-          <Avatar
-            user={participantUser}
-            size={50}
-            style={styles.participantAvatar}
-          />
-          <View style={styles.participantInfo}>
-            <Text style={[styles.participantName, { color: C.text }]}>
-              {participantUser.display_name || participantUser.username || 'Unknown'}
-            </Text>
-            <Text style={[styles.participantUsername, { color: C.textSecondary }]}>
-              @{participantUser.username || 'unknown'}
-            </Text>
-            {joinedAt && (
-              <Text style={[styles.participantJoined, { color: C.textSecondary }]}>
-                Joined {new Date(joinedAt).toLocaleDateString()}
-              </Text>
-            )}
-          </View>
-          <View style={styles.participantStats}>
-            <View style={styles.participantStatColumn}>
-              <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
-                Posts
-              </Text>
-              <View style={styles.participantStatRow}>
-                <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
-                <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
-                  {postCount}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.participantStatColumn}>
-              <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
-                Likes
-              </Text>
-              <View style={styles.participantStatRow}>
-                <MaterialIcons name="favorite" size={16} color={C.textSecondary} />
-                <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
-                  {totalLikesInChallenge}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </TouchableOpacity>
+        <View style={styles.postsRow}>
+          {row.items.map((post: any, columnIndex: number) => (
+            <GridPostCard
+              key={post.id || `post-${row.startIndex + columnIndex}`}
+              item={post}
+              index={row.startIndex + columnIndex}
+            />
+          ))}
+          {Array.from({ length: Math.max(0, 3 - row.items.length) }).map((_, spacerIndex) => (
+            <View key={`spacer-${row.startIndex}-${spacerIndex}`} style={styles.gridPostSpacer} />
+          ))}
+        </View>
       );
     }
+
+    const participantUser = item.user || item;
+    const postCount = Number(item.total_posts ?? item.post_count ?? 0);
+    const totalLikesInChallenge = Number(item.total_likes ?? 0);
+    const latestSubmissionAt = item.latest_submission_at;
+
+    return (
+      <TouchableOpacity
+        style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
+        onPress={() => {
+          const uid = participantUser.id || item.user_id;
+          if (uid) {
+            router.push({
+              pathname: '/profile-feed/[userId]',
+              params: { userId: String(uid), challengeId: String(challenge.id) }
+            });
+          }
+        }}
+      >
+        <Avatar
+          user={participantUser}
+          size={50}
+          style={styles.participantAvatar}
+        />
+        <View style={styles.participantInfo}>
+          <Text style={[styles.participantName, { color: C.text }]}>
+            {participantUser.display_name || participantUser.username || 'Unknown'}
+          </Text>
+          <Text style={[styles.participantUsername, { color: C.textSecondary }]}>
+            @{participantUser.username || 'unknown'}
+          </Text>
+          {latestSubmissionAt && (
+            <Text style={[styles.participantJoined, { color: C.textSecondary }]}>
+              Latest submission {formatDate(latestSubmissionAt)}
+            </Text>
+          )}
+        </View>
+        <View style={styles.participantStats}>
+          <View style={styles.participantStatColumn}>
+            <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
+              Posts
+            </Text>
+            <View style={styles.participantStatRow}>
+              <MaterialIcons name="video-library" size={16} color={C.textSecondary} />
+              <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                {postCount}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.participantStatColumn}>
+            <Text style={[styles.participantStatLabel, { color: C.textSecondary }]}>
+              Likes
+            </Text>
+            <View style={styles.participantStatRow}>
+              <MaterialIcons name="favorite" size={16} color={C.textSecondary} />
+              <Text style={[styles.participantStatText, { color: C.textSecondary }]}>
+                {totalLikesInChallenge}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   // Loading state
@@ -1048,9 +1524,9 @@ export default function ChallengeDetailScreen() {
     );
   }
 
-  // Determine data source based on active tab (posts sorted by likes when challenge ended)
-  const data = activeTab === 'winners' ? [] : (activeTab === 'posts' ? sortedPosts : sortedParticipants);
-  const isLoading = activeTab === 'winners' ? false : (activeTab === 'posts' ? postsLoading : loadingAllParticipants);
+  // Determine data source based on active tab without remounting the list.
+  const data = activeTab === 'winners' ? [] : (activeTab === 'posts' ? postRows : sortedParticipants);
+  const isLoading = activeTab === 'winners' ? loadingWinners : (activeTab === 'posts' ? postsLoading : loadingAllParticipants);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
@@ -1073,26 +1549,18 @@ export default function ChallengeDetailScreen() {
         renderItem={renderItem}
         keyExtractor={(item, index) => {
           if (activeTab === 'posts') {
-            return item.id || `post-${index}`;
+            return item.id || `post-row-${index}`;
           } else {
             return item.user?.id || item.user_id || item.id || `participant-${index}`;
           }
         }}
-        numColumns={activeTab === 'posts' ? 3 : 1}
-        key={activeTab === 'posts' ? 'posts' : 'detail-list'}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.postsLoading}>
               <ActivityIndicator size="small" color={C.primary} />
             </View>
-          ) : activeTab === 'winners' ? (
-            <View style={styles.emptyParticipants}>
-              <MaterialIcons name="emoji-events" size={48} color={C.textSecondary} />
-              <Text style={[styles.emptyText, { color: C.textSecondary }]}>No winners yet</Text>
-              <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>Winners will appear here once set by the organizer.</Text>
-            </View>
-          ) : (
+          ) : activeTab === 'winners' ? null : (
             <View style={activeTab === 'posts' ? styles.emptyPosts : styles.emptyParticipants}>
               <MaterialIcons
                 name={activeTab === 'posts' ? "video-library" : "people-outline"}
@@ -1100,7 +1568,9 @@ export default function ChallengeDetailScreen() {
                 color={C.textSecondary}
               />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                {activeTab === 'posts' ? 'No posts yet' : 'No participants yet'}
+                {activeTab === 'posts'
+                  ? (postsWindowMessage || 'No posts yet')
+                  : 'No participant rankings yet'}
               </Text>
               {activeTab === 'posts' && challenge.is_participant && isActive() && (
                 <Text style={[styles.emptySubtext, { color: C.textSecondary }]}>
@@ -1430,6 +1900,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
   },
+  detailMetaText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  durationBlock: {
+    gap: 6,
+  },
   organizerSection: {
     marginTop: 8,
   },
@@ -1473,6 +1950,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
   },
   joinedBadge: {
     flexDirection: 'row',
@@ -1499,6 +1977,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 6,
+  },
+  challengeEndedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  challengeEndedBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 8,
   },
   organizerActions: {
     gap: 12,
@@ -1560,7 +2053,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '800',
     textAlign: 'center',
   },
   tabCountBadge: {
@@ -1587,48 +2080,141 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   winnersTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 6,
   },
-  winnersGrid: {
+  winnersSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  winnerPodiumRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 16,
   },
-  winnerCard: {
-    width: (screenWidth - 32 - 24) / 5,
+  podiumCard: {
+    flex: 1,
+    minHeight: 188,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1f2937',
     alignItems: 'center',
   },
-  winnerRank: {
-    position: 'absolute',
-    top: 2,
-    left: 2,
-    zIndex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 4,
+  podiumCardFirst: {
+    backgroundColor: '#111827',
+    borderColor: '#374151',
   },
-  winnerRankText: {
-    color: '#fff',
-    fontSize: 10,
+  podiumBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 8,
+  },
+  podiumBadgeRank: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  podiumMedalLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+  },
+  podiumThumb: {
+    width: '100%',
+    aspectRatio: 0.92,
+    borderRadius: 14,
+    backgroundColor: '#222',
+    marginBottom: 10,
+  },
+  podiumAvatarFallback: {
+    marginBottom: 10,
+  },
+  podiumWinnerName: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  podiumWinnerLikes: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  winnerList: {
+    gap: 10,
+  },
+  winnerListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: '#111827',
+    gap: 10,
+  },
+  winnerListRank: {
+    minWidth: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+  },
+  winnerListRankText: {
+    color: '#f8fafc',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  winnerListThumb: {
+    width: 54,
+    height: 54,
+    borderRadius: 12,
+    backgroundColor: '#222',
+  },
+  winnerListInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  winnerListName: {
+    fontSize: 14,
     fontWeight: '700',
   },
-  winnerThumb: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: 8,
-    backgroundColor: '#222',
+  winnerListLikes: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  winnerListMeta: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  winnersAnnouncement: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   winnerThumbPlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
   },
-  winnerLikes: {
-    fontSize: 10,
-    marginTop: 4,
+  winnersAnnouncementText: {
+    marginTop: 14,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   editModalOverlay: {
     flex: 1,
@@ -1664,7 +2250,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   postsGrid: {
-    padding: 1,
+    paddingHorizontal: 1,
+    paddingTop: 1,
+  },
+  postsRow: {
+    flexDirection: 'row',
   },
   gridPostCard: {
     width: POST_ITEM_SIZE,
@@ -1684,14 +2274,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#1a1a1a',
   },
-  gridPlayBadge: {
+  gridCardMeta: {
     position: 'absolute',
-    bottom: 6,
+    left: 6,
     right: 6,
+    bottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  gridLikesBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+  },
+  gridLikesText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  gridPlayBadge: {
     backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 4,
+  },
+  gridPostSpacer: {
+    width: POST_ITEM_SIZE,
+    height: POST_ITEM_SIZE,
+    margin: 1,
   },
   participantsList: {
     padding: 20,

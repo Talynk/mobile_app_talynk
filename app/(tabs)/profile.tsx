@@ -182,7 +182,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
             style={styles.submitToCompetitionDraftButton}
             onPress={(e) => {
               e.stopPropagation();
-              onUseContentPress();
+              onUseContentPress?.();
             }}
             activeOpacity={0.8}
           >
@@ -1135,7 +1135,7 @@ export default function ProfileScreen() {
             'Choose what to do with this draft.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Publish the content normally', onPress: () => handlePublishDraft(item.id) },
+              { text: 'Publish the content to the Main Feed', onPress: () => handlePublishDraft(item.id) },
               { text: 'Submit the content to a competition', onPress: () => openSubmitDraftToCompetition(item.id) },
             ]
           );
@@ -1713,7 +1713,12 @@ export default function ProfileScreen() {
                   <Text style={styles.submitToChallengeEmptyHint}>Join a competition from the Competitions tab, then you can submit this draft there.</Text>
                 </View>
               ) : (
-                <ScrollView style={styles.submitToChallengeList} keyboardShouldPersistTaps="handled">
+                <ScrollView
+                  style={styles.submitToChallengeList}
+                  contentContainerStyle={styles.submitToChallengeListContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={true}
+                >
                   {joinedChallengesForSubmit.map((challenge: any) => (
                     <TouchableOpacity
                       key={challenge.id}
@@ -2008,7 +2013,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   submitToChallengeModalContainer: {
-    maxHeight: '70%',
+    maxHeight: '86%',
   },
   submitToChallengeCard: {
     backgroundColor: '#1a1a1a',
@@ -2016,8 +2021,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingTop: 16,
     paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingBottom: 16,
     minHeight: 200,
+    maxHeight: '100%',
   },
   submitToChallengeHeader: {
     flexDirection: 'row',
@@ -2066,7 +2072,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   submitToChallengeList: {
-    maxHeight: 280,
+    maxHeight: 420,
+    paddingBottom: 8,
+  },
+  submitToChallengeListContent: {
+    paddingBottom: 20,
   },
   submitToChallengeItem: {
     flexDirection: 'row',

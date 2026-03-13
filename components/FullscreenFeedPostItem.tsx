@@ -33,6 +33,7 @@ import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -99,6 +100,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   challengeName,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
+  const isAppActive = useAppActive();
   const showBestButton = likesDuringChallenge !== undefined && likesDuringChallenge !== null;
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -193,7 +195,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   useEffect(() => {
     if (!videoPlayer || !playerValidRef.current) return;
     try {
-      if (isActive && !decoderErrorDetected) {
+      if (isActive && isAppActive && !decoderErrorDetected && !pausedByUser) {
         videoPlayer.muted = isMuted;
         videoPlayer.play();
       } else {
@@ -207,7 +209,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     } catch (e) {
       playerValidRef.current = false;
     }
-  }, [isActive, isMuted, videoPlayer, decoderErrorDetected, index]);
+  }, [isActive, isAppActive, isMuted, videoPlayer, decoderErrorDetected, index, pausedByUser]);
 
   // Fade out thumbnail when video is playing and ready
   useEffect(() => {

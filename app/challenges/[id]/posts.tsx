@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { challengesApi, followsApi, likesApi } from '@/lib/api';
+import { challengesApi, followsApi } from '@/lib/api';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Post } from '@/types';
@@ -29,14 +29,14 @@ import CommentsModal from '@/components/CommentsModal';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useCache } from '@/lib/cache-context';
-import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
+import { useAppSelector } from '@/lib/store/hooks';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useCreateFocus } from '@/lib/create-focus-context';
+import { loadFallbackChallengePosts } from '@/lib/utils/challenge-post-fallback';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
 
 const COLORS = {
@@ -71,11 +71,12 @@ const sortChallengePosts = (posts: Post[], likesDuringChallengeMap: Record<strin
   });
 
 export default function ChallengePostsScreen() {
-  const { id, open, openIndex } = useLocalSearchParams();
+  const { id, open, openIndex, winnerUserId, winnerUsername } = useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
+  const isWinnerDetailView = !!winnerUserId;
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,9 +96,9 @@ export default function ChallengePostsScreen() {
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const [likesDuringChallengeMap, setLikesDuringChallengeMap] = useState<Record<string, number>>({});
   const [isChallengeEnded, setIsChallengeEnded] = useState(false);
+  const [emptyMessage, setEmptyMessage] = useState('No posts in this challenge yet');
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
-  const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
 
   const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
@@ -131,28 +132,57 @@ export default function ChallengePostsScreen() {
       }
 
       setError(null);
+      setEmptyMessage(isWinnerDetailView ? 'No winner posts available yet' : 'No posts in this challenge yet');
 
       const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
-      const response = await challengesApi.getPosts(id as string, page, limit);
+      const response = isWinnerDetailView
+        ? await challengesApi.getWinnerPosts(id as string, String(winnerUserId), page, limit)
+        : await challengesApi.getPosts(id as string, page, limit);
 
       if (response.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const orderedBy = response.data?.ordered_by;
-        const ended = orderedBy === 'likes_at_challenge_end' || orderedBy === 'winner_rank';
-        // When backend returns winner_rank order, preserve API order; otherwise sort by likes
-        let postsList: Post[];
-        if (orderedBy === 'winner_rank' && rawItems.length > 0) {
-          const orderedPosts = rawItems.map((cp: any) => cp.post || cp).filter(Boolean);
-          postsList = filterHlsReady(orderedPosts) as Post[];
-        } else {
-          let list = filterHlsReady(response.data?.posts || []) as Post[];
-          const map: Record<string, number> = {};
-          rawItems.forEach((cp: any) => {
-            const postId = cp.post?.id || cp.post_id;
-            const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
-            if (postId) map[postId] = likes;
-          });
-          postsList = sortChallengePosts(list, map, ended);
+        const ended = isWinnerDetailView || orderedBy === 'likes_at_challenge_end' || orderedBy === 'winner_rank';
+        const map: Record<string, number> = {};
+        rawItems.forEach((cp: any) => {
+          const postId = cp.post?.id || cp.post_id;
+          const likes = cp.likes_during_challenge ?? cp.likes_at_challenge_end ?? 0;
+          if (postId) map[postId] = likes;
+        });
+
+        const list = filterHlsReady(response.data?.posts || []) as Post[];
+        const postsList = sortChallengePosts(list, map, rawItems.length > 0);
+        const shouldUseFallback =
+          postsList.length === 0 &&
+          response.data?.winners_visible === false &&
+          (isWinnerDetailView ||
+            response.data?.challenge_status === 'ended' ||
+            response.data?.challenge_status === 'stopped');
+
+        if (shouldUseFallback) {
+          const fallbackData = await loadFallbackChallengePosts(String(id));
+          const filteredFallbackPosts = isWinnerDetailView
+            ? fallbackData.posts.filter((post: any) => {
+                const fallbackUserId = post?.user?.id || post?.user_id;
+                return fallbackUserId === String(winnerUserId);
+              })
+            : fallbackData.posts;
+          const sortedFallbackPosts = sortChallengePosts(
+            filteredFallbackPosts as Post[],
+            fallbackData.likesMap,
+            filteredFallbackPosts.length > 0,
+          );
+
+          setHasMore(false);
+          setPosts(sortedFallbackPosts);
+          setLikesDuringChallengeMap(fallbackData.likesMap);
+          setIsChallengeEnded(filteredFallbackPosts.length > 0);
+          setEmptyMessage(
+            isWinnerDetailView
+              ? 'No winner posts available yet'
+              : 'No posts in this challenge yet',
+          );
+          return;
         }
 
         const pagination = response.data?.pagination || {};
@@ -168,16 +198,75 @@ export default function ChallengePostsScreen() {
           setLikesDuringChallengeMap(prev => ({ ...prev, ...map }));
         }
       } else {
+        const fallbackData = page === 1 ? await loadFallbackChallengePosts(String(id)) : null;
+
+        if (fallbackData) {
+          const filteredFallbackPosts = isWinnerDetailView
+            ? fallbackData.posts.filter((post: any) => {
+                const fallbackUserId = post?.user?.id || post?.user_id;
+                return fallbackUserId === String(winnerUserId);
+              })
+            : fallbackData.posts;
+          const sortedFallbackPosts = sortChallengePosts(
+            filteredFallbackPosts as Post[],
+            fallbackData.likesMap,
+            filteredFallbackPosts.length > 0,
+          );
+
+          setHasMore(false);
+          setPosts(sortedFallbackPosts);
+          setLikesDuringChallengeMap(fallbackData.likesMap);
+          setIsChallengeEnded(filteredFallbackPosts.length > 0);
+          setEmptyMessage(
+            isWinnerDetailView
+              ? 'No winner posts available yet'
+              : 'No posts in this challenge yet',
+          );
+          return;
+        }
+
         if (page === 1) {
           setPosts([]);
         }
         setHasMore(false);
-        setError(response.message || 'Failed to load posts');
+        const message = response.message || 'Failed to load posts';
+        if (page === 1) {
+          setEmptyMessage(message);
+        }
+        setError(message);
       }
     } catch (err: any) {
       console.warn('Error loading challenge posts:', err?.message);
+      const fallbackData = page === 1 ? await loadFallbackChallengePosts(String(id)) : null;
+
+      if (fallbackData) {
+        const filteredFallbackPosts = isWinnerDetailView
+          ? fallbackData.posts.filter((post: any) => {
+              const fallbackUserId = post?.user?.id || post?.user_id;
+              return fallbackUserId === String(winnerUserId);
+            })
+          : fallbackData.posts;
+        const sortedFallbackPosts = sortChallengePosts(
+          filteredFallbackPosts as Post[],
+          fallbackData.likesMap,
+          filteredFallbackPosts.length > 0,
+        );
+
+        setHasMore(false);
+        setPosts(sortedFallbackPosts);
+        setLikesDuringChallengeMap(fallbackData.likesMap);
+        setIsChallengeEnded(filteredFallbackPosts.length > 0);
+        setEmptyMessage(
+          isWinnerDetailView
+            ? 'No winner posts available yet'
+            : 'No posts in this challenge yet',
+        );
+        return;
+      }
+
       if (page === 1) {
         setPosts([]);
+        setEmptyMessage(err?.message || 'Failed to load posts');
       }
       setHasMore(false);
       setError(err.message || 'Failed to load posts');
@@ -190,7 +279,7 @@ export default function ChallengePostsScreen() {
 
   useEffect(() => {
     loadPosts(1);
-  }, [id]);
+  }, [id, winnerUserId]);
 
   // If coming from challenge detail tile tap, auto-open fullscreen at index
   useEffect(() => {
@@ -328,7 +417,7 @@ export default function ChallengePostsScreen() {
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
             <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{item.likes || 0}</Text>
+            <Text style={styles.postStatText}>{likesDuringChallengeMap[item.id] ?? item.likes ?? item.like_count ?? 0}</Text>
           </View>
           {isVideo && (
             <View style={styles.playIcon}>
@@ -351,7 +440,7 @@ export default function ChallengePostsScreen() {
     );
   }
 
-  if (error && posts.length === 0) {
+  if (error && posts.length === 0 && !isWinnerDetailView) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.errorContainer}>
@@ -365,6 +454,22 @@ export default function ChallengePostsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
       <StatusBar barStyle="light-content" />
+
+      <View style={styles.screenHeader}>
+        <TouchableOpacity style={styles.headerBackButton} onPress={() => router.back()}>
+          <Feather name="arrow-left" size={22} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.screenHeaderText}>
+          <Text style={styles.screenTitle} numberOfLines={1}>
+            {isWinnerDetailView
+              ? `@${String(winnerUsername || 'winner')} Winner Posts`
+              : 'Competition Posts'}
+          </Text>
+          <Text style={styles.screenSubtitle} numberOfLines={1}>
+            {isWinnerDetailView ? 'Official winning posts for this user' : 'Posts ordered for this competition'}
+          </Text>
+        </View>
+      </View>
 
       {/* Grid View */}
       <FlatList
@@ -404,7 +509,7 @@ export default function ChallengePostsScreen() {
             <View style={styles.emptyContainer}>
               <MaterialIcons name="video-library" size={64} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                No posts in this challenge yet
+                {emptyMessage}
               </Text>
             </View>
           ) : null
@@ -494,6 +599,36 @@ export default function ChallengePostsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  screenHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2a2a2a',
+  },
+  headerBackButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  screenHeaderText: {
+    flex: 1,
+  },
+  screenTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  screenSubtitle: {
+    color: '#9ca3af',
+    fontSize: 12,
+    marginTop: 2,
   },
   loadingContainer: {
     flex: 1,

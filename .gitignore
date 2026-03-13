@@ -45,7 +45,6 @@ dist/
 web-build/
 talynk_backend/
 Instagram-preloading-demo-video.mp4
-talynk_backend-prod/
 React-Native-Tiktok-Clone/
 talynk-video-processor-main/
 Talentix.postman_collection.json
@@ -53,3 +52,4 @@ react-native-video-master/
 tiktok-clone-main/
 Sentry_Logs.txt
 Sentry_Logs_minimized.txt
+talynk-backend-prod/

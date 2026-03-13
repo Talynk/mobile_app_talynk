@@ -42,6 +42,7 @@ import {
   PreparedVideoAsset,
   uploadPreparedVideo,
 } from '@/lib/utils/video-upload';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -259,6 +260,7 @@ export default function CreatePostScreen() {
   const [loadingCategories, setLoadingCategories] = useState<boolean>(false);
   const [loadingSubcategories, setLoadingSubcategories] = useState<boolean>(false);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  const isAppActive = useAppActive();
   // expo-video preview player for recorded/captured video
   const previewPlayer = useVideoPlayer(editedVideoUri || recordedVideoUri, (player) => {
     if (player) {
@@ -337,6 +339,15 @@ export default function CreatePostScreen() {
     };
     configureAudio();
   }, []);
+
+  useEffect(() => {
+    if (!previewPlayer || isAppActive) return;
+
+    try {
+      previewPlayer.pause();
+      setIsVideoPlaying(false);
+    } catch (_) {}
+  }, [isAppActive, previewPlayer]);
 
   const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
 
@@ -2064,18 +2075,14 @@ export default function CreatePostScreen() {
                             Optional
                           </Text>
                         </View>
-                        <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 12 }]}>
-                          Select a challenge to submit this post to
+                        <Text style={[styles.subLabel, styles.challengeIntroText, { color: C.textSecondary }]}>
+                          Choose where to publish this content
                         </Text>
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          contentContainerStyle={styles.pillRow}
-                        >
+                        <View style={styles.challengeSelectionStack}>
                           <TouchableOpacity
                             style={[
-                              styles.challengePill,
-                              { borderColor: C.border },
+                              styles.challengePrimaryAction,
+                              { borderColor: C.border, backgroundColor: C.card },
                               !selectedChallengeId && {
                                 backgroundColor: C.primary,
                                 borderColor: C.primary,
@@ -2085,38 +2092,61 @@ export default function CreatePostScreen() {
                           >
                             <Text
                               style={[
-                                styles.challengePillText,
+                                styles.challengePrimaryActionText,
                                 { color: !selectedChallengeId ? '#fff' : C.text },
                               ]}
                             >
-                              No Challenge
+                              Publish to Main Feed
+                            </Text>
+                            <Text
+                              style={[
+                                styles.challengePrimaryActionHint,
+                                { color: !selectedChallengeId ? 'rgba(255,255,255,0.82)' : C.textSecondary },
+                              ]}
+                            >
+                              Post without linking this content to a competition
                             </Text>
                           </TouchableOpacity>
-                          {joinedChallenges.map((challenge: any) => (
-                            <TouchableOpacity
-                              key={challenge.id}
-                              style={[
-                                styles.challengePill,
-                                { borderColor: C.border },
-                                selectedChallengeId === challenge.id && {
-                                  backgroundColor: C.primary,
-                                  borderColor: C.primary,
-                                },
-                              ]}
-                              onPress={() => setSelectedChallengeId(challenge.id)}
-                            >
-                              <Text
+
+                          <View style={styles.challengeOrRow}>
+                            <Text style={[styles.challengeOrText, { color: C.textSecondary }]}>OR</Text>
+                          </View>
+
+                          <Text style={[styles.subLabel, styles.challengeListLabel, { color: C.textSecondary }]}>
+                            Choose a Competition from the ones below
+                          </Text>
+
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.challengePillRow}
+                          >
+                            {joinedChallenges.map((challenge: any) => (
+                              <TouchableOpacity
+                                key={challenge.id}
                                 style={[
-                                  styles.challengePillText,
-                                  { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
+                                  styles.challengePill,
+                                  { borderColor: C.border },
+                                  selectedChallengeId === challenge.id && {
+                                    backgroundColor: C.primary,
+                                    borderColor: C.primary,
+                                  },
                                 ]}
-                                numberOfLines={1}
+                                onPress={() => setSelectedChallengeId(challenge.id)}
                               >
-                                {challenge.name}
-                              </Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
+                                <Text
+                                  style={[
+                                    styles.challengePillText,
+                                    { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {challenge.name}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
                       </>
                     ) : (
                       <View style={{ paddingVertical: 8 }}>
@@ -2487,7 +2517,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: 32,
   },
   label: {
     fontSize: 16,
@@ -2516,6 +2546,10 @@ const styles = StyleSheet.create({
   },
   pillRow: {
     paddingHorizontal: 4,
+  },
+  challengePillRow: {
+    paddingHorizontal: 4,
+    paddingBottom: 4,
   },
   pill: {
     paddingVertical: 10,
@@ -3041,7 +3075,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   labelHint: {
     fontSize: 12,
@@ -3072,8 +3106,8 @@ const styles = StyleSheet.create({
   },
   subLabel: {
     fontSize: 13,
-    marginBottom: 10,
-    marginTop: 4,
+    marginBottom: 14,
+    marginTop: 6,
   },
   selectedBadge: {
     paddingHorizontal: 10,
@@ -3096,7 +3130,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   subcategorySection: {
-    marginTop: 16,
+    marginTop: 20,
   },
   subcategoryGrid: {
     flexDirection: 'row',
@@ -3130,6 +3164,42 @@ const styles = StyleSheet.create({
   challengePillText: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  challengeSelectionStack: {
+    gap: 18,
+  },
+  challengeIntroText: {
+    marginBottom: 6,
+  },
+  challengePrimaryAction: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  challengePrimaryActionText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  challengePrimaryActionHint: {
+    fontSize: 12,
+    marginTop: 6,
+    lineHeight: 17,
+  },
+  challengeOrRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  challengeOrText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+  },
+  challengeListLabel: {
+    marginTop: 0,
+    marginBottom: 6,
   },
   warningBanner: {
     borderRadius: 12,

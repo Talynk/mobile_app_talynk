@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from './auth-context';
 import { useCache } from './cache-context';
-import websocketService, { PostUpdate, CommentUpdate, NotificationUpdate, LikeUpdate } from './websocket-service';
+import websocketService, {
+  PostUpdate,
+  CommentUpdate,
+  NotificationUpdate,
+  LikeUpdate,
+  ChallengeLikesUpdate,
+} from './websocket-service';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface RealtimeContextType {
@@ -16,6 +22,7 @@ interface RealtimeContextType {
   onNewComment: (callback: (update: CommentUpdate) => void) => () => void;
   onNewNotification: (callback: (update: NotificationUpdate) => void) => () => void;
   onLikeUpdate: (callback: (update: LikeUpdate) => void) => () => void;
+  onChallengeLikesUpdated: (callback: (update: ChallengeLikesUpdate) => void) => () => void;
 }
 
 const RealtimeContext = createContext<RealtimeContextType | undefined>(undefined);
@@ -36,6 +43,7 @@ export const useRealtime = () => {
       onNewComment: () => () => {},
       onNewNotification: () => () => {},
       onLikeUpdate: () => () => {},
+      onChallengeLikesUpdated: () => () => {},
     };
   }
   return context;
@@ -55,6 +63,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
   const commentCallbacks = useRef<Set<(update: CommentUpdate) => void>>(new Set());
   const notificationCallbacks = useRef<Set<(update: NotificationUpdate) => void>>(new Set());
   const likeUpdateCallbacks = useRef<Set<(update: LikeUpdate) => void>>(new Set());
+  const challengeLikeCallbacks = useRef<Set<(update: ChallengeLikesUpdate) => void>>(new Set());
 
   useEffect(() => {
     const initWebSocket = async () => {
@@ -117,6 +126,10 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
             likeUpdateCallbacks.current.forEach(callback => callback(update));
           };
 
+          const handleChallengeLikesUpdated = (update: ChallengeLikesUpdate) => {
+            challengeLikeCallbacks.current.forEach(callback => callback(update));
+          };
+
           websocketService.on('connected', handleConnected);
           websocketService.on('disconnected', handleDisconnected);
           websocketService.on('disabled', handleDisabled);
@@ -124,6 +137,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
           websocketService.on('newComment', handleNewComment);
           websocketService.on('newNotification', handleNewNotification);
           websocketService.on('likeUpdate', handleLikeUpdate);
+          websocketService.on('challengeLikesUpdated', handleChallengeLikesUpdated);
 
           return () => {
             websocketService.off('connected', handleConnected);
@@ -133,6 +147,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
             websocketService.off('newComment', handleNewComment);
             websocketService.off('newNotification', handleNewNotification);
             websocketService.off('likeUpdate', handleLikeUpdate);
+            websocketService.off('challengeLikesUpdated', handleChallengeLikesUpdated);
             websocketService.disconnect();
           };
         }
@@ -196,6 +211,13 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
     };
   }, []);
 
+  const onChallengeLikesUpdated = useCallback((callback: (update: ChallengeLikesUpdate) => void) => {
+    challengeLikeCallbacks.current.add(callback);
+    return () => {
+      challengeLikeCallbacks.current.delete(callback);
+    };
+  }, []);
+
   const value: RealtimeContextType = {
     isConnected,
     isAvailable,
@@ -208,6 +230,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
     onNewComment,
     onNewNotification,
     onLikeUpdate,
+    onChallengeLikesUpdated,
   };
 
   return (
