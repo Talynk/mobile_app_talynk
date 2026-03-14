@@ -3244,7 +3244,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
   },
   challengeListLabel: {
-    marginTop: 0,
+    marginTop: 12,
     marginBottom: 6,
     fontSize: 16,
   },

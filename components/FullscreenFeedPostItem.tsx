@@ -50,8 +50,8 @@ const VIDEO_BUFFER_OPTIONS = Platform.select({
   default: {},
 });
 
-const PLAYBACK_STALL_MS = 1500;
-const INITIAL_PLAYBACK_STALL_MS = 2500;
+const PLAYBACK_STALL_MS = 2000;
+const INITIAL_PLAYBACK_STALL_MS = 6000;
 const PLAYBACK_STALL_BUFFER_GAP = 0.35;
 
 const formatNumber = (num: number): string => {
@@ -356,7 +356,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
         if (event?.error) {
           setIsPlaying(false);
-          markPlaybackStall(videoPlayer.currentTime || lastPlaybackTimeRef.current || 0);
+          if (videoReady || lastPlaybackTimeRef.current > 0.1) {
+            markPlaybackStall(videoPlayer.currentTime || lastPlaybackTimeRef.current || 0);
+          }
           return;
         }
 
@@ -409,6 +411,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           !pausedByUser &&
           playbackStatusRef.current === 'loading' &&
           ct < 0.05 &&
+          bufferedPosition >= 0 &&
+          bufferedPosition < 0.15 &&
           Date.now() - lastProgressAtRef.current >= INITIAL_PLAYBACK_STALL_MS;
         const midPlaybackStalled =
           shouldLoadVideo &&

@@ -1,30 +1,25 @@
-import { challengesApi, postsApi, userApi } from '@/lib/api';
+import { challengesApi } from '@/lib/api';
 import { Post } from '@/types';
-import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 
 const PARTICIPANT_LIMIT = 100;
 const USER_POST_LIMIT = 100;
+const FALLBACK_CACHE_TTL_MS = 30_000;
+
+type FallbackChallengeData = {
+  posts: Post[];
+  likesMap: Record<string, number>;
+  participants: any[];
+};
+
+const fallbackChallengeCache = new Map<
+  string,
+  { loadedAt: number; data: FallbackChallengeData } | { promise: Promise<FallbackChallengeData> }
+>();
 
 function getUserIdFromParticipantRow(participant: any): string | null {
   return participant?.user?.id || participant?.user_id || null;
-}
-
-function extractPostsArray(payload: any): any[] {
-  if (Array.isArray(payload?.data)) {
-    return payload.data;
-  }
-
-  if (Array.isArray(payload?.data?.posts)) {
-    return payload.data.posts;
-  }
-
-  if (Array.isArray(payload?.posts)) {
-    return payload.posts;
-  }
-
-  return [];
 }
 
 function getChallengeEntries(post: any): any[] {
@@ -105,11 +100,17 @@ export function buildWinnerEntriesFromPosts(posts: any[], likesMap: Record<strin
 export async function loadFallbackChallengePosts(
   challengeId: string,
   participantSeed?: any[],
-): Promise<{
-  posts: Post[];
-  likesMap: Record<string, number>;
-  participants: any[];
-}> {
+): Promise<FallbackChallengeData> {
+  const cached = fallbackChallengeCache.get(challengeId);
+  if (cached && 'data' in cached && Date.now() - cached.loadedAt < FALLBACK_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  if (cached && 'promise' in cached) {
+    return cached.promise;
+  }
+
+  const loadPromise = (async (): Promise<FallbackChallengeData> => {
   let participants = Array.isArray(participantSeed) ? participantSeed : [];
 
   if (participants.length === 0) {
@@ -131,115 +132,89 @@ export async function loadFallbackChallengePosts(
   }
 
   const participantPostsResults = await Promise.allSettled(
-    participantIds.map((participantId) => userApi.getUserPosts(participantId, 1, USER_POST_LIMIT, 'approved')),
+    participantIds.map((participantId) =>
+      challengesApi.getParticipantPosts(challengeId, participantId, 1, USER_POST_LIMIT),
+    ),
   );
 
-  const candidatePosts = new Map<string, any>();
+  const likesMap: Record<string, number> = {};
+  const challengePosts = new Map<string, Post>();
 
   participantPostsResults.forEach((result, index) => {
     if (result.status !== 'fulfilled' || result.value?.status !== 'success') {
       return;
     }
 
-    extractPostsArray(result.value).forEach((post: any) => {
-      if (!post?.id || candidatePosts.has(post.id)) {
+    const rawItems = Array.isArray(result.value.data?.rawItems) ? result.value.data.rawItems : [];
+    const posts = filterHlsReady(Array.isArray(result.value.data?.posts) ? result.value.data.posts : []);
+    const rawItemsByPostId = new Map<string, any>();
+
+    rawItems.forEach((rawItem: any) => {
+      const postId = rawItem?.post?.id ?? rawItem?.post_id;
+      if (postId) {
+        rawItemsByPostId.set(postId, rawItem);
+      }
+    });
+
+    posts.forEach((post: any) => {
+      if (!post?.id || challengePosts.has(post.id)) {
         return;
       }
 
-      candidatePosts.set(post.id, {
+      const matchingEntry = rawItemsByPostId.get(post.id) ?? getMatchingChallengeEntry(post, challengeId);
+      const snapshotLikes = getChallengePostSnapshotLikes(
+        matchingEntry ? { ...post, challenge_post: matchingEntry } : post,
+        challengeId,
+      );
+
+      const normalizedPost = normalizePost({
         ...post,
         user_id: post?.user_id || post?.userId || participantIds[index],
-      });
-    });
-  });
-
-  const candidateList = Array.from(candidatePosts.values());
-
-  if (candidateList.length === 0) {
-    return {
-      posts: [],
-      likesMap: {},
-      participants,
-    };
-  }
-
-  const postDetailsResults = await Promise.allSettled(
-    candidateList.map((post) => postsApi.getById(post.id)),
-  );
-
-  const likesMap: Record<string, number> = {};
-  const challengePosts = new Map<string, Post>();
-
-  postDetailsResults.forEach((result, index) => {
-    const candidatePost = candidateList[index];
-    const fullPost =
-      result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data
-        ? result.value.data
-        : candidatePost;
-
-    const mergedPost = {
-      ...candidatePost,
-      ...fullPost,
-      user: (fullPost as any)?.user || candidatePost?.user,
-      challengePosts: (fullPost as any)?.challengePosts ?? candidatePost?.challengePosts,
-      challenge_posts: (fullPost as any)?.challenge_posts ?? candidatePost?.challenge_posts,
-    };
-
-    const matchingEntry = getMatchingChallengeEntry(mergedPost, challengeId);
-    const challengeMeta = getChallengePostMeta(mergedPost);
-
-    if (!matchingEntry && challengeMeta.challengeId !== challengeId) {
-      return;
-    }
-
-    const snapshotLikes = getChallengePostSnapshotLikes(mergedPost, challengeId);
-    const normalizedPost = normalizePost({
-      ...mergedPost,
-      challenge_id: challengeId,
-      challengeId: challengeId,
-      challenge_posts: mergedPost.challenge_posts,
-      challengePosts: mergedPost.challengePosts,
-      likes_during_challenge: snapshotLikes,
-      likes_at_challenge_end: snapshotLikes,
-      submitted_at:
-        matchingEntry?.submitted_at ||
-        mergedPost?.submitted_at ||
-        mergedPost?.createdAt ||
-        mergedPost?.uploadDate ||
-        mergedPost?.created_at,
-      total_likes:
-        mergedPost?.total_likes ??
-        mergedPost?.likes ??
-        mergedPost?.like_count ??
-        candidatePost?.likesCount ??
-        0,
-    });
-
-    likesMap[normalizedPost.id] = snapshotLikes;
-
-    challengePosts.set(normalizedPost.id, {
-      ...normalizedPost,
-      challenge_id: challengeId,
-      challengeId: challengeId,
-      challenge_posts: mergedPost.challenge_posts,
-      challengePosts: mergedPost.challengePosts,
-      likes_during_challenge: snapshotLikes,
-      likes_at_challenge_end: snapshotLikes,
-      total_likes: Number(
-        mergedPost?.total_likes ??
-          mergedPost?.likes ??
-          mergedPost?.like_count ??
-          normalizedPost?.likes ??
-          normalizedPost?.like_count ??
+        challenge_id: challengeId,
+        challengeId: challengeId,
+        challenge_posts: post?.challenge_posts,
+        challengePosts: post?.challengePosts,
+        likes_during_challenge: snapshotLikes,
+        likes_at_challenge_end: snapshotLikes,
+        submitted_at:
+          matchingEntry?.submitted_at ||
+          post?.submitted_at ||
+          post?.createdAt ||
+          post?.uploadDate ||
+          post?.created_at,
+        total_likes:
+          post?.total_likes ??
+          post?.likes ??
+          post?.like_count ??
           0,
-      ),
-      submitted_at:
-        matchingEntry?.submitted_at ||
-        mergedPost?.submitted_at ||
-        normalizedPost?.createdAt ||
-        normalizedPost?.uploadDate ||
-        (normalizedPost as any)?.created_at,
-    } as Post);
+      });
+
+      likesMap[normalizedPost.id] = snapshotLikes;
+
+      challengePosts.set(normalizedPost.id, {
+        ...normalizedPost,
+        challenge_id: challengeId,
+        challengeId: challengeId,
+        challenge_posts: post?.challenge_posts,
+        challengePosts: post?.challengePosts,
+        likes_during_challenge: snapshotLikes,
+        likes_at_challenge_end: snapshotLikes,
+        total_likes: Number(
+          post?.total_likes ??
+            post?.likes ??
+            post?.like_count ??
+            normalizedPost?.likes ??
+            normalizedPost?.like_count ??
+            0,
+        ),
+        submitted_at:
+          matchingEntry?.submitted_at ||
+          post?.submitted_at ||
+          normalizedPost?.createdAt ||
+          normalizedPost?.uploadDate ||
+          (normalizedPost as any)?.created_at,
+      } as Post);
+    });
   });
 
   return {
@@ -251,4 +226,19 @@ export async function loadFallbackChallengePosts(
     likesMap,
     participants,
   };
+  })();
+
+  fallbackChallengeCache.set(challengeId, { promise: loadPromise });
+
+  try {
+    const data = await loadPromise;
+    fallbackChallengeCache.set(challengeId, {
+      data,
+      loadedAt: Date.now(),
+    });
+    return data;
+  } catch (error) {
+    fallbackChallengeCache.delete(challengeId);
+    throw error;
+  }
 }

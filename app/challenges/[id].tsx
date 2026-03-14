@@ -1224,7 +1224,7 @@ export default function ChallengeDetailScreen() {
             <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
               <Text style={[styles.winnersTitle, { color: C.text }]}>Official Winners</Text>
               <Text style={[styles.winnersSubtitle, { color: C.textSecondary }]}>
-                {`Dashboard-confirmed winner order.${winnersConfirmedAt ? ` Announced ${formatDate(winnersConfirmedAt)}.` : ''} Tap a winner to view that user's competition posts.`}
+                {`Organizer-confirmed winner order.${winnersConfirmedAt ? ` Announced ${formatDate(winnersConfirmedAt)}.` : ''} Tap a winner to view that user's competition posts.`}
               </Text>
             </View>
           ) : (
@@ -1262,7 +1262,7 @@ export default function ChallengeDetailScreen() {
 
     if (activeTab === 'winners') {
       const winnerUser = item.user || {};
-      const winnerRank = Number(item.winner_rank ?? index + 1);
+      const winnerRank = index + 1;
       const winnerLikes = Number(item.total_likes_during_challenge ?? 0);
       const winnerPostsCount = Number(item.total_winner_posts ?? item.posts?.length ?? 0);
       const medal = WINNER_MEDALS[winnerRank as 1 | 2 | 3];

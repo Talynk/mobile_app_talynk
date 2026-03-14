@@ -7,6 +7,9 @@ let lastChangedAt = Date.now();
 const listeners = new Set<Listener>();
 const pendingOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const offlineSources = new Map<string, { message?: string }>();
+const connectivityFailureCounts = new Map<string, { count: number; lastAt: number }>();
+const CONNECTIVITY_FAILURE_WINDOW_MS = 6_000;
+const API_CLIENT_FAILURE_THRESHOLD = 2;
 
 function getSourceKey(source?: string): string {
   return source?.trim() || 'unknown';
@@ -34,6 +37,12 @@ function clearSources(predicate: (source: string) => boolean) {
   [...offlineSources.keys()].forEach((source) => {
     if (predicate(source)) {
       offlineSources.delete(source);
+    }
+  });
+
+  [...connectivityFailureCounts.keys()].forEach((source) => {
+    if (predicate(source)) {
+      connectivityFailureCounts.delete(source);
     }
   });
 }
@@ -85,6 +94,23 @@ export const networkStatus = {
     if (meta?.immediate) {
       activateOfflineSource(source, meta?.message);
       return;
+    }
+
+    if (source === 'api-client') {
+      const now = Date.now();
+      const previous = connectivityFailureCounts.get(source);
+      const nextCount =
+        previous && now - previous.lastAt <= CONNECTIVITY_FAILURE_WINDOW_MS
+          ? previous.count + 1
+          : 1;
+
+      connectivityFailureCounts.set(source, { count: nextCount, lastAt: now });
+
+      if (nextCount < API_CLIENT_FAILURE_THRESHOLD) {
+        return;
+      }
+
+      connectivityFailureCounts.delete(source);
     }
 
     // Guard against transient request hiccups on otherwise healthy connections.
