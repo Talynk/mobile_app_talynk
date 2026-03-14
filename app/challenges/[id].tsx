@@ -43,9 +43,6 @@ import {
   isChallengeRunning,
 } from '@/lib/utils/challenge';
 import {
-  buildWinnerEntriesFromPosts,
-  getChallengePostSnapshotLikes,
-  getChallengePostTimestamp,
   loadFallbackChallengePosts,
   sortChallengePostsByLikes,
 } from '@/lib/utils/challenge-post-fallback';
@@ -141,12 +138,11 @@ export default function ChallengeDetailScreen() {
   const [rawChallengePosts, setRawChallengePosts] = useState<any[]>([]);
   const [challengeLikesMap, setChallengeLikesMap] = useState<Record<string, number>>({});
   const [useChallengeSnapshotLikes, setUseChallengeSnapshotLikes] = useState(false);
-  const [, setWinnersVisible] = useState(false);
+  const [winnersVisible, setWinnersVisible] = useState(false);
   const [winnersConfirmedAt, setWinnersConfirmedAt] = useState<string | null>(null);
   const [winners, setWinners] = useState<any[]>([]);
   const [loadingWinners, setLoadingWinners] = useState(false);
   const [winnersFetched, setWinnersFetched] = useState(false);
-  const [winnerSource, setWinnerSource] = useState<'official' | 'ranking'>('official');
   const [postsWindowMessage, setPostsWindowMessage] = useState<string | null>(null);
   const [postsFetched, setPostsFetched] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
@@ -154,9 +150,9 @@ export default function ChallengeDetailScreen() {
 
   useRefetchOnReconnect(() => {
     fetchChallenge({ showLoader: false });
-    if (activeTab === 'participants' && participantsFetched) {
+    if (activeTab === 'participants') {
       fetchParticipants();
-    } else if (activeTab === 'winners' && winnersFetched) {
+    } else if (activeTab === 'winners') {
       fetchWinners({ forceRefresh: true });
     } else {
       fetchPosts({ forceRefresh: true });
@@ -213,7 +209,6 @@ export default function ChallengeDetailScreen() {
         posts: [],
         likesMap: {},
         participants: [],
-        winners: [],
       };
     }
 
@@ -235,7 +230,6 @@ export default function ChallengeDetailScreen() {
     const payload = {
       challengeId: String(id),
       ...fallbackData,
-      winners: buildWinnerEntriesFromPosts(fallbackData.posts, fallbackData.likesMap),
     };
 
     fallbackChallengeDataRef.current = payload;
@@ -251,6 +245,25 @@ export default function ChallengeDetailScreen() {
 
   useEffect(() => {
     fallbackChallengeDataRef.current = null;
+  }, [id]);
+
+  useEffect(() => {
+    setPosts([]);
+    setRawChallengePosts([]);
+    setChallengeLikesMap({});
+    setUseChallengeSnapshotLikes(false);
+    setParticipants([]);
+    setAllParticipants([]);
+    setWinners([]);
+    setWinnersVisible(false);
+    setWinnersConfirmedAt(null);
+    setPostsWindowMessage(null);
+    setPostsFetched(false);
+    setParticipantsFetched(false);
+    setWinnersFetched(false);
+    setActiveTab('posts');
+    setShowFullscreen(false);
+    setFullscreenIndex(0);
   }, [id]);
 
   const fetchPosts = async (options?: { forceRefresh?: boolean }) => {
@@ -351,7 +364,7 @@ export default function ChallengeDetailScreen() {
     setLoadingParticipants(true);
 
     try {
-      const response = await challengesApi.getParticipantsRanking(id as string, 1, 10);
+      const response = await challengesApi.getParticipantsRanking(id as string, 1, 100);
 
       if (response?.status === 'success') {
         const participantsList = response.data?.participants || [];
@@ -379,144 +392,39 @@ export default function ChallengeDetailScreen() {
     setLoadingWinners(true);
 
     try {
-      const response = await challengesApi.getPosts(id as string, 1, 100);
+      const response = await challengesApi.getWinners(id as string, 1, 100);
 
       if (response?.status === 'success') {
-        const rawItems = Array.isArray(response.data?.rawItems) ? response.data.rawItems : [];
-        const postsList = filterHlsReady(Array.isArray(response.data?.posts) ? response.data.posts : []);
-        const likesMapFromResponse = buildLikesMapFromRawItems(rawItems);
+        const winnersList = Array.isArray(response.data?.winners) ? response.data.winners : [];
+        const normalizedWinners = winnersList.map((winner: any) => ({
+          ...winner,
+          winner_rank: winner?.winner_rank != null ? Number(winner.winner_rank) : null,
+          total_winner_posts: Number(winner?.total_winner_posts ?? winner?.posts?.length ?? 0),
+          total_likes_during_challenge: Number(winner?.total_likes_during_challenge ?? 0),
+          latest_submission_at: winner?.latest_submission_at ?? null,
+          posts: Array.isArray(winner?.posts) ? winner.posts : [],
+        }));
 
-        const rawItemsByPostId = new Map<string, any>();
-        rawItems.forEach((item: any) => {
-          const postId = item?.post?.id ?? item?.post_id;
-          if (postId) {
-            rawItemsByPostId.set(postId, item);
-          }
-        });
-
-        const officialWinners = [...postsList]
-          .map((post: any, index: number) => {
-            const rawItem = rawItemsByPostId.get(post.id);
-            const rankValue = Number(rawItem?.winner_rank ?? post?.winner_rank ?? index + 1);
-            const challengeLikes =
-              likesMapFromResponse[post.id] ??
-              getChallengePostSnapshotLikes(post) ??
-              Number(post?.total_likes ?? post?.likes ?? post?.like_count ?? 0);
-
-            return {
-              ...post,
-              winner_rank: rankValue,
-              likes_during_challenge: challengeLikes,
-              likes_at_challenge_end: challengeLikes,
-              total_likes: Number(post?.total_likes ?? post?.likes ?? post?.like_count ?? 0),
-              submitted_at:
-                rawItem?.submitted_at ||
-                post?.submitted_at ||
-                post?.createdAt ||
-                post?.uploadDate ||
-                post?.created_at,
-            };
-          })
-          .sort((a: any, b: any) => {
-            const rankA = Number(a?.winner_rank ?? Number.MAX_SAFE_INTEGER);
-            const rankB = Number(b?.winner_rank ?? Number.MAX_SAFE_INTEGER);
-            if (rankA !== rankB) {
-              return rankA - rankB;
-            }
-
-            const likesA = Number(a?.likes_during_challenge ?? 0);
-            const likesB = Number(b?.likes_during_challenge ?? 0);
-            if (likesB !== likesA) {
-              return likesB - likesA;
-            }
-
-            return getChallengePostTimestamp(b) - getChallengePostTimestamp(a);
-          });
-
-        if (officialWinners.length > 0) {
-          if (!postsFetched && posts.length === 0) {
-            setPosts(sortChallengePostsByLikes(officialWinners, likesMapFromResponse, Object.keys(likesMapFromResponse).length > 0));
-            setChallengeLikesMap(likesMapFromResponse);
-            setUseChallengeSnapshotLikes(Object.keys(likesMapFromResponse).length > 0);
-            setPostsFetched(true);
-          }
-          setWinners(officialWinners);
-          setWinnersVisible(true);
-          setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
-          setWinnerSource(response.data?.winners_visible === true ? 'official' : 'ranking');
-          setWinnersFetched(true);
-          return;
-        }
-
-        const challengeStatus = response.data?.challenge_status;
-        if (challengeStatus === 'ended' || challengeStatus === 'stopped' || challengeEnded) {
-          const fallbackData = await getFallbackChallengeData(options);
-          if (!postsFetched && posts.length === 0) {
-            setPosts(fallbackData.posts);
-            setChallengeLikesMap(fallbackData.likesMap);
-            setUseChallengeSnapshotLikes(fallbackData.posts.length > 0);
-            setPostsFetched(true);
-          }
-          setWinners(fallbackData.winners);
-          setWinnersVisible(fallbackData.winners.length > 0);
-          setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
-          setWinnerSource('ranking');
-          setWinnersFetched(true);
-          return;
-        }
-
-        setWinners([]);
-        setWinnersVisible(false);
+        setWinners(normalizedWinners);
+        setWinnersVisible(response.data?.winners_visible === true);
         setWinnersConfirmedAt(response.data?.winners_confirmed_at ?? null);
         setWinnersFetched(true);
       } else {
-        const fallbackData =
-          challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
-            ? await getFallbackChallengeData(options)
-            : null;
-
-        if (fallbackData && fallbackData.winners.length > 0) {
-          if (!postsFetched && posts.length === 0) {
-            setPosts(fallbackData.posts);
-            setChallengeLikesMap(fallbackData.likesMap);
-            setUseChallengeSnapshotLikes(true);
-            setPostsFetched(true);
-          }
-          setWinners(fallbackData.winners);
-          setWinnersVisible(true);
-          setWinnerSource('ranking');
-          setWinnersFetched(true);
-        } else {
-          setWinners([]);
-          setWinnersVisible(false);
-        }
+        setWinners([]);
+        setWinnersVisible(false);
+        setWinnersConfirmedAt(null);
+        setWinnersFetched(false);
       }
     } catch (err: any) {
       console.warn('Error fetching challenge winners:', err?.message);
-      const fallbackData =
-        challengeEnded || challenge?.status === 'ended' || challenge?.status === 'stopped'
-          ? await getFallbackChallengeData(options)
-          : null;
-
-      if (fallbackData && fallbackData.winners.length > 0) {
-        if (!postsFetched && posts.length === 0) {
-          setPosts(fallbackData.posts);
-          setChallengeLikesMap(fallbackData.likesMap);
-          setUseChallengeSnapshotLikes(true);
-          setPostsFetched(true);
-        }
-        setWinners(fallbackData.winners);
-        setWinnersVisible(true);
-        setWinnerSource('ranking');
-        setWinnersFetched(true);
-      } else {
-        setWinners([]);
-        setWinnersVisible(false);
-      }
+      setWinners([]);
+      setWinnersVisible(false);
+      setWinnersConfirmedAt(null);
+      setWinnersFetched(false);
     } finally {
       setLoadingWinners(false);
     }
-  }, [buildLikesMapFromRawItems, challenge?.status, challengeEnded, getFallbackChallengeData, id, posts.length, postsFetched]);
+  }, [id]);
 
   const handleTabChange = useCallback((
     tab: 'posts' | 'participants' | 'winners',
@@ -549,7 +457,16 @@ export default function ChallengeDetailScreen() {
   useEffect(() => {
     fetchChallenge();
     fetchPosts();
+    fetchParticipants();
   }, [id]);
+
+  useEffect(() => {
+    if (!challenge || challenge.status === 'pending' || !challengeEnded || winnersFetched) {
+      return;
+    }
+
+    fetchWinners();
+  }, [challenge?.id, challengeEnded, winnersFetched]);
 
   // Refresh challenge + posts when screen regains focus (not on every tab change).
   useFocusEffect(
@@ -691,7 +608,7 @@ export default function ChallengeDetailScreen() {
 
     router.push({
       pathname: '/(tabs)/create',
-      params: { challengeId: id as string, challengeName: challenge.name }
+      params: { challengeId: id as string, challengeName: challenge.name, fromChallenge: '1' }
     });
   };
 
@@ -792,19 +709,14 @@ export default function ChallengeDetailScreen() {
       const likesB = Number(b.total_likes_during_challenge ?? 0);
       if (likesB !== likesA) return likesB - likesA;
 
-      return getChallengePostTimestamp(b) - getChallengePostTimestamp(a);
+      return (
+        new Date(b.latest_submission_at || 0).getTime() -
+        new Date(a.latest_submission_at || 0).getTime()
+      );
     });
   }, [winners]);
 
-  const winnersAnnounced = sortedWinners.length > 0;
-
-  const podiumWinners = useMemo(() => {
-    return sortedWinners.slice(0, 3);
-  }, [sortedWinners]);
-
-  const remainingWinners = useMemo(() => {
-    return sortedWinners.slice(3);
-  }, [sortedWinners]);
+  const winnersAnnounced = winnersVisible && sortedWinners.length > 0;
 
   const isOrganizer = challenge?.organizer_id === user?.id || challenge?.organizer?.id === user?.id;
 
@@ -877,18 +789,31 @@ export default function ChallengeDetailScreen() {
     }
   };
 
-  const openWinnerPost = useCallback((winner: any) => {
-    const winnerIndex = sortedPosts.findIndex((post: any) => post.id === winner?.id);
-    if (winnerIndex < 0) {
+  const openCompetitionUserPosts = useCallback((
+    targetUserId: string | null | undefined,
+    targetUsername: string | null | undefined,
+    mode: 'participant' | 'winner',
+  ) => {
+    if (!targetUserId || !challenge?.id) {
       return;
     }
 
-    setFullscreenIndex(winnerIndex);
-    setShowFullscreen(true);
-    setTimeout(() => {
-      fullscreenListRef.current?.scrollToIndex({ index: winnerIndex, animated: false });
-    }, 100);
-  }, [sortedPosts]);
+    router.push({
+      pathname: '/challenges/[id]/posts',
+      params:
+        mode === 'winner'
+          ? {
+              id: String(challenge.id),
+              winnerUserId: String(targetUserId),
+              winnerUsername: String(targetUsername || ''),
+            }
+          : {
+              id: String(challenge.id),
+              participantUserId: String(targetUserId),
+              participantUsername: String(targetUsername || ''),
+            },
+    });
+  }, [challenge?.id]);
 
   const postRows = useMemo(() => {
     const rows: Array<{ id: string; items: any[]; startIndex: number }> = [];
@@ -1245,28 +1170,26 @@ export default function ChallengeDetailScreen() {
                 </View>
               </TouchableOpacity>
 
-              {isAuthenticated && (
-                <TouchableOpacity
-                  style={[
-                    styles.tab,
-                    activeTab === 'participants' && styles.tabActive
-                  ]}
-                  onPress={() => handleTabChange('participants')}
-                >
-                  <MaterialIcons
-                    name="people"
-                    size={18}
-                    color={activeTab === 'participants' ? C.primary : C.textSecondary}
-                  />
-                  <Text style={[
-                    styles.tabText,
-                    { color: activeTab === 'participants' ? C.primary : C.textSecondary }
-                  ]} numberOfLines={1}>Participants</Text>
-                  <View style={[styles.tabCountBadge, activeTab === 'participants' && styles.tabCountBadgeActive]}>
-                    <Text style={[styles.tabCountText, activeTab === 'participants' && styles.tabCountTextActive]}>{participantCount}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={[
+                  styles.tab,
+                  activeTab === 'participants' && styles.tabActive
+                ]}
+                onPress={() => handleTabChange('participants')}
+              >
+                <MaterialIcons
+                  name="people"
+                  size={18}
+                  color={activeTab === 'participants' ? C.primary : C.textSecondary}
+                />
+                <Text style={[
+                  styles.tabText,
+                  { color: activeTab === 'participants' ? C.primary : C.textSecondary }
+                ]} numberOfLines={1}>Participants</Text>
+                <View style={[styles.tabCountBadge, activeTab === 'participants' && styles.tabCountBadgeActive]}>
+                  <Text style={[styles.tabCountText, activeTab === 'participants' && styles.tabCountTextActive]}>{participantCount}</Text>
+                </View>
+              </TouchableOpacity>
               {challengeEnded && (
                 <TouchableOpacity
                   style={[styles.tab, activeTab === 'winners' && styles.tabActive]}
@@ -1299,109 +1222,10 @@ export default function ChallengeDetailScreen() {
             </View>
           ) : winnersAnnounced ? (
             <View style={[styles.winnersSection, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Text style={[styles.winnersTitle, { color: C.text }]}>
-                {winnerSource === 'official' ? 'Official Winners' : 'Winner Ranking'}
-              </Text>
+              <Text style={[styles.winnersTitle, { color: C.text }]}>Official Winners</Text>
               <Text style={[styles.winnersSubtitle, { color: C.textSecondary }]}>
-                {winnerSource === 'official'
-                  ? `Confirmed winner order from the competition dashboard.${winnersConfirmedAt ? ` Announced ${formatDate(winnersConfirmedAt)}.` : ''}`
-                  : 'Ordered by likes and submission time from competition posts.'}
+                {`Dashboard-confirmed winner order.${winnersConfirmedAt ? ` Announced ${formatDate(winnersConfirmedAt)}.` : ''} Tap a winner to view that user's competition posts.`}
               </Text>
-
-              <View style={styles.winnerPodiumRow}>
-                {podiumWinners.map((winner: any) => {
-                  const rank = Number(winner.winner_rank ?? 0) as 1 | 2 | 3;
-                  const medal = WINNER_MEDALS[rank];
-                  const winnerUser = winner.user || {};
-                  const thumbUrl = getThumbnailUrl(winner) || getPostMediaUrl(winner) || '';
-                  const winnerLikes = Number(
-                    winner?.likes_during_challenge ??
-                      winner?.likes_at_challenge_end ??
-                      winner?.total_likes ??
-                      winner?.likes ??
-                      winner?.like_count ??
-                      0,
-                  );
-
-                  return (
-                    <TouchableOpacity
-                      key={winner.id || winnerUser?.id || `winner-${rank}`}
-                      style={[
-                        styles.podiumCard,
-                        rank === 1 && styles.podiumCardFirst,
-                      ]}
-                      activeOpacity={0.9}
-                      onPress={() => openWinnerPost(winner)}
-                    >
-                      <LinearGradient colors={medal.colors} style={styles.podiumBadge}>
-                        <MaterialIcons name="workspace-premium" size={16} color={medal.text} />
-                        <Text style={[styles.podiumBadgeRank, { color: medal.text }]}>{rank}</Text>
-                      </LinearGradient>
-                      <Text style={[styles.podiumMedalLabel, { color: medal.badge }]}>{medal.title}</Text>
-                      {thumbUrl ? (
-                        <Image source={{ uri: thumbUrl }} style={styles.podiumThumb} resizeMode="cover" />
-                      ) : (
-                        <Avatar user={winnerUser} size={88} style={styles.podiumAvatarFallback} />
-                      )}
-                      <Text style={[styles.podiumWinnerName, { color: C.text }]} numberOfLines={1}>
-                        @{winnerUser.username || 'winner'}
-                      </Text>
-                      <Text style={[styles.podiumWinnerLikes, { color: C.textSecondary }]}>
-                        {winnerLikes} likes
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {remainingWinners.length > 0 && (
-                <View style={styles.winnerList}>
-                  {remainingWinners.map((winner: any) => {
-                    const winnerUser = winner.user || {};
-                    const thumbUrl = getThumbnailUrl(winner) || getPostMediaUrl(winner) || '';
-                    const winnerLikes = Number(
-                      winner?.likes_during_challenge ??
-                        winner?.likes_at_challenge_end ??
-                        winner?.total_likes ??
-                        winner?.likes ??
-                        winner?.like_count ??
-                        0,
-                    );
-                    return (
-                      <TouchableOpacity
-                        key={winner.id || winnerUser?.id || `winner-${winner.winner_rank}`}
-                        style={[styles.winnerListItem, { borderColor: C.border }]}
-                        activeOpacity={0.9}
-                        onPress={() => openWinnerPost(winner)}
-                      >
-                        <View style={styles.winnerListRank}>
-                          <Text style={styles.winnerListRankText}>#{winner.winner_rank}</Text>
-                        </View>
-                        {thumbUrl ? (
-                          <Image source={{ uri: thumbUrl }} style={styles.winnerListThumb} resizeMode="cover" />
-                        ) : (
-                          <Avatar user={winnerUser} size={54} style={styles.winnerListThumb} />
-                        )}
-                        <View style={styles.winnerListInfo}>
-                          <Text style={[styles.winnerListName, { color: C.text }]} numberOfLines={1}>
-                            @{winnerUser.username || 'winner'}
-                          </Text>
-                          <Text style={[styles.winnerListLikes, { color: C.textSecondary }]}>
-                            {winnerLikes} likes
-                          </Text>
-                          {(winner.submitted_at || winner.createdAt || winner.uploadDate || winner.created_at) && (
-                            <Text style={[styles.winnerListMeta, { color: C.textSecondary }]}>
-                              Submitted {formatDate(
-                                winner.submitted_at || winner.createdAt || winner.uploadDate || winner.created_at,
-                              )}
-                            </Text>
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
             </View>
           ) : (
             <View style={[styles.winnersAnnouncement, { backgroundColor: C.card, borderColor: C.border }]}>
@@ -1436,6 +1260,74 @@ export default function ChallengeDetailScreen() {
       );
     }
 
+    if (activeTab === 'winners') {
+      const winnerUser = item.user || {};
+      const winnerRank = Number(item.winner_rank ?? index + 1);
+      const winnerLikes = Number(item.total_likes_during_challenge ?? 0);
+      const winnerPostsCount = Number(item.total_winner_posts ?? item.posts?.length ?? 0);
+      const medal = WINNER_MEDALS[winnerRank as 1 | 2 | 3];
+
+      return (
+        <TouchableOpacity
+          style={[
+            styles.winnerUserRow,
+            { backgroundColor: C.card, borderColor: C.border },
+            medal && styles.winnerUserRowTopThree,
+          ]}
+          onPress={() =>
+            openCompetitionUserPosts(
+              winnerUser.id || item.user_id,
+              winnerUser.username,
+              'winner',
+            )
+          }
+        >
+          <View style={styles.winnerUserRankWrap}>
+            {medal ? (
+              <LinearGradient colors={medal.colors} style={styles.winnerUserRankBadge}>
+                <MaterialIcons name="workspace-premium" size={14} color={medal.text} />
+                <Text style={[styles.winnerUserRankText, { color: medal.text }]}>{winnerRank}</Text>
+              </LinearGradient>
+            ) : (
+              <View style={styles.winnerUserRankPlain}>
+                <Text style={styles.winnerUserRankPlainText}>#{winnerRank}</Text>
+              </View>
+            )}
+          </View>
+
+          <Avatar
+            user={winnerUser}
+            size={54}
+            style={styles.winnerUserAvatar}
+          />
+
+          <View style={styles.winnerUserInfo}>
+            <Text style={[styles.winnerUserName, { color: C.text }]}>
+              {winnerUser.display_name || winnerUser.username || 'Unknown'}
+            </Text>
+            <Text style={[styles.winnerUserUsername, { color: C.textSecondary }]}>
+              @{winnerUser.username || 'unknown'}
+            </Text>
+            <View style={styles.winnerUserStatsRow}>
+              <View style={styles.winnerUserStatChip}>
+                <Text style={styles.winnerUserStatChipText}>{winnerPostsCount} posts</Text>
+              </View>
+              <View style={styles.winnerUserStatChip}>
+                <Text style={styles.winnerUserStatChipText}>{winnerLikes} likes</Text>
+              </View>
+            </View>
+            {item.latest_submission_at && (
+              <Text style={[styles.winnerUserMeta, { color: C.textSecondary }]}>
+                Latest submission {formatDate(item.latest_submission_at)}
+              </Text>
+            )}
+          </View>
+
+          <Feather name="chevron-right" size={18} color={C.textSecondary} />
+        </TouchableOpacity>
+      );
+    }
+
     const participantUser = item.user || item;
     const postCount = Number(item.total_posts ?? item.post_count ?? 0);
     const totalLikesInChallenge = Number(item.total_likes ?? 0);
@@ -1444,15 +1336,13 @@ export default function ChallengeDetailScreen() {
     return (
       <TouchableOpacity
         style={[styles.participantItem, { backgroundColor: C.card, borderColor: C.border }]}
-        onPress={() => {
-          const uid = participantUser.id || item.user_id;
-          if (uid) {
-            router.push({
-              pathname: '/profile-feed/[userId]',
-              params: { userId: String(uid), challengeId: String(challenge.id) }
-            });
-          }
-        }}
+        onPress={() =>
+          openCompetitionUserPosts(
+            participantUser.id || item.user_id,
+            participantUser.username,
+            'participant',
+          )
+        }
       >
         <Avatar
           user={participantUser}
@@ -1532,7 +1422,14 @@ export default function ChallengeDetailScreen() {
   }
 
   // Determine data source based on active tab without remounting the list.
-  const data = activeTab === 'winners' ? [] : (activeTab === 'posts' ? postRows : sortedParticipants);
+  const data =
+    activeTab === 'posts'
+      ? postRows
+      : activeTab === 'participants'
+        ? sortedParticipants
+        : winnersAnnounced
+          ? sortedWinners
+          : [];
   const isLoading = activeTab === 'winners' ? loadingWinners : (activeTab === 'posts' ? postsLoading : loadingAllParticipants);
 
   return (
@@ -1557,9 +1454,13 @@ export default function ChallengeDetailScreen() {
         keyExtractor={(item, index) => {
           if (activeTab === 'posts') {
             return item.id || `post-row-${index}`;
-          } else {
+          }
+
+          if (activeTab === 'participants') {
             return item.user?.id || item.user_id || item.id || `participant-${index}`;
           }
+
+          return item.user?.id || item.user_id || item.id || `winner-${index}`;
         }}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
@@ -1717,10 +1618,11 @@ export default function ChallengeDetailScreen() {
                       style={styles.modalUserItem}
                       onPress={() => {
                         if (participantUser.id && challenge?.id) {
-                          router.push({
-                            pathname: '/profile-feed/[userId]',
-                            params: { userId: String(participantUser.id), challengeId: String(challenge.id) }
-                          });
+                          openCompetitionUserPosts(
+                            participantUser.id,
+                            participantUser.username,
+                            'participant',
+                          );
                           setParticipantsModalVisible(false);
                         }
                       }}
@@ -2039,18 +1941,19 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   tab: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    minHeight: 72,
+    paddingHorizontal: 8,
+    minHeight: 68,
     borderRadius: 10,
-    gap: 4,
+    gap: 3,
     borderWidth: 1,
     borderColor: '#2a2a2a',
     borderBottomWidth: 2,
@@ -2062,7 +1965,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#60a5fa',
   },
   tabText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '800',
     textAlign: 'center',
   },
@@ -2086,7 +1989,9 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   winnersSection: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
     borderTopWidth: 1,
   },
   winnersTitle: {
@@ -2161,6 +2066,88 @@ const styles = StyleSheet.create({
   },
   winnerList: {
     gap: 10,
+  },
+  winnerUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+  },
+  winnerUserRowTopThree: {
+    backgroundColor: '#111827',
+  },
+  winnerUserRankWrap: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  winnerUserRankBadge: {
+    minWidth: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  winnerUserRankText: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  winnerUserRankPlain: {
+    minWidth: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0f172a',
+  },
+  winnerUserRankPlainText: {
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  winnerUserAvatar: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+  },
+  winnerUserInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  winnerUserName: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  winnerUserUsername: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  winnerUserStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 2,
+  },
+  winnerUserStatChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#0f172a',
+  },
+  winnerUserStatChipText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  winnerUserMeta: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
   },
   winnerListItem: {
     flexDirection: 'row',

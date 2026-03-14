@@ -222,6 +222,15 @@ async function _legacyMultipartUpload(
 
 export default function CreatePostScreen() {
   const params = useLocalSearchParams();
+  const forcedChallengeId =
+    typeof params.challengeId === 'string' && params.challengeId.trim().length > 0
+      ? params.challengeId
+      : null;
+  const forcedChallengeName =
+    typeof params.challengeName === 'string' && params.challengeName.trim().length > 0
+      ? params.challengeName
+      : null;
+  const isChallengeOnlyFlow = params.fromChallenge === '1' && !!forcedChallengeId;
   const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
@@ -277,6 +286,7 @@ export default function CreatePostScreen() {
   const [draftReplaceModalVisible, setDraftReplaceModalVisible] = useState(false);
   const [existingDrafts, setExistingDrafts] = useState<any[]>([]);
   const [pendingDraftStatus, setPendingDraftStatus] = useState<'active' | 'draft'>('draft');
+  const effectiveSelectedChallengeId = isChallengeOnlyFlow ? forcedChallengeId : selectedChallengeId;
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -467,7 +477,11 @@ export default function CreatePostScreen() {
             activeChallenges.map((c: any) => ({ name: c.name, status: c.status })));
           setJoinedChallenges(activeChallenges);
 
-          if (params.challengeId && activeChallenges.some((c: any) => c.id === params.challengeId)) {
+          if (
+            !isChallengeOnlyFlow &&
+            params.challengeId &&
+            activeChallenges.some((c: any) => c.id === params.challengeId)
+          ) {
             setSelectedChallengeId(params.challengeId as string);
             console.log('[Create] Auto-selected challenge:', params.challengeId);
           }
@@ -489,7 +503,7 @@ export default function CreatePostScreen() {
     };
 
     fetchJoinedChallenges();
-  }, [isAuthenticated, authLoading, params.challengeId]);
+  }, [isAuthenticated, authLoading, isChallengeOnlyFlow, params.challengeId]);
 
   // --- Handle camera mode changes ---
   useEffect(() => {
@@ -1152,8 +1166,11 @@ export default function CreatePostScreen() {
         name: fileName,
         type: fileType,
       };
-      const selectedChallenge = joinedChallenges.find((challenge: any) => challenge.id === selectedChallengeId);
-      const selectedChallengeName = selectedChallenge?.name as string | undefined;
+      const selectedChallenge = joinedChallenges.find(
+        (challenge: any) => challenge.id === effectiveSelectedChallengeId,
+      );
+      const selectedChallengeName =
+        selectedChallenge?.name || forcedChallengeName || undefined;
 
       // Note: For React Native, FormData.append(name, file) expects:
       // - file as a Blob/File object with uri property (which RN handles)
@@ -1161,7 +1178,7 @@ export default function CreatePostScreen() {
       // We don't convert to base64 for FormData as it expects the native file object
       // FormData will read the file from the URI automatically
 
-      if (selectedChallengeId && !isVideo) {
+      if (effectiveSelectedChallengeId && !isVideo) {
         const formData = new FormData();
         formData.append('title', caption.trim().substring(0, 50) || 'My Post');
         formData.append('caption', caption);
@@ -1169,7 +1186,7 @@ export default function CreatePostScreen() {
         formData.append('file', fileData as any);
 
         console.log('[Upload] Creating post in challenge:', {
-          challengeId: selectedChallengeId,
+          challengeId: effectiveSelectedChallengeId,
           title: caption.trim().substring(0, 50),
           categoryName,
           fileName,
@@ -1177,7 +1194,7 @@ export default function CreatePostScreen() {
         });
 
         const xhr = new XMLHttpRequest();
-        const apiUrl = `${API_BASE_URL}/api/challenges/${selectedChallengeId}/posts`;
+        const apiUrl = `${API_BASE_URL}/api/challenges/${effectiveSelectedChallengeId}/posts`;
 
         xhr.open('POST', apiUrl);
         xhr.setRequestHeader('Accept', 'application/json');
@@ -1241,7 +1258,7 @@ export default function CreatePostScreen() {
             console.log('[Upload] Challenge post response:', response);
 
             if (response.status === 'success') {
-              const challengeIdToOpen = selectedChallengeId;
+              const challengeIdToOpen = effectiveSelectedChallengeId;
               const createdPost = response.data?.post;
               const createdPostId = createdPost?.id as string | undefined;
               const createdType = createdPost?.type || createdPost?.mediaType || null;
@@ -1370,8 +1387,8 @@ export default function CreatePostScreen() {
         }
 
         let challengeLinkFailed = false;
-        if (selectedChallengeId && status !== 'draft') {
-          const linkRes = await challengesApi.addPostToChallenge(selectedChallengeId, postId);
+        if (effectiveSelectedChallengeId && status !== 'draft') {
+          const linkRes = await challengesApi.addPostToChallenge(effectiveSelectedChallengeId, postId);
           if (linkRes.status !== 'success') {
             challengeLinkFailed = true;
             console.warn('[Upload] Failed to link uploaded post to challenge:', linkRes.message);
@@ -1380,20 +1397,20 @@ export default function CreatePostScreen() {
 
         await videoReadyTracker.track(user.id, {
           postId,
-          destination: status === 'draft' ? 'draft' : (selectedChallengeId ? 'challenge' : 'post'),
-          challengeId: selectedChallengeId || undefined,
+          destination: status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
+          challengeId: effectiveSelectedChallengeId || undefined,
           challengeName: selectedChallengeName,
         });
 
         updateProgress(100);
         await uploadNotificationService.showUploadQueued(
-          status === 'draft' ? 'draft' : (selectedChallengeId ? 'challenge' : 'post'),
+          status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
           selectedChallengeName
         );
 
         const successMessage = status === 'draft'
           ? 'Draft uploaded. You will be notified when it is ready.'
-          : selectedChallengeId
+          : effectiveSelectedChallengeId
             ? challengeLinkFailed
               ? 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
               : 'Video uploaded. You will be notified when the competition post is ready.'
@@ -2067,6 +2084,29 @@ export default function CreatePostScreen() {
                           Loading challenges...
                         </Text>
                       </View>
+                    ) : isChallengeOnlyFlow ? (
+                      <View style={styles.challengeSelectionStack}>
+                        <Text style={[styles.subLabel, styles.challengeListLabel, { color: C.textSecondary }]}>
+                          Posting to this competition
+                        </Text>
+                        <View
+                          style={[
+                            styles.challengePrimaryAction,
+                            styles.challengeLockedCard,
+                            { borderColor: C.primary, backgroundColor: C.card },
+                          ]}
+                        >
+                          <View style={styles.challengeLockedHeader}>
+                            <MaterialIcons name="emoji-events" size={18} color={C.primary} />
+                            <Text style={[styles.challengePrimaryActionText, { color: C.text }]}>
+                              {forcedChallengeName || 'Competition'}
+                            </Text>
+                          </View>
+                          <Text style={[styles.challengePrimaryActionHint, { color: C.textSecondary }]}>
+                            This post will be submitted only to the competition you opened.
+                          </Text>
+                        </View>
+                      </View>
                     ) : joinedChallenges.length > 0 ? (
                       <>
                         <View style={styles.labelRow}>
@@ -2079,7 +2119,7 @@ export default function CreatePostScreen() {
                             style={[
                               styles.challengePrimaryAction,
                               { borderColor: C.border, backgroundColor: C.card },
-                              !selectedChallengeId && {
+                              !effectiveSelectedChallengeId && {
                                 backgroundColor: C.primary,
                                 borderColor: C.primary,
                               },
@@ -2089,7 +2129,7 @@ export default function CreatePostScreen() {
                             <Text
                               style={[
                                 styles.challengePrimaryActionText,
-                                { color: !selectedChallengeId ? '#fff' : C.text },
+                                { color: !effectiveSelectedChallengeId ? '#fff' : C.text },
                               ]}
                             >
                               Publish to Main Feed
@@ -2097,7 +2137,7 @@ export default function CreatePostScreen() {
                             <Text
                               style={[
                                 styles.challengePrimaryActionHint,
-                                { color: !selectedChallengeId ? 'rgba(255,255,255,0.82)' : C.textSecondary },
+                                { color: !effectiveSelectedChallengeId ? 'rgba(255,255,255,0.82)' : C.textSecondary },
                               ]}
                             >
                               Post without linking this content to a competition
@@ -2123,7 +2163,7 @@ export default function CreatePostScreen() {
                                 style={[
                                   styles.challengePill,
                                   { borderColor: C.border },
-                                  selectedChallengeId === challenge.id && {
+                                  effectiveSelectedChallengeId === challenge.id && {
                                     backgroundColor: C.primary,
                                     borderColor: C.primary,
                                   },
@@ -2133,7 +2173,7 @@ export default function CreatePostScreen() {
                                 <Text
                                   style={[
                                     styles.challengePillText,
-                                    { color: selectedChallengeId === challenge.id ? '#fff' : C.text },
+                                    { color: effectiveSelectedChallengeId === challenge.id ? '#fff' : C.text },
                                   ]}
                                   numberOfLines={1}
                                 >
@@ -2204,7 +2244,7 @@ export default function CreatePostScreen() {
                 </View>
               )}
 
-              {selectedChallengeId ? (
+              {effectiveSelectedChallengeId ? (
                 <View style={styles.quickActionButtonsContainer}>
                   <TouchableOpacity
                     style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
@@ -3174,6 +3214,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 16,
+  },
+  challengeLockedCard: {
+    marginTop: 0,
+  },
+  challengeLockedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   challengePrimaryActionText: {
     fontSize: 15,

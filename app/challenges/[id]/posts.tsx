@@ -59,7 +59,13 @@ const COLORS = {
 };
 
 const getChallengePostTimestamp = (post: any) =>
-  new Date(post?.createdAt || post?.uploadDate || post?.created_at || 0).getTime();
+  new Date(
+    post?.submitted_at ||
+      post?.createdAt ||
+      post?.uploadDate ||
+      post?.created_at ||
+      0,
+  ).getTime();
 
 const sortChallengePosts = (posts: Post[], likesDuringChallengeMap: Record<string, number>, ended: boolean) =>
   [...posts].sort((a, b) => {
@@ -78,12 +84,14 @@ const sortChallengePosts = (posts: Post[], likesDuringChallengeMap: Record<strin
   });
 
 export default function ChallengePostsScreen() {
-  const { id, open, openIndex, winnerUserId, winnerUsername } = useLocalSearchParams();
+  const { id, open, openIndex, winnerUserId, winnerUsername, participantUserId, participantUsername } =
+    useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
   const isWinnerDetailView = !!winnerUserId;
+  const isParticipantDetailView = !!participantUserId;
 
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,17 +147,31 @@ export default function ChallengePostsScreen() {
       }
 
       setError(null);
-      setEmptyMessage(isWinnerDetailView ? 'No winner posts available yet' : 'No posts in this challenge yet');
+      setEmptyMessage(
+        isWinnerDetailView
+          ? 'No winner posts available yet'
+          : isParticipantDetailView
+            ? 'No posts from this participant yet'
+            : 'No posts in this challenge yet',
+      );
 
       const limit = page === 1 ? INITIAL_LIMIT : LOAD_MORE_LIMIT;
       const response = isWinnerDetailView
         ? await challengesApi.getWinnerPosts(id as string, String(winnerUserId), page, limit)
-        : await challengesApi.getPosts(id as string, page, limit);
+        : isParticipantDetailView
+          ? await challengesApi.getParticipantPosts(id as string, String(participantUserId), page, limit)
+          : await challengesApi.getPosts(id as string, page, limit);
 
       if (response.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const orderedBy = response.data?.ordered_by;
-        const ended = isWinnerDetailView || orderedBy === 'likes_at_challenge_end' || orderedBy === 'winner_rank';
+        const challengeStatus = response.data?.challenge_status;
+        const ended =
+          isWinnerDetailView ||
+          challengeStatus === 'ended' ||
+          challengeStatus === 'stopped' ||
+          orderedBy === 'likes_at_challenge_end' ||
+          orderedBy === 'winner_rank';
         const map: Record<string, number> = {};
         rawItems.forEach((cp: any) => {
           const postId = cp.post?.id || cp.post_id;
@@ -158,9 +180,10 @@ export default function ChallengePostsScreen() {
         });
 
         const list = filterHlsReady(response.data?.posts || []) as Post[];
-        const postsList = sortChallengePosts(list, map, rawItems.length > 0);
+        const postsList = sortChallengePosts(list, map, ended);
         const shouldUseFallback =
           postsList.length === 0 &&
+          !isParticipantDetailView &&
           response.data?.winners_visible === false &&
           (isWinnerDetailView ||
             response.data?.challenge_status === 'ended' ||
@@ -187,7 +210,9 @@ export default function ChallengePostsScreen() {
           setEmptyMessage(
             isWinnerDetailView
               ? 'No winner posts available yet'
-              : 'No posts in this challenge yet',
+              : isParticipantDetailView
+                ? 'No posts from this participant yet'
+                : 'No posts in this challenge yet',
           );
           return;
         }
@@ -227,7 +252,9 @@ export default function ChallengePostsScreen() {
           setEmptyMessage(
             isWinnerDetailView
               ? 'No winner posts available yet'
-              : 'No posts in this challenge yet',
+              : isParticipantDetailView
+                ? 'No posts from this participant yet'
+                : 'No posts in this challenge yet',
           );
           return;
         }
@@ -252,6 +279,11 @@ export default function ChallengePostsScreen() {
               const fallbackUserId = post?.user?.id || post?.user_id;
               return fallbackUserId === String(winnerUserId);
             })
+          : isParticipantDetailView
+            ? fallbackData.posts.filter((post: any) => {
+                const fallbackUserId = post?.user?.id || post?.user_id;
+                return fallbackUserId === String(participantUserId);
+              })
           : fallbackData.posts;
         const sortedFallbackPosts = sortChallengePosts(
           filteredFallbackPosts as Post[],
@@ -266,7 +298,9 @@ export default function ChallengePostsScreen() {
         setEmptyMessage(
           isWinnerDetailView
             ? 'No winner posts available yet'
-            : 'No posts in this challenge yet',
+            : isParticipantDetailView
+              ? 'No posts from this participant yet'
+              : 'No posts in this challenge yet',
         );
         return;
       }
@@ -286,7 +320,7 @@ export default function ChallengePostsScreen() {
 
   useEffect(() => {
     loadPosts(1);
-  }, [id, winnerUserId]);
+  }, [id, winnerUserId, participantUserId]);
 
   // If coming from challenge detail tile tap, auto-open fullscreen at index
   useEffect(() => {
@@ -397,6 +431,9 @@ export default function ChallengePostsScreen() {
   // PostCard component for grid display — STATIC ONLY, no video playback
   const PostCard = ({ item, index }: { item: Post; index: number }) => {
     const isVideo = item.type === 'video' || !!(item.video_url);
+    const visibleLikes = isChallengeEnded
+      ? likesDuringChallengeMap[item.id] ?? item.likes ?? item.like_count ?? 0
+      : item.likes ?? item.like_count ?? 0;
 
     // THUMBNAIL PRIORITY: server thumbnail_url > fallback image > placeholder
     const serverThumbnail = getThumbnailUrl(item);
@@ -424,7 +461,7 @@ export default function ChallengePostsScreen() {
         <View style={styles.postOverlay}>
           <View style={styles.postStats}>
             <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{likesDuringChallengeMap[item.id] ?? item.likes ?? item.like_count ?? 0}</Text>
+            <Text style={styles.postStatText}>{visibleLikes}</Text>
           </View>
           {isVideo && (
             <View style={styles.playIcon}>
@@ -447,7 +484,7 @@ export default function ChallengePostsScreen() {
     );
   }
 
-  if (error && posts.length === 0 && !isWinnerDetailView) {
+  if (error && posts.length === 0 && !isWinnerDetailView && !isParticipantDetailView) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.errorContainer}>
@@ -470,10 +507,16 @@ export default function ChallengePostsScreen() {
           <Text style={styles.screenTitle} numberOfLines={1}>
             {isWinnerDetailView
               ? `@${String(winnerUsername || 'winner')} Winner Posts`
-              : 'Competition Posts'}
+              : isParticipantDetailView
+                ? `@${String(participantUsername || 'participant')} Competition Posts`
+                : 'Competition Posts'}
           </Text>
           <Text style={styles.screenSubtitle} numberOfLines={1}>
-            {isWinnerDetailView ? 'Official winning posts for this user' : 'Posts ordered for this competition'}
+            {isWinnerDetailView
+              ? 'Official winning posts for this user'
+              : isParticipantDetailView
+                ? 'Posts submitted by this participant in the competition'
+                : 'Posts ordered for this competition'}
           </Text>
         </View>
       </View>

@@ -1608,6 +1608,62 @@ export const challengesApi = {
     }
   },
 
+  getParticipantPosts: async (
+    challengeId: string,
+    userId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.get(
+        `/api/challenges/${challengeId}/participants/${userId}/posts?page=${page}&limit=${limit}`,
+      );
+      const apiResponse = response.data;
+      const rawItems = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
+      const posts = rawItems.map((item: any) => {
+        const post = item.post || item;
+        return normalizePost({
+          ...post,
+          winner_rank: item.winner_rank ?? post.winner_rank,
+          likes_during_challenge:
+            item.likes_during_challenge ??
+            item.likes_at_challenge_end ??
+            post.likes_during_challenge,
+          total_likes: item.total_likes ?? post.total_likes ?? post.likes,
+          submitted_at: item.submitted_at ?? post.submitted_at,
+          challengePosts: post?.challengePosts ?? post?.challenge_posts,
+          challenge_posts: post?.challenge_posts ?? post?.challengePosts,
+        });
+      });
+
+      return {
+        status: apiResponse?.status ?? 'success',
+        message: apiResponse?.message || 'Participant posts fetched successfully',
+        data: {
+          posts,
+          rawItems,
+          pagination: apiResponse?.pagination || {},
+          winners_visible: apiResponse?.winners_visible ?? false,
+          winners_confirmed_at: apiResponse?.winners_confirmed_at ?? null,
+          challenge_status: apiResponse?.challenge_status,
+        },
+      };
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch participant posts',
+        data: {
+          posts: [],
+          rawItems: [],
+          pagination: {},
+          winners_visible: false,
+          winners_confirmed_at: null,
+          challenge_status: undefined,
+        },
+      };
+    }
+  },
+
   getPosts: async (challengeId: string, page = 1, limit = 20): Promise<ApiResponse<any>> => {
     try {
       const response = await apiClient.get(`/api/challenges/${challengeId}/posts?page=${page}&limit=${limit}`);
