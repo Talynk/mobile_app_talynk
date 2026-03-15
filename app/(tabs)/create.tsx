@@ -2149,7 +2149,7 @@ export default function CreatePostScreen() {
                           </View>
 
                           <Text style={[styles.subLabel, styles.challengeListLabel, { color: C.textSecondary }]}>
-                            Choose a Competition from the ones below you've joined sofar
+                            Choose a Competition from the ones below you've joined so far
                           </Text>
 
                           <ScrollView
