@@ -16,6 +16,7 @@ import {
   Keyboard,
   Pressable,
   ActionSheetIOS,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { postsApi } from '@/lib/api';
@@ -680,7 +681,10 @@ export default function CommentsModal({
       animationType="slide"
       onRequestClose={() => setShowReportModal(false)}
     >
-      <View style={styles.reportOverlay}>
+      <KeyboardAvoidingView
+        style={styles.reportOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={styles.reportContainer}>
           <View style={styles.reportHeader}>
             <Text style={styles.reportTitle}>Report Comment</Text>
@@ -745,7 +749,7 @@ export default function CommentsModal({
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 

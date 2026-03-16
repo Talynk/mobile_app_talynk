@@ -175,7 +175,7 @@ export default function CategoryScreen() {
     if (post) {
       try {
         const url = getPostMediaUrl(post) || (post as any).fullUrl || '';
-        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talynk', url: url || undefined });
+        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talentix', url: url || undefined });
       } catch {}
     }
   }, [posts]);

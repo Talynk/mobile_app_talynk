@@ -288,6 +288,14 @@ function RootLayoutNav() {
                   <Stack.Screen name="profile-feed/[userId]" options={{ headerShown: false }} />
                   <Stack.Screen name="search" options={{ headerShown: false }} />
                   <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/change-password" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/delete-account" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/sessions" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/help-center" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/report-problem" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/about" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/privacy-policy" options={{ headerShown: false }} />
                 </Stack>
               </View>
               <StatusBar style="light" />

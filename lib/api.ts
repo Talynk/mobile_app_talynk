@@ -2374,3 +2374,183 @@ export const reportsApi = {
     }
   },
 };
+
+// Settings API — Password change, account deletion, sessions, logout
+export const settingsApi = {
+  // Step 1: Request OTP for password change
+  changePasswordRequestOtp: async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/password/change/request-otp', {
+        currentPassword,
+        newPassword,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      return {
+        status: 'error',
+        message: apiData?.message || error.message || 'Failed to request password change OTP',
+        data: { remainingSeconds: apiData?.data?.remainingSeconds },
+      };
+    }
+  },
+
+  // Step 2: Verify OTP and change password
+  changePasswordVerifyOtp: async (
+    otpCode: string,
+    newPassword: string
+  ): Promise<ApiResponse<{ code?: string }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/password/change/verify-otp', {
+        otpCode,
+        newPassword,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      return {
+        status: 'error',
+        message: apiData?.message || error.message || 'Failed to verify OTP',
+        data: { code: apiData?.data?.code },
+      };
+    }
+  },
+
+  // Step 1: Request OTP for account deletion
+  deleteAccountRequestOtp: async (
+    password: string
+  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/account/delete/request-otp', {
+        password,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      return {
+        status: 'error',
+        message: apiData?.message || error.message || 'Failed to request account deletion OTP',
+        data: { remainingSeconds: apiData?.data?.remainingSeconds },
+      };
+    }
+  },
+
+  // Step 2: Verify OTP and delete account
+  deleteAccount: async (
+    password: string,
+    otpCode: string
+  ): Promise<ApiResponse<{ code?: string }>> => {
+    try {
+      const response = await apiClient.post('/api/auth/account/delete', {
+        password,
+        otpCode,
+      });
+      return response.data;
+    } catch (error: any) {
+      const apiData = error.response?.data;
+      return {
+        status: 'error',
+        message: apiData?.message || error.message || 'Failed to delete account',
+        data: { code: apiData?.data?.code },
+      };
+    }
+  },
+
+  // List active sessions
+  getSessions: async (): Promise<ApiResponse<{ sessions: any[] }>> => {
+    try {
+      const response = await apiClient.get('/api/user/sessions');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch sessions',
+        data: { sessions: [] },
+      };
+    }
+  },
+
+  // Revoke a specific session
+  revokeSession: async (sessionId: string): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.delete(`/api/user/sessions/${sessionId}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to revoke session',
+        data: {},
+      };
+    }
+  },
+
+  // Logout current session (backend)
+  logout: async (): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post('/api/auth/logout');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Logout failed',
+        data: {},
+      };
+    }
+  },
+
+  // Logout from all sessions
+  logoutAll: async (): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post('/api/auth/logout/all');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Logout all failed',
+        data: {},
+      };
+    }
+  },
+};
+
+// Support API — Submit and view support issues
+export const supportApi = {
+  submitIssue: async (
+    subject: string,
+    message: string,
+    category?: 'BUG' | 'PAYMENT' | 'GENERAL',
+    metadata?: Record<string, any>
+  ): Promise<ApiResponse<any>> => {
+    try {
+      const response = await apiClient.post('/api/support/issues', {
+        subject,
+        message,
+        category,
+        metadata,
+      });
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to submit support issue',
+        data: {},
+      };
+    }
+  },
+
+  getMyIssues: async (page = 1, limit = 10): Promise<ApiResponse<{ issues: any[]; pagination?: any }>> => {
+    try {
+      const response = await apiClient.get(`/api/support/issues/my?page=${page}&limit=${limit}`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to fetch support issues',
+        data: { issues: [], pagination: {} },
+      };
+    }
+  },
+};

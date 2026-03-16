@@ -235,8 +235,8 @@ export default function FeedScreen() {
       try {
         const mediaUrl = getPostMediaUrl(post);
         await Share.share({
-          message: mediaUrl || post.caption || 'Check out this post on Talynk!',
-          title: 'Check out this post on Talynk!',
+          message: mediaUrl || post.caption || 'Check out this post on Talentix!',
+          title: 'Check out this post on Talentix!',
           url: mediaUrl || undefined,
         });
       } catch {}

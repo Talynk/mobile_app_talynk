@@ -552,7 +552,7 @@ export default function RegisterScreen() {
 
         <View style={styles.header}>
           <Text style={[styles.title, { color: C.text }]}>Create your account</Text>
-          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Sign up to join Talynk.</Text>
+          <Text style={[styles.subtitle, { color: C.textSecondary }]}>Sign up to join Talentix.</Text>
         </View>
 
         {/* Alerts */}
@@ -1065,7 +1065,7 @@ export default function RegisterScreen() {
               <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
             </View>
             <Text style={[styles.successTitle, { color: '#22c55e' }]}>Registration Successful!</Text>
-            <Text style={[styles.successMessage, { color: C.textSecondary }]}>Your account has been created successfully. You can now sign in to start using Talynk.</Text>
+            <Text style={[styles.successMessage, { color: C.textSecondary }]}>Your account has been created successfully. You can now sign in to start using Talentix.</Text>
             <TouchableOpacity
               style={styles.goToLoginButton}
               onPress={() => {

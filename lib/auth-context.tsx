@@ -183,6 +183,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    // Hit backend to revoke the session server-side
+    try {
+      const { settingsApi } = require('./api');
+      await settingsApi.logout();
+    } catch (error) {
+      // Silently ignore — local cleanup still happens
+      console.warn('[Auth] Backend logout failed (session may already be expired):', error);
+    }
     try {
       await Promise.all([
         AsyncStorage.removeItem('talynk_token'),

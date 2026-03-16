@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { reportsApi } from '../lib/api';
@@ -146,7 +148,10 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
       animationType="slide"
       onRequestClose={handleClose}
     >
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView
+        style={styles.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
@@ -251,7 +256,7 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
             </View>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
