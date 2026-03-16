@@ -16,6 +16,7 @@ import {
   Platform,
   PanResponder,
   Modal,
+  InteractionManager,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -53,11 +54,40 @@ const VIDEO_BUFFER_OPTIONS = Platform.select({
 const PLAYBACK_STALL_MS = 2000;
 const INITIAL_PLAYBACK_STALL_MS = 6000;
 const PLAYBACK_STALL_BUFFER_GAP = 0.35;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
   if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
   return num.toString();
+};
+
+const getAdFeaturedDurationText = (post: any): string | null => {
+  const rawExpiry =
+    post?.expiresAt ||
+    post?.expires_at ||
+    post?.featured_until ||
+    post?.featuredUntil ||
+    null;
+
+  if (!rawExpiry) {
+    return null;
+  }
+
+  const expiryTimestamp = new Date(rawExpiry).getTime();
+  if (!Number.isFinite(expiryTimestamp)) {
+    return null;
+  }
+
+  const remainingMs = expiryTimestamp - Date.now();
+  if (remainingMs <= 0) {
+    return 'Featured ends today';
+  }
+
+  const remainingDays = Math.max(1, Math.ceil(remainingMs / DAY_IN_MS));
+  return remainingDays === 1
+    ? 'Featured for 1 more day'
+    : `Featured for ${remainingDays} more days`;
 };
 
 const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
@@ -76,6 +106,189 @@ const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: nu
     </View>
   );
 };
+
+type NativeFeedVideoHandle = {
+  play: () => void;
+  pause: () => void;
+  setMuted: (muted: boolean) => void;
+  seekTo: (time: number) => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  getBufferedPosition: () => number;
+  isPlaying: () => boolean;
+};
+
+type NativeFeedVideoProps = {
+  source: any;
+  contentFit: 'contain' | 'cover' | 'fill';
+  isMuted: boolean;
+  shouldPlay: boolean;
+  onFirstFrameRender: () => void;
+  onStatusChange: (event: { status?: string; error?: unknown }) => void;
+  onPlayingChange: (isPlaying: boolean) => void;
+  onPlayerReady: () => void;
+  onPlayerInvalid: () => void;
+};
+
+class VideoMountBoundary extends React.Component<
+  { boundaryKey: string; onError: () => void; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  componentDidUpdate(prevProps: Readonly<{ boundaryKey: string }>) {
+    if (prevProps.boundaryKey !== this.props.boundaryKey && this.state.hasError) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
+const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoProps>(
+  (
+    {
+      source,
+      contentFit,
+      isMuted,
+      shouldPlay,
+      onFirstFrameRender,
+      onStatusChange,
+      onPlayingChange,
+      onPlayerReady,
+      onPlayerInvalid,
+    },
+    ref,
+  ) => {
+    const player = useVideoPlayer(source, (instance) => {
+      if (!instance) {
+        return;
+      }
+
+      try {
+        instance.loop = true;
+        instance.muted = shouldPlay ? isMuted : true;
+        instance.staysActiveInBackground = false;
+        instance.bufferOptions = VIDEO_BUFFER_OPTIONS;
+      } catch (e) {
+        console.warn('[FeedVideo] Error configuring player:', e);
+      }
+    });
+
+    React.useEffect(() => {
+      if (player) {
+        onPlayerReady();
+      } else {
+        onPlayerInvalid();
+      }
+
+      return () => {
+        onPlayerInvalid();
+      };
+    }, [onPlayerInvalid, onPlayerReady, player]);
+
+    React.useEffect(() => {
+      if (!player) return;
+
+      try {
+        player.muted = shouldPlay ? isMuted : true;
+        if (shouldPlay) {
+          player.play();
+        } else {
+          player.pause();
+        }
+      } catch (_) {}
+    }, [isMuted, player, shouldPlay]);
+
+    React.useEffect(() => {
+      if (!player) return;
+
+      try {
+        const sub = player.addListener('playingChange', (event: { isPlaying: boolean }) => {
+          onPlayingChange(event.isPlaying);
+        });
+        return () => {
+          try { sub.remove(); } catch (_) {}
+        };
+      } catch (_) {
+        return () => {};
+      }
+    }, [onPlayingChange, player]);
+
+    React.useEffect(() => {
+      if (!player) return;
+
+      try {
+        const sub = player.addListener('statusChange', (event: { status?: string; error?: unknown }) => {
+          onStatusChange(event);
+        });
+        return () => {
+          try { sub.remove(); } catch (_) {}
+        };
+      } catch (_) {
+        return () => {};
+      }
+    }, [onStatusChange, player]);
+
+    React.useImperativeHandle(ref, () => ({
+      play: () => {
+        try { player?.play(); } catch (_) {}
+      },
+      pause: () => {
+        try { player?.pause(); } catch (_) {}
+      },
+      setMuted: (muted: boolean) => {
+        try {
+          if (player) {
+            player.muted = muted;
+          }
+        } catch (_) {}
+      },
+      seekTo: (time: number) => {
+        try {
+          if (player) {
+            player.currentTime = time;
+          }
+        } catch (_) {}
+      },
+      getCurrentTime: () => player?.currentTime || 0,
+      getDuration: () => player?.duration || 0,
+      getBufferedPosition: () => player?.bufferedPosition ?? -1,
+      isPlaying: () => !!player?.playing,
+    }), [player]);
+
+    if (!player) {
+      return null;
+    }
+
+    return (
+      <VideoView
+        player={player}
+        style={styles.media}
+        contentFit={contentFit}
+        nativeControls={false}
+        useExoShutter={false}
+        onFirstFrameRender={onFirstFrameRender}
+        {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as any } : {})}
+      />
+    );
+  }
+);
+
+NativeFeedVideo.displayName = 'NativeFeedVideo';
 
 export interface FullscreenFeedPostItemProps {
   item: Post;
@@ -143,7 +356,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const wasActiveRef = useRef(isActive);
   const playerValidRef = useRef(false);
   const isMountedRef = useRef(true);
+  const videoControllerRef = useRef<NativeFeedVideoHandle | null>(null);
+  const videoMountRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoMountRetryCountRef = useRef(0);
   const [isPlayerValid, setIsPlayerValid] = useState(false);
+  const [canMountVideoPlayer, setCanMountVideoPlayer] = useState(false);
+  const [videoMountBoundaryKey, setVideoMountBoundaryKey] = useState(0);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [usingImageFallback, setUsingImageFallback] = useState(false);
@@ -186,19 +404,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       : null;
   const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
 
-  const videoPlayer = useVideoPlayer(videoPlayerSource, (player) => {
-    if (player) {
-      try {
-        player.loop = true;
-        player.muted = isMuted;
-        player.staysActiveInBackground = false;
-        player.bufferOptions = VIDEO_BUFFER_OPTIONS;
-      } catch (e) {
-        console.warn('[VideoPlayer] Error setting player properties:', e);
-      }
-    }
-  });
-
   const clearPlaybackStall = useCallback((options?: { resume?: boolean }) => {
     networkStatus.reportOnline({ source: playbackStallSource });
 
@@ -207,15 +412,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     stalledAtRef.current = null;
     lastProgressAtRef.current = Date.now();
 
-    if (options?.resume && videoPlayer && isActive && isAppActive && !pausedByUser) {
+    const controller = videoControllerRef.current;
+    if (options?.resume && controller && isActive && isAppActive && !pausedByUser) {
       try {
-        if (stalledAt != null && Math.abs((videoPlayer.currentTime || 0) - stalledAt) > 0.75) {
-          videoPlayer.currentTime = stalledAt;
+        if (stalledAt != null && Math.abs((controller.getCurrentTime() || 0) - stalledAt) > 0.75) {
+          controller.seekTo(stalledAt);
         }
-        videoPlayer.play();
+        controller.play();
       } catch (_) {}
     }
-  }, [isActive, isAppActive, pausedByUser, playbackStallSource, videoPlayer]);
+  }, [isActive, isAppActive, pausedByUser, playbackStallSource]);
 
   const markPlaybackStall = useCallback((currentTime: number) => {
     if (awaitingNetworkRecoveryRef.current) {
@@ -234,26 +440,21 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [playbackStallSource]);
 
   useEffect(() => {
-    if (videoPlayer) {
-      playerValidRef.current = true;
-      if (isMountedRef.current) setIsPlayerValid(true);
-    } else {
-      playerValidRef.current = false;
-      if (isMountedRef.current) setIsPlayerValid(false);
-    }
-  }, [videoPlayer]);
-
-  useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       playerValidRef.current = false;
+      videoControllerRef.current = null;
+      if (videoMountRetryTimeoutRef.current) {
+        clearTimeout(videoMountRetryTimeoutRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     if (!videoPlayerSource) {
       playerValidRef.current = false;
+      videoControllerRef.current = null;
       if (isMountedRef.current) setIsPlayerValid(false);
     }
   }, [videoPlayerSource]);
@@ -276,6 +477,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     lastProgressAtRef.current = Date.now();
     stalledAtRef.current = null;
     awaitingNetworkRecoveryRef.current = false;
+    videoMountRetryCountRef.current = 0;
+    setCanMountVideoPlayer(false);
+    setVideoMountBoundaryKey(0);
     networkStatus.reportOnline({ source: playbackStallSource });
   }, [item.id, playbackStallSource]);
 
@@ -285,25 +489,137 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     };
   }, [playbackStallSource]);
 
-  // Play/pause based on active state
   useEffect(() => {
-    if (!videoPlayer || !playerValidRef.current) return;
+    if (!shouldLoadVideo) {
+      setCanMountVideoPlayer(false);
+      playerValidRef.current = false;
+      videoControllerRef.current = null;
+      if (isMountedRef.current) {
+        setIsPlayerValid(false);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    let frameId = 0;
+    let interactionHandle: { cancel?: () => void } | null = null;
+
+    frameId = requestAnimationFrame(() => {
+      interactionHandle = InteractionManager.runAfterInteractions(() => {
+        if (cancelled) return;
+        setCanMountVideoPlayer(true);
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      interactionHandle?.cancel?.();
+    };
+  }, [item.id, shouldLoadVideo]);
+
+  const handleNativePlayerReady = useCallback(() => {
+    playerValidRef.current = true;
+    if (isMountedRef.current) {
+      setIsPlayerValid(true);
+    }
+  }, []);
+
+  const handleNativePlayerInvalid = useCallback(() => {
+    playerValidRef.current = false;
+    videoControllerRef.current = null;
+    if (isMountedRef.current) {
+      setIsPlayerValid(false);
+    }
+  }, []);
+
+  const handleNativePlayerMountError = useCallback(() => {
+    handleNativePlayerInvalid();
+    if (isMountedRef.current) {
+      setCanMountVideoPlayer(false);
+      setVideoReady(false);
+      setIsPlaying(false);
+    }
+
+    if (videoMountRetryTimeoutRef.current) {
+      clearTimeout(videoMountRetryTimeoutRef.current);
+      videoMountRetryTimeoutRef.current = null;
+    }
+
+    if (!shouldLoadVideo || videoMountRetryCountRef.current >= 1) {
+      return;
+    }
+
+    videoMountRetryCountRef.current += 1;
+    videoMountRetryTimeoutRef.current = setTimeout(() => {
+      if (!isMountedRef.current || !shouldLoadVideo) {
+        return;
+      }
+      setVideoMountBoundaryKey((prev) => prev + 1);
+      setCanMountVideoPlayer(true);
+    }, 450);
+  }, [handleNativePlayerInvalid, shouldLoadVideo]);
+
+  const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
+    if (isMountedRef.current) {
+      setIsPlaying(nextPlaying);
+      if (nextPlaying) {
+        lastProgressAtRef.current = Date.now();
+        if (awaitingNetworkRecoveryRef.current) {
+          clearPlaybackStall();
+        }
+      }
+    }
+  }, [clearPlaybackStall]);
+
+  const handleNativeStatusChange = useCallback((event: { status?: string; error?: unknown }) => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    if (event?.status) {
+      playbackStatusRef.current = event.status as 'idle' | 'loading' | 'readyToPlay' | 'error';
+    }
+
+    if (event?.error) {
+      setIsPlaying(false);
+      const currentTime = videoControllerRef.current?.getCurrentTime() || lastPlaybackTimeRef.current || 0;
+      if (videoReady || lastPlaybackTimeRef.current > 0.1) {
+        markPlaybackStall(currentTime);
+      }
+      return;
+    }
+
+    if (event?.status === 'readyToPlay') {
+      setVideoError(false);
+      setDecoderErrorDetected(false);
+      if (awaitingNetworkRecoveryRef.current) {
+        clearPlaybackStall({ resume: true });
+      }
+    }
+  }, [clearPlaybackStall, markPlaybackStall, videoReady]);
+
+  useEffect(() => {
+    const controller = videoControllerRef.current;
+    if (!controller || !playerValidRef.current) return;
     try {
       if (isActive && isAppActive && !decoderErrorDetected && !pausedByUser) {
-        videoPlayer.muted = isMuted;
-        videoPlayer.play();
+        controller.setMuted(isMuted);
+        controller.play();
       } else {
-        videoPlayer.muted = true;
-        videoPlayer.pause();
+        controller.setMuted(true);
+        controller.pause();
       }
       if (isActive && !wasActiveRef.current) {
-        videoPlayer.currentTime = 0;
+        controller.seekTo(0);
       }
       wasActiveRef.current = isActive;
     } catch (e) {
       playerValidRef.current = false;
     }
-  }, [isActive, isAppActive, isMuted, videoPlayer, decoderErrorDetected, index, pausedByUser]);
+  }, [isActive, isAppActive, isMuted, decoderErrorDetected, index, pausedByUser, isPlayerValid, canMountVideoPlayer]);
 
   // Fade out thumbnail when video is playing and ready
   useEffect(() => {
@@ -318,76 +634,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [isActive, isPlaying, videoReady, thumbnailOpacity]);
 
-  // Track playing state
   useEffect(() => {
-    if (!videoPlayer || !playerValidRef.current) return;
-    try {
-      const sub = videoPlayer.addListener('playingChange', (event: { isPlaying: boolean }) => {
-        if (isMountedRef.current) {
-          setIsPlaying(event.isPlaying);
-          if (event.isPlaying) {
-            lastProgressAtRef.current = Date.now();
-            if (awaitingNetworkRecoveryRef.current) {
-              clearPlaybackStall();
-            }
-          }
-        }
-      });
-      return () => {
-        try { sub.remove(); } catch (_) {}
-      };
-    } catch (_) {
-      playerValidRef.current = false;
-      return () => {};
-    }
-  }, [clearPlaybackStall, videoPlayer, isActive]);
-
-  useEffect(() => {
-    if (!videoPlayer || !playerValidRef.current) return;
-    try {
-      const sub = videoPlayer.addListener('statusChange', (event: { status?: string; error?: unknown }) => {
-        if (!isMountedRef.current) {
-          return;
-        }
-
-        if (event?.status) {
-          playbackStatusRef.current = event.status as 'idle' | 'loading' | 'readyToPlay' | 'error';
-        }
-
-        if (event?.error) {
-          setIsPlaying(false);
-          if (videoReady || lastPlaybackTimeRef.current > 0.1) {
-            markPlaybackStall(videoPlayer.currentTime || lastPlaybackTimeRef.current || 0);
-          }
-          return;
-        }
-
-        if (event?.status === 'readyToPlay') {
-          setVideoError(false);
-          setDecoderErrorDetected(false);
-          if (awaitingNetworkRecoveryRef.current) {
-            clearPlaybackStall({ resume: true });
-          }
-        }
-      });
-
-      return () => {
-        try { sub.remove(); } catch (_) {}
-      };
-    } catch (_) {
-      playerValidRef.current = false;
-      return () => {};
-    }
-  }, [clearPlaybackStall, markPlaybackStall, videoPlayer]);
-
-  // Track progress
-  useEffect(() => {
-    if (!videoPlayer || !isActive) return;
+    if (!isActive || !isPlayerValid) return;
     const interval = setInterval(() => {
       try {
-        const ct = videoPlayer.currentTime || 0;
-        const dur = videoPlayer.duration || 0;
-        const bufferedPosition = videoPlayer.bufferedPosition ?? -1;
+        const controller = videoControllerRef.current;
+        if (!controller) {
+          return;
+        }
+        const ct = controller.getCurrentTime() || 0;
+        const dur = controller.getDuration() || 0;
+        const bufferedPosition = controller.getBufferedPosition();
 
         if (dur > 0) {
           setVideoProgress(ct / dur);
@@ -428,10 +685,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       } catch (_) {}
     }, 250);
     return () => clearInterval(interval);
-  }, [clearPlaybackStall, isActive, markPlaybackStall, pausedByUser, shouldLoadVideo, videoPlayer, videoReady]);
+  }, [clearPlaybackStall, isActive, isPlayerValid, markPlaybackStall, pausedByUser, shouldLoadVideo, videoReady]);
 
   useEffect(() => {
-    if (!videoPlayer) {
+    if (!isPlayerValid) {
       return;
     }
 
@@ -446,7 +703,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     });
 
     return unsubscribe;
-  }, [clearPlaybackStall, videoPlayer]);
+  }, [clearPlaybackStall, isPlayerValid]);
 
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {
@@ -454,20 +711,23 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       const delay = Math.pow(2, retryCount) * 1000;
       setTimeout(() => {
         setVideoError(false);
+        setCanMountVideoPlayer(true);
+        setVideoMountBoundaryKey((prev) => prev + 1);
         setRetryCount(prev => prev + 1);
       }, delay);
     }
   }, [retryCount]);
 
   const handleTapToPause = () => {
-    if (!videoPlayer || !isPlayerValid) return;
+    const controller = videoControllerRef.current;
+    if (!controller || !isPlayerValid) return;
     try {
-      if (videoPlayer.playing) {
-        videoPlayer.pause();
+      if (controller.isPlaying()) {
+        controller.pause();
         setPausedByUser(true);
         pauseIndicatorOpacity.setValue(1);
       } else {
-        videoPlayer.play();
+        controller.play();
         setPausedByUser(false);
         pauseIndicatorOpacity.setValue(0);
       }
@@ -476,8 +736,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const handleMuteToggle = () => {
     const newMuted = toggleMute();
-    if (videoPlayer) {
-      try { videoPlayer.muted = newMuted; } catch (_) {}
+    if (videoControllerRef.current) {
+      try { videoControllerRef.current.setMuted(newMuted); } catch (_) {}
     }
     muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
     muteOpacity.setValue(1);
@@ -530,16 +790,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [onComment, item.id]);
 
   const handleProgressBarSeek = useCallback((locationX: number) => {
-    if (!videoPlayer || !playerValidRef.current) return;
+    const controller = videoControllerRef.current;
+    if (!controller || !playerValidRef.current) return;
     const ratio = Math.max(0, Math.min(1, locationX / screenWidth));
     try {
-      const dur = videoPlayer.duration || 0;
+      const dur = controller.getDuration() || 0;
       if (dur > 0) {
-        videoPlayer.currentTime = ratio * dur;
+        controller.seekTo(ratio * dur);
         setVideoProgress(ratio);
       }
     } catch (_) {}
-  }, [videoPlayer, screenWidth]);
+  }, [screenWidth]);
 
   const seekRef = useRef((_x: number) => {});
   seekRef.current = handleProgressBarSeek;
@@ -568,32 +829,42 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const displayLikeCount = cachedLikeCount !== undefined ? cachedLikeCount : (item.like_count ?? item.likes ?? 0);
   const isAd = (item as any).isAd === true;
   const adTitle = (item as any).title || (item as any).ad_title || '';
+  const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
+  const mediaContentFit = isAd ? 'contain' : 'cover';
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
-            <Pressable style={styles.mediaWrapper} onPress={handleTapToPause}>
+            <Pressable style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]} onPress={handleTapToPause}>
               {thumbnailOrPlaceholderUrl ? (
                 <Animated.Image
                   source={{ uri: thumbnailOrPlaceholderUrl }}
                   style={[styles.media, styles.mediaThumbnailLayer, { opacity: thumbnailOpacity }]}
-                  resizeMode="cover"
+                  resizeMode={mediaContentFit}
                 />
               ) : null}
 
-              {videoPlayer && isPlayerValid && shouldLoadVideo && !videoError && (
+              {canMountVideoPlayer && shouldLoadVideo && !videoError && videoPlayerSource && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
-                  <VideoView
-                    player={videoPlayer}
-                    style={styles.media}
-                    contentFit="cover"
-                    nativeControls={false}
-                    useExoShutter={false}
-                    onFirstFrameRender={() => setVideoReady(true)}
-                    {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as any } : {})}
-                  />
+                  <VideoMountBoundary
+                    boundaryKey={`${item.id}:${videoMountBoundaryKey}`}
+                    onError={handleNativePlayerMountError}
+                  >
+                    <NativeFeedVideo
+                      ref={videoControllerRef}
+                      source={videoPlayerSource}
+                      contentFit={mediaContentFit}
+                      isMuted={isMuted}
+                      shouldPlay={isActive && isAppActive && !decoderErrorDetected && !pausedByUser}
+                      onFirstFrameRender={() => setVideoReady(true)}
+                      onStatusChange={handleNativeStatusChange}
+                      onPlayingChange={handleNativePlayingChange}
+                      onPlayerReady={handleNativePlayerReady}
+                      onPlayerInvalid={handleNativePlayerInvalid}
+                    />
+                  </VideoMountBoundary>
                 </View>
               )}
 
@@ -626,12 +897,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </Pressable>
           </>
         ) : (
-          <View style={styles.mediaWrapper}>
+          <View style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]}>
             {imageDisplayUrl && !imageError ? (
               <Image
                 source={{ uri: imageDisplayUrl }}
                 style={styles.media}
-                resizeMode="cover"
+                resizeMode={mediaContentFit}
                 onError={() => {
                   if (!usingImageFallback && fallbackImageUrl) {
                     setUsingImageFallback(true);
@@ -710,6 +981,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 <View style={styles.sponsoredPill}>
                   <Text style={styles.sponsoredPillText}>Sponsored</Text>
                 </View>
+                {adFeaturedDurationText ? (
+                  <View style={styles.sponsoredDurationPill}>
+                    <Text style={styles.sponsoredDurationText}>{adFeaturedDurationText}</Text>
+                  </View>
+                ) : null}
               </View>
             )}
             {!isAd && (
@@ -718,7 +994,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               </TouchableOpacity>
             )}
             {isAd && !!adTitle && (
-              <Text style={styles.username}>{adTitle}</Text>
+              <Text style={styles.adTitle}>{adTitle}</Text>
             )}
             {isCompetitionPost && (
               <View style={styles.challengeTag}>
@@ -853,6 +1129,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'transparent',
     overflow: 'visible',
+  },
+  adMediaWrapper: {
+    backgroundColor: '#000',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
   media: {
     width: '100%',
@@ -1052,6 +1333,7 @@ const styles = StyleSheet.create({
   sponsoredMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 6,
   },
@@ -1068,6 +1350,19 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
+  sponsoredDurationPill: {
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.35)',
+  },
+  sponsoredDurationText: {
+    color: '#dbeafe',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   sponsoredByText: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 11,
@@ -1078,6 +1373,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+    marginBottom: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  adTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 22,
     marginBottom: 6,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },

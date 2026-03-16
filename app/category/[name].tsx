@@ -40,6 +40,7 @@ import {
   VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
 
 const POSTS_PER_PAGE = 20;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -131,6 +132,7 @@ export default function CategoryScreen() {
       const res = await postsApi.getByCategory(categoryId!, pageParam as number, POSTS_PER_PAGE);
       if (res.status !== 'success') throw new Error(res.message);
       const rawPosts = res.data?.posts || [];
+      primePostDetailsCache(rawPosts);
       const posts = filterHlsReady(rawPosts) as Post[];
       const pagination = res.data?.pagination || {};
       const hasNext = pagination.hasNextPage !== false && rawPosts.length === POSTS_PER_PAGE;

@@ -89,6 +89,9 @@ const defaultFormData = {
     scoring_criteria: '',
 };
 
+const BEAUTY_CONTENT_WARNING =
+    'Posting nudity or exposing private parts is not permitted on this platform.';
+
 function parseOrganizerContact(full: string): { code: string; digits: string } {
     if (!full || !full.trim()) return { code: '+250', digits: '' };
     const s = full.trim();
@@ -116,6 +119,23 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
     const fieldYOffsets = useRef<Partial<Record<FieldErrorKey, number>>>({});
 
     const isEditMode = !!editChallenge?.id;
+    const showBeautySafetyNotice = useMemo(() => {
+        const beautyText = [
+            formData.name,
+            formData.description,
+            formData.what_you_do,
+            formData.eligibility_criteria,
+        ]
+            .join(' ')
+            .toLowerCase();
+
+        return beautyText.includes('beauty');
+    }, [
+        formData.description,
+        formData.eligibility_criteria,
+        formData.name,
+        formData.what_you_do,
+    ]);
 
     const scrollToFirstError = useCallback((firstKey: FieldErrorKey) => {
         const y = fieldYOffsets.current[firstKey];
@@ -447,6 +467,16 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                             {fieldErrors.description ? <Text style={styles.errorText}>{fieldErrors.description}</Text> : null}
                         </View>
 
+                        {showBeautySafetyNotice ? (
+                            <View style={styles.safetyNotice}>
+                                <Feather name="alert-triangle" size={18} color="#f59e0b" />
+                                <View style={styles.safetyNoticeContent}>
+                                    <Text style={styles.safetyNoticeTitle}>Beauty Competition Notice</Text>
+                                    <Text style={styles.safetyNoticeText}>{BEAUTY_CONTENT_WARNING}</Text>
+                                </View>
+                            </View>
+                        ) : null}
+
                         <View onLayout={saveFieldLayout('organizer_name')} style={styles.inputGroup}>
                             <Text style={styles.label}>Organizer Name *</Text>
                             <TextInput
@@ -753,6 +783,32 @@ const styles = StyleSheet.create({
     },
     inputGroup: {
         marginBottom: 16,
+    },
+    safetyNotice: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        marginBottom: 16,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: 'rgba(245, 158, 11, 0.35)',
+        backgroundColor: 'rgba(120, 53, 15, 0.35)',
+    },
+    safetyNoticeContent: {
+        flex: 1,
+        gap: 4,
+    },
+    safetyNoticeTitle: {
+        color: '#fbbf24',
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    safetyNoticeText: {
+        color: '#f3f4f6',
+        fontSize: 13,
+        lineHeight: 18,
     },
     label: {
         color: '#ccc',

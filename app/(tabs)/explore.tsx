@@ -30,9 +30,19 @@ import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-u
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { normalizePost } from '@/lib/utils/normalize-post';
-import { setExplorePostsCache } from '@/lib/explore-posts-cache';
+import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-cache';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const EXPLORE_PAGE_LIMIT = 24;
+
+function normalizeExplorePosts(items: any[]): Post[] {
+  return filterHlsReady(
+    items
+      .map((post) => normalizePost(post))
+      .filter((post: any) => !post?.isAd && !post?.challenge_id && !post?.challengeId)
+  );
+}
 
 const ExploreGridCard = React.memo(function ExploreGridCard({
   item,
@@ -136,10 +146,17 @@ export default function ExploreScreen() {
   const gridListRef = useRef<FlatList<Post>>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const deferredCountrySearchQuery = useDeferredValue(countrySearchQuery);
+  const exploreLoadVersionRef = useRef(0);
 
   useEffect(() => {
+    const cachedPosts = getExplorePostsCache();
+    if (cachedPosts.length > 0) {
+      setAllGridPosts(cachedPosts);
+      setGridPosts(cachedPosts);
+    }
+
     loadInitialContent();
-    setGridLoading(true);
+    setGridLoading(cachedPosts.length === 0);
     loadGridPosts().catch(() => {
       setGridLoading(false);
     });
@@ -186,11 +203,16 @@ export default function ExploreScreen() {
   useEffect(() => {
     if (!searchQuery) {
       setGridPosts(applyClientFilters(allGridPosts));
-      setTimeout(() => {
-        gridListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      }, 50);
     }
   }, [allGridPosts, selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, searchQuery, categories]);
+
+  useEffect(() => {
+    if (searchQuery) return;
+    const scrollTimer = setTimeout(() => {
+      gridListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }, 50);
+    return () => clearTimeout(scrollTimer);
+  }, [selectedMainCategoryId, selectedSubCategoryId, selectedCountryId, searchQuery]);
 
   useEffect(() => {
     if (deferredSearchQuery.trim().length > 0) {
@@ -258,10 +280,12 @@ export default function ExploreScreen() {
   };
 
   const loadGridPosts = async (_page?: number, _forceRefresh?: boolean) => {
+    const loadVersion = ++exploreLoadVersionRef.current;
+
     try {
       setGridLoading(true);
 
-      const limit = 50;
+      const limit = EXPLORE_PAGE_LIMIT;
       const seen = new Set<string>();
       const mergedPosts: Post[] = [];
       let page = 1;
@@ -269,6 +293,7 @@ export default function ExploreScreen() {
       let keepGoing = true;
       let useCursorFallback = false;
       let nextCursor: string | null = null;
+      let firstBatchCommitted = false;
 
       while (keepGoing) {
         let pagePosts: Post[] = [];
@@ -319,10 +344,8 @@ export default function ExploreScreen() {
           }
         }
 
-        const filteredPagePosts = pagePosts.filter((post: any) => {
+        const filteredPagePosts = normalizeExplorePosts(pagePosts).filter((post: any) => {
           if (!post?.id || seen.has(post.id)) return false;
-          if (post?.isAd) return false;
-          if (post?.challenge_id || post?.challengeId) return false;
           return true;
         });
 
@@ -331,46 +354,43 @@ export default function ExploreScreen() {
           mergedPosts.push(post);
         }
 
+        if (loadVersion !== exploreLoadVersionRef.current) {
+          return;
+        }
+
+        if (filteredPagePosts.length > 0) {
+          primePostDetailsCache(filteredPagePosts);
+          setAllGridPosts([...mergedPosts]);
+          setExplorePostsCache([...mergedPosts]);
+        }
+
+        if (!firstBatchCommitted) {
+          firstBatchCommitted = true;
+          setGridLoading(false);
+        }
+
         if (isFallback) {
           keepGoing = !!nextCursor;
           if (!nextCursor) {
             break;
           }
         }
+
+        if (keepGoing) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
       }
 
-      const needsEnrichment = mergedPosts.some((post: any) => !post?.category && !post?.category_id);
-      let enrichedPosts = mergedPosts;
-
-      if (needsEnrichment && mergedPosts.length > 0) {
-        const enrichResults = await Promise.allSettled(
-          mergedPosts.map((post) => postsApi.getById(post.id))
-        );
-
-        enrichedPosts = mergedPosts.map((post, index) => {
-          const result = enrichResults[index];
-          if (result?.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
-            return normalizePost({
-              ...post,
-              ...result.value.data,
-            });
-          }
-          return post;
-        });
+      if (loadVersion === exploreLoadVersionRef.current && mergedPosts.length === 0) {
+        setAllGridPosts([]);
+        setExplorePostsCache([]);
       }
-
-      const readyPosts = filterHlsReady(
-        enrichedPosts.filter((post: any) => !post?.isAd && !post?.challenge_id && !post?.challengeId)
-      );
 
       if (__DEV__) {
         console.log(
-          `🟣 [Explore] Loaded source posts: total=${enrichedPosts.length}, afterHLS=${readyPosts.length}, totalPages=${totalPages}, cursorFallback=${useCursorFallback}`
+          `🟣 [Explore] Loaded source posts: total=${mergedPosts.length}, totalPages=${totalPages}, cursorFallback=${useCursorFallback}`
         );
       }
-
-      setAllGridPosts(readyPosts);
-      setGridPosts(applyClientFilters(readyPosts));
     } catch (error) {
       console.error('Error loading grid posts:', error);
     } finally {
@@ -616,14 +636,14 @@ export default function ExploreScreen() {
       ) : (
         <FlatList
           ref={gridListRef}
-          data={gridLoading ? [] : gridPosts}
+          data={gridPosts}
           keyExtractor={(item) => item.id}
           numColumns={3}
-          removeClippedSubviews={false}
-          initialNumToRender={18}
-          maxToRenderPerBatch={24}
-          windowSize={9}
-          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={Platform.OS === 'android'}
+          initialNumToRender={12}
+          maxToRenderPerBatch={18}
+          windowSize={7}
+          updateCellsBatchingPeriod={30}
           contentContainerStyle={styles.gridListContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListHeaderComponent={

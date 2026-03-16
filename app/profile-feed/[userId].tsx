@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,13 @@ import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
 import { getExplorePostsCache } from '@/lib/explore-posts-cache';
 import { normalizePost } from '@/lib/utils/normalize-post';
+import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
+import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
+import { getProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import {
+  needsChallengeMetaEnrichment,
+  needsRenderableMediaEnrichment,
+} from '@/lib/utils/post-detail-enrichment';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -141,9 +148,17 @@ function ProfileFeedContent({
   const initialPost = initialPostData ? (() => {
     try { return normalizePost(JSON.parse(initialPostData)); } catch (e) { return null; }
   })() : null;
+  const cachedLaunchPosts = userId === 'explore' ? [] : getProfileFeedLaunchCache(userId, status);
+  const initialPosts = useMemo(() => {
+    const normalizedCachedPosts = cachedLaunchPosts.map((post) => normalizePost(post));
+    if (initialPost && !normalizedCachedPosts.find((post) => post.id === initialPost.id)) {
+      return [initialPost, ...normalizedCachedPosts];
+    }
+    return normalizedCachedPosts.length > 0 ? normalizedCachedPosts : (initialPost ? [initialPost] : []);
+  }, [cachedLaunchPosts, initialPost]);
 
-  const [posts, setPosts] = useState<Post[]>(initialPost ? [initialPost] : []);
-  const [loading, setLoading] = useState(!initialPost);
+  const [posts, setPosts] = useState<Post[]>(initialPosts);
+  const [loading, setLoading] = useState(initialPosts.length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -172,6 +187,12 @@ function ProfileFeedContent({
   const isExplore = userId === 'explore';
   const isOwnProfile = !isExplore && !!user && user.id === userId;
 
+  useEffect(() => {
+    if (initialPosts.length > 0) {
+      primePostDetailsCache(initialPosts);
+    }
+  }, [initialPosts]);
+
   // Full viewport height: one item = entire screen, only progress bar at bottom (no bottom tab here)
   const availableHeight = screenHeight - insets.top;
 
@@ -179,6 +200,25 @@ function ProfileFeedContent({
   const LIMIT = 100;
 
   useRefetchOnReconnect(() => loadPosts(1, true));
+
+  useEffect(() => {
+    if (!initialPostId || initialScrollDone || posts.length === 0) {
+      return;
+    }
+
+    const initialIndex = posts.findIndex((post) => post.id === initialPostId);
+    if (initialIndex < 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
+      setCurrentIndex(initialIndex);
+      setInitialScrollDone(true);
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [initialPostId, initialScrollDone, posts]);
 
   const loadPosts = useCallback(async (page = 1, refresh = false) => {
     try {
@@ -244,9 +284,9 @@ function ProfileFeedContent({
         // SAFETY: Always include the tapped post, even if filters are weird
         if (initialPostId && !explorePosts.find(p => p.id === initialPostId)) {
           try {
-            const singleRes = await postsApi.getById(initialPostId);
-            if (singleRes.status === 'success' && singleRes.data) {
-              explorePosts.unshift(singleRes.data as Post);
+            const cachedPost = await getPostDetailCached(initialPostId, { requireNetwork: true });
+            if (cachedPost) {
+              explorePosts.unshift(cachedPost as Post);
             }
           } catch {
             // ignore – we just skip the safety post
@@ -329,15 +369,25 @@ function ProfileFeedContent({
           },
         });
       });
+      primePostDetailsCache(postsArray);
 
       // CRITICAL ENRICHMENT: The user-post endpoints return hlsReady:true but
       // OMIT hls_url and thumbnail_url. Enrich from individual post endpoint.
       const postsNeedingEnrichment = postsArray.filter(
         (p: any) => {
-          const missingChallengeMeta = !p.challengeName && !p.challenge?.name && !Array.isArray(p.challengePosts) && !Array.isArray(p.challenge_posts);
+          const processingStatus = p.processing_status ?? p.processingStatus ?? '';
           const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
-          const missingImageMedia = p.type === 'image' && !p.image && !p.imageUrl && !p.fullUrl;
-          return needsPlaybackData || missingChallengeMeta || missingImageMedia;
+          const staleProcessingState =
+            p.type === 'video' &&
+            !!processingStatus &&
+            processingStatus !== 'completed' &&
+            processingStatus !== 'failed';
+          return (
+            needsPlaybackData ||
+            staleProcessingState ||
+            needsRenderableMediaEnrichment(p) ||
+            needsChallengeMetaEnrichment(p)
+          );
         }
       );
 
@@ -346,47 +396,47 @@ function ProfileFeedContent({
           console.log(`🔄 [ProfileFeed] Enriching ${postsNeedingEnrichment.length} posts with full data...`);
         }
 
-        const enrichResults = await Promise.allSettled(
-          postsNeedingEnrichment.map((p: any) => postsApi.getById(p.id))
+        const videoAssetMap = await getPostVideoAssetsBatchCached(
+          postsNeedingEnrichment
+            .filter((p: any) => p.type === 'video')
+            .map((p: any) => p.id),
         );
-
-        const enrichMap = new Map<string, any>();
-        enrichResults.forEach((result, idx) => {
-          if (result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
-            const fullPost = result.value.data;
-            enrichMap.set(postsNeedingEnrichment[idx].id, fullPost);
-          }
-        });
+        const enrichMap = await getPostDetailsCached(
+          postsNeedingEnrichment.map((p: any) => p.id),
+          { requireNetwork: true },
+        );
 
         // Merge enriched data back, including any challenge / competition metadata.
         postsArray = postsArray.map((p: any) => {
+          const videoAssets = videoAssetMap.get(p.id);
           const enriched = enrichMap.get(p.id);
-          if (!enriched) return p;
+          if (!enriched && !videoAssets) return p;
 
-          const enrichedFirstChallengePost = Array.isArray(enriched.challenge_posts)
+          const enrichedFirstChallengePost = Array.isArray(enriched?.challenge_posts)
             ? enriched.challenge_posts[0]
             : undefined;
           const enrichedChallenge =
-            enriched.challenge ||
-            enriched.competition ||
+            enriched?.challenge ||
+            enriched?.competition ||
             enrichedFirstChallengePost?.challenge;
 
           const enrichedChallengeId =
-            enriched.challenge_id ||
-            enriched.challengeId ||
+            enriched?.challenge_id ||
+            enriched?.challengeId ||
             enrichedChallenge?.id ||
             enrichedFirstChallengePost?.challenge_id;
 
           const enrichedChallengeName =
-            enriched.challenge_name ||
-            enriched.challengeName ||
+            enriched?.challenge_name ||
+            enriched?.challengeName ||
             enrichedChallenge?.name;
 
           return {
             ...normalizePost({
               ...p,
+              ...videoAssets,
               ...enriched,
-              user: enriched.user || p.user,
+              user: enriched?.user || p.user,
               challenge: enrichedChallenge || p.challenge || p.competition,
               challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
               challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
@@ -479,16 +529,7 @@ function ProfileFeedContent({
             return dateB - dateA; // Newest first
           });
 
-          // OPTIMIZATION: Preserve the initial post object reference if it exists
-          // This prevents the playing video from re-rendering/flickering when API returns
-          if (initialPost && page === 1) {
-            const mergedPosts = sortedPosts.map(p =>
-              p.id === initialPost.id ? initialPost : p
-            );
-            setPosts(mergedPosts);
-          } else {
-            setPosts(sortedPosts);
-          }
+          setPosts(sortedPosts);
 
           // Get username from first post
           if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {

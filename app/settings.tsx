@@ -198,7 +198,7 @@ export default function SettingsScreen() {
 
         {/* App Info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appInfoText}>Talynk Social v1.0.0</Text>
+          <Text style={styles.appInfoText}>Talentix Social v1.0.0</Text>
           <Text style={styles.appInfoSubtext}>Made with ❤️ for creators</Text>
         </View>
       </ScrollView>

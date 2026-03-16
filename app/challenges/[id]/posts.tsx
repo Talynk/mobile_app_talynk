@@ -33,6 +33,7 @@ import { useAppSelector } from '@/lib/store/hooks';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { loadFallbackChallengePosts } from '@/lib/utils/challenge-post-fallback';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -204,6 +205,7 @@ export default function ChallengePostsScreen() {
           );
 
           setHasMore(false);
+          primePostDetailsCache(sortedFallbackPosts);
           setPosts(sortedFallbackPosts);
           setLikesDuringChallengeMap(fallbackData.likesMap);
           setIsChallengeEnded(filteredFallbackPosts.length > 0);
@@ -222,10 +224,12 @@ export default function ChallengePostsScreen() {
         setHasMore(hasMoreData);
 
         if (page === 1 || refresh) {
+          primePostDetailsCache(postsList);
           setPosts(postsList);
           setLikesDuringChallengeMap(map);
           setIsChallengeEnded(ended);
         } else {
+          primePostDetailsCache(postsList);
           setPosts(prev => [...prev, ...postsList]);
           setLikesDuringChallengeMap(prev => ({ ...prev, ...map }));
         }
@@ -246,6 +250,7 @@ export default function ChallengePostsScreen() {
           );
 
           setHasMore(false);
+          primePostDetailsCache(sortedFallbackPosts);
           setPosts(sortedFallbackPosts);
           setLikesDuringChallengeMap(fallbackData.likesMap);
           setIsChallengeEnded(filteredFallbackPosts.length > 0);
@@ -292,6 +297,7 @@ export default function ChallengePostsScreen() {
         );
 
         setHasMore(false);
+        primePostDetailsCache(sortedFallbackPosts);
         setPosts(sortedFallbackPosts);
         setLikesDuringChallengeMap(fallbackData.likesMap);
         setIsChallengeEnded(filteredFallbackPosts.length > 0);

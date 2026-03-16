@@ -53,6 +53,7 @@ import {
   VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -147,6 +148,7 @@ export default function ChallengeDetailScreen() {
   const [postsFetched, setPostsFetched] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
   const fallbackChallengeDataRef = useRef<any>(null);
+  const hasHandledInitialFocusRef = useRef(false);
 
   useRefetchOnReconnect(() => {
     fetchChallenge({ showLoader: false });
@@ -245,6 +247,7 @@ export default function ChallengeDetailScreen() {
 
   useEffect(() => {
     fallbackChallengeDataRef.current = null;
+    hasHandledInitialFocusRef.current = false;
   }, [id]);
 
   useEffect(() => {
@@ -291,6 +294,7 @@ export default function ChallengeDetailScreen() {
         if (shouldUseFallback) {
           const fallbackData = await getFallbackChallengeData(options);
 
+          primePostDetailsCache(fallbackData.posts);
           setPosts(fallbackData.posts);
           setRawChallengePosts([]);
           setChallengeLikesMap(fallbackData.likesMap);
@@ -302,6 +306,7 @@ export default function ChallengeDetailScreen() {
 
         const hasSnapshotLikes = Object.keys(likesMapFromResponse).length > 0;
 
+        primePostDetailsCache(normalizedPosts);
         setPosts(normalizedPosts);
         setRawChallengePosts(Array.isArray(rawItems) ? rawItems : []);
         setChallengeLikesMap(likesMapFromResponse);
@@ -317,6 +322,7 @@ export default function ChallengeDetailScreen() {
             : null;
 
         if (fallbackData && fallbackData.posts.length > 0) {
+          primePostDetailsCache(fallbackData.posts);
           setPosts(fallbackData.posts);
           setRawChallengePosts([]);
           setChallengeLikesMap(fallbackData.likesMap);
@@ -339,6 +345,7 @@ export default function ChallengeDetailScreen() {
           : null;
 
       if (fallbackData && fallbackData.posts.length > 0) {
+        primePostDetailsCache(fallbackData.posts);
         setPosts(fallbackData.posts);
         setRawChallengePosts([]);
         setChallengeLikesMap(fallbackData.likesMap);
@@ -471,6 +478,11 @@ export default function ChallengeDetailScreen() {
   // Refresh challenge + posts when screen regains focus (not on every tab change).
   useFocusEffect(
     useCallback(() => {
+      if (!hasHandledInitialFocusRef.current) {
+        hasHandledInitialFocusRef.current = true;
+        return;
+      }
+
       fetchChallenge({ showLoader: false });
       if (activeTab === 'participants') {
         fetchParticipants();

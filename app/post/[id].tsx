@@ -33,6 +33,7 @@ import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -102,27 +103,28 @@ export default function PostDetailScreen() {
   const fetchPost = async () => {
     try {
       setLoading(true);
-      const response = await postsApi.getById(id as string);
+      const cachedPost = await getPostDetailCached(id as string, { requireNetwork: true });
 
       // Log post structure for debugging
       if (__DEV__) {
         console.log('📥 [fetchPost] API Response:', {
-          status: response.status,
-          post: response.data ? {
-            id: response.data.id,
-            type: response.data.type,
-            video_url: response.data.video_url,
-            image: response.data.image,
-            imageUrl: response.data.imageUrl,
-            fullUrl: (response.data as any).fullUrl,
-            allKeys: Object.keys(response.data),
+          status: cachedPost ? 'success' : 'error',
+          post: cachedPost ? {
+            id: cachedPost.id,
+            type: cachedPost.type,
+            video_url: cachedPost.video_url,
+            image: cachedPost.image,
+            imageUrl: cachedPost.imageUrl,
+            fullUrl: (cachedPost as any).fullUrl,
+            allKeys: Object.keys(cachedPost),
           } : null,
-          fullPost: response.data,
+          fullPost: cachedPost,
         });
       }
 
-      if (response.status === 'success' && response.data) {
-        setPost(response.data);
+      if (cachedPost) {
+        primePostDetailsCache([cachedPost]);
+        setPost(cachedPost);
       }
     } catch (error) {
       console.error('Error fetching post:', error);

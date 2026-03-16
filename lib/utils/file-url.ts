@@ -98,6 +98,35 @@ export function getThumbnailUrl(post: any): string | null {
   const url = post?.thumbnail_url || post?.thumbnailUrl || post?.thumbnail || '';
 
   if (!url || url.trim() === '') {
+    const hlsUrl = getFileUrl(
+      post?.hls_url ||
+      post?.hlsUrl ||
+      post?.playback_url ||
+      post?.fullUrl ||
+      ''
+    );
+
+    if (hlsUrl && hlsUrl.toLowerCase().includes('.m3u8')) {
+      const normalizedHlsUrl = hlsUrl.split('?')[0];
+      const hlsMatch = normalizedHlsUrl.match(/^(https?:\/\/[^/]+)\/hls\/([^/]+)\/[^/]+\.m3u8$/i);
+      if (hlsMatch) {
+        const [, origin, videoId] = hlsMatch;
+        return `${origin}/thumbnails/${videoId}_thumbnail.jpg`;
+      }
+
+      const relativeHlsMatch = normalizedHlsUrl.match(/^\/?(?:uploads\/)?hls\/([^/]+)\/[^/]+\.m3u8$/i);
+      if (relativeHlsMatch) {
+        const [, videoId] = relativeHlsMatch;
+        return getFileUrl(`/uploads/thumbnails/${videoId}_thumbnail.jpg`);
+      }
+
+      const derivedFromMaster = normalizedHlsUrl.replace(/\/master\.m3u8$/i, '/thumbnail.jpg');
+      const derivedFromPlaylist = derivedFromMaster.replace(/\/[^/]+\.m3u8$/i, '/thumbnail.jpg');
+      if (derivedFromPlaylist !== normalizedHlsUrl) {
+        return derivedFromPlaylist;
+      }
+    }
+
     return isImagePost(post) ? getPostMediaUrl(post) : null;
   }
 

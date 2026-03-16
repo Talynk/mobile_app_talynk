@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ScrollView,
   ActivityIndicator,
   useColorScheme,
@@ -15,12 +14,13 @@ import {
   RefreshControl,
   Dimensions,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
-import { getFileUrl } from '@/lib/utils/file-url';
+import { getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRealtime } from '@/lib/realtime-context';
@@ -37,6 +37,14 @@ import { useCache } from '@/lib/cache-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { normalizePost } from '@/lib/utils/normalize-post';
+import { getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
+import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
+import { getPostVideoAssetsCached } from '@/lib/post-video-assets-cache';
+import { setProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import {
+  needsChallengeMetaEnrichment,
+  needsRenderableMediaEnrichment,
+} from '@/lib/utils/post-detail-enrichment';
 
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -77,13 +85,56 @@ interface VideoThumbnailCardProps {
 }
 
 const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
+  const [imageError, setImageError] = useState(false);
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
   const challengeMeta = getChallengePostMeta(post);
 
   // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
-  const serverThumbnail = (post as any).thumbnail_url || '';
-  const fallbackImageUrl = post.image || (post as any).thumbnail || '';
-  const thumbnailUrl = serverThumbnail || fallbackImageUrl;
+  const serverThumbnail = getThumbnailUrl(post);
+  // IMPORTANT: never treat HLS (.m3u8) playback URLs as images here.
+  // For videos, thumbnails must come from thumbnail_url (or enriched assets),
+  // not from fullUrl/playback_url.
+  const fallbackImageUrl = getFileUrl(
+    post.image ||
+    post.imageUrl ||
+    (post as any).thumbnail ||
+    ''
+  );
+  const thumbnailUrl = serverThumbnail || (isVideo ? null : fallbackImageUrl);
+  const [resolvedThumbnailUrl, setResolvedThumbnailUrl] = useState<string | null>(thumbnailUrl);
+
+  useEffect(() => {
+    setImageError(false);
+    setResolvedThumbnailUrl(thumbnailUrl);
+  }, [thumbnailUrl]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isVideo || resolvedThumbnailUrl || !post?.id) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    getPostVideoAssetsCached(post.id)
+      .then((assets) => {
+        if (cancelled || !assets) return;
+        const repairedThumbnail =
+          getFileUrl(assets.thumbnail_url || assets.thumbnailUrl || '') ||
+          getFileUrl((assets as any).image || (assets as any).thumbnail || '');
+        if (repairedThumbnail) {
+          setResolvedThumbnailUrl(repairedThumbnail);
+        }
+      })
+      .catch(() => {
+        // Best-effort thumbnail repair only.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isVideo, post?.id, resolvedThumbnailUrl]);
 
   return (
     <TouchableOpacity
@@ -93,11 +144,15 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
     >
       {/* Static thumbnail only — NO video player */}
       <View style={styles.videoThumbnail}>
-        {thumbnailUrl ? (
-          <Image
-            source={{ uri: thumbnailUrl }}
+        {resolvedThumbnailUrl && !imageError ? (
+          <ExpoImage
+            source={{ uri: resolvedThumbnailUrl }}
             style={styles.postImage}
-            resizeMode="cover"
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={0}
+            onError={() => setImageError(true)}
+            recyclingKey={post.id}
           />
         ) : (
           <View style={[styles.postImage, styles.noMediaPlaceholder]}>
@@ -184,6 +239,39 @@ const COLORS = {
   },
 };
 
+async function fetchAllApprovedPosts(userId: string) {
+  const limit = 100;
+  let page = 1;
+  const allPosts: any[] = [];
+
+  while (page <= 10) {
+    const response = await userApi.getUserApprovedPosts(userId, page, limit);
+    if (response.status !== 'success' || !response.data) {
+      return response;
+    }
+
+    const pagePosts = Array.isArray(response.data)
+      ? response.data
+      : (response.data as any)?.posts || [];
+
+    allPosts.push(...pagePosts);
+
+    if (pagePosts.length < limit) {
+      return {
+        ...response,
+        data: allPosts,
+      };
+    }
+
+    page += 1;
+  }
+
+  return {
+    status: 'success',
+    data: allPosts,
+  } as any;
+}
+
 export default function ExternalUserProfileScreen() {
   const { id } = useLocalSearchParams();
   const { user: currentUser } = useAuth();
@@ -244,6 +332,20 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const teaserIntervalRef = useRef<any>(null);
+
+  const prefetchProfileThumbnails = useCallback((items: Post[]) => {
+    const urls = items
+      .map((post: any) => getThumbnailUrl(post) || null)
+      .filter((url): url is string => !!url);
+
+    if (urls.length === 0) {
+      return;
+    }
+
+    void ExpoImage.prefetch(urls, 'memory-disk').catch(() => {
+      // Best-effort only.
+    });
+  }, []);
 
   // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
@@ -434,7 +536,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     setLoadingPosts(true);
     setPostsError(null);
     try {
-      const response = await userApi.getUserApprovedPosts(id as string);
+      const response = await fetchAllApprovedPosts(id as string);
       if (response.status === 'success' && response.data) {
         // Handle both array and object with posts property
         const posts = Array.isArray(response.data)
@@ -444,40 +546,64 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const normalized = (posts as any[]).map((p: any) => {
           return normalizeUserProfilePost(p, profile);
         });
+        primePostDetailsCache(normalized);
 
         // CRITICAL ENRICHMENT: Backend user-post endpoints return hlsReady:true
         // but OMIT hls_url and thumbnail_url. Fetch from individual post endpoint.
-        const needsEnrichment = normalized.filter(
-          (p: any) => {
-            const missingChallengeMeta = !getChallengePostMeta(p).isChallengePost;
-            const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
-            const missingImageMedia = p.type === 'image' && !p.image && !p.imageUrl && !p.fullUrl;
-            return needsPlaybackData || missingChallengeMeta || missingImageMedia;
-          }
-        );
+        const needsEnrichment = normalized.filter((p: any) => {
+          const isVideo = p.type === 'video' || !!(p.video_url || p.videoUrl);
+          const processingStatus = p.processing_status ?? p.processingStatus ?? '';
+          const hasThumbnail =
+            !!p.thumbnail_url || !!p.thumbnailUrl || !!p.thumbnail;
+
+          // Videos without a real thumbnail should always be enriched so we can
+          // repair thumbnails for the profile grid and avoid grey placeholders.
+          const missingThumbnailForVideo = isVideo && !hasThumbnail;
+
+          const needsPlaybackData =
+            isVideo &&
+            p.hlsReady &&
+            !p.hls_url &&
+            !p.fullUrl?.includes('.m3u8');
+
+          const staleProcessingState =
+            isVideo &&
+            !!processingStatus &&
+            processingStatus !== 'completed' &&
+            processingStatus !== 'failed';
+
+          return (
+            missingThumbnailForVideo ||
+            needsPlaybackData ||
+            staleProcessingState ||
+            needsRenderableMediaEnrichment(p) ||
+            needsChallengeMetaEnrichment(p)
+          );
+        });
 
         if (needsEnrichment.length > 0) {
-          const enrichResults = await Promise.allSettled(
-            needsEnrichment.map((p: any) => postsApi.getById(p.id))
+          const videoAssetMap = await getPostVideoAssetsBatchCached(
+            needsEnrichment
+              .filter((p: any) => p.type === 'video')
+              .map((p: any) => p.id),
           );
-
-          const enrichMap = new Map<string, any>();
-          enrichResults.forEach((result, idx) => {
-            if (result.status === 'fulfilled' && result.value?.status === 'success' && result.value?.data) {
-              enrichMap.set(needsEnrichment[idx].id, result.value.data);
-            }
-          });
+          const enrichMap = await getPostDetailsCached(
+            needsEnrichment.map((p: any) => p.id),
+            { requireNetwork: true },
+          );
 
           // Merge enriched data
           for (let i = 0; i < normalized.length; i++) {
+            const videoAssets = videoAssetMap.get(normalized[i].id);
             const enriched = enrichMap.get(normalized[i].id);
-            if (enriched) {
+            if (enriched || videoAssets) {
               normalized[i] = {
                 ...normalizeUserProfilePost(
                   {
                     ...normalized[i],
+                    ...videoAssets,
                     ...enriched,
-                    user: enriched.user || normalized[i].user,
+                    user: enriched?.user || normalized[i].user,
                   },
                   profile,
                 ),
@@ -486,8 +612,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           }
         }
 
-        // Apply HLS filter — only show HLS-transcoded video posts
-        setApprovedPosts(filterHlsReady(normalized));
+        const visiblePosts = filterHlsReady(normalized);
+        prefetchProfileThumbnails(visiblePosts);
+        setApprovedPosts(visiblePosts);
         // Profile "Posts" stat = count of published (approved) posts only, not drafts
         setProfile((prev) => (prev ? { ...prev, posts_count: normalized.length } : null));
       } else {
@@ -514,22 +641,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     const fetchData = async () => {
       try {
         if (id) {
-          const [profileResponse, postsResponse] = await Promise.all([
-            userApi.getUserById(id as string),
-            userApi.getUserApprovedPosts(id as string)
-          ]);
+          const profileResponse = await userApi.getUserById(id as string);
           if (profileResponse.status === 'success' && profileResponse.data) {
             setProfile(profileResponse.data);
           }
-          if (postsResponse.status === 'success' && postsResponse.data) {
-            const posts = Array.isArray(postsResponse.data)
-              ? postsResponse.data
-              : (postsResponse.data as any)?.posts || [];
-            const normalized = (posts as any[]).map((p: any) => {
-              return normalizeUserProfilePost(p, profileResponse.data);
-            });
-            setApprovedPosts(filterHlsReady(normalized));
-          }
+          await fetchApprovedPosts();
         }
       } catch (err: any) {
         console.error('Error refreshing data:', err);
@@ -590,6 +706,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   };
 
   const handlePostPress = (post: Post) => {
+    setProfileFeedLaunchCache(id as string, 'active', approvedPosts);
     // Navigate to full-screen profile feed with current post as initial
     router.push({
       pathname: '/profile-feed/[userId]',
@@ -901,17 +1018,21 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                     isVideo ? (
                       <ModalVideoPlayer source={mediaUrl} />
                     ) : (
-                      <Image
+                      <ExpoImage
                         source={{ uri: mediaUrl }}
                         style={styles.overlayMedia}
-                        resizeMode="contain"
+                        contentFit="contain"
+                        cachePolicy="memory-disk"
+                        transition={0}
                       />
                     )
                   ) : (
-                    <Image
+                    <ExpoImage
                       source={{ uri: 'https://via.placeholder.com/300' }}
                       style={styles.overlayMedia}
-                      resizeMode="contain"
+                      contentFit="contain"
+                      cachePolicy="memory-disk"
+                      transition={0}
                     />
                   )}
                   <View style={styles.overlayActions}>

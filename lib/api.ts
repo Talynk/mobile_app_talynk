@@ -14,6 +14,34 @@ import {
 } from '../types';
 import { normalizePost } from './utils/normalize-post';
 
+async function retryApiRequest<T>(
+  request: () => Promise<T>,
+  maxAttempts = 2,
+  retryDelayMs = 800,
+): Promise<T> {
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await request();
+    } catch (error: any) {
+      lastError = error;
+      const status = error?.response?.status;
+      const shouldRetry =
+        attempt < maxAttempts &&
+        (!status || status >= 500 || error?.code === 'ECONNABORTED' || error?.code === 'NETWORK_ERROR');
+
+      if (!shouldRetry) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+    }
+  }
+
+  throw lastError;
+}
+
 // Auth API
 export const authApi = {
   login: async (usernameOrEmail: string, password: string): Promise<ApiResponse<LoginResponseData>> => {
@@ -846,7 +874,9 @@ export const postsApi = {
     expiresIn: number;
   }>> => {
     try {
-      const response = await apiClient.post('/api/posts/create-upload', data);
+      const response = await retryApiRequest(() =>
+        apiClient.post('/api/posts/create-upload', data, { timeout: 30000 })
+      );
       return response.data;
     } catch (error: any) {
       return {
@@ -867,7 +897,9 @@ export const postsApi = {
     processing_status: string;
   }>> => {
     try {
-      const response = await apiClient.post('/api/posts/upload-complete', { postId });
+      const response = await retryApiRequest(() =>
+        apiClient.post('/api/posts/upload-complete', { postId }, { timeout: 30000 })
+      );
       return response.data;
     } catch (error: any) {
       return {
@@ -1855,7 +1887,9 @@ export const challengesApi = {
   // Link existing post to a challenge
   addPostToChallenge: async (challengeId: string, postId: string): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.post(`/api/challenges/${challengeId}/posts/${postId}`);
+      const response = await retryApiRequest(() =>
+        apiClient.post(`/api/challenges/${challengeId}/posts/${postId}`, undefined, { timeout: 30000 })
+      );
       return response.data;
     } catch (error: any) {
       return {

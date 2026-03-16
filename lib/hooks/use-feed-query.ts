@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { useMemo } from 'react';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
 
 type FeedTab = 'foryou' | 'following';
 
@@ -39,6 +40,7 @@ export function useFeedQuery(tab: FeedTab) {
         const page = pageParam ? Number(pageParam) : 1;
         const raw = await postsApi.getFollowing(page, 20);
         const allPosts = extractPosts(raw);
+        primePostDetailsCache(allPosts);
         const hlsPosts = filterHlsReady(allPosts);
         if (__DEV__) {
           console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
@@ -61,6 +63,7 @@ export function useFeedQuery(tab: FeedTab) {
       }
 
       const allPosts = extractPosts(raw);
+      primePostDetailsCache(allPosts);
       if (__DEV__) {
         console.log(`🔵 [FEED v2-clean] ForYou: extracted ${allPosts.length} posts from response`);
       }

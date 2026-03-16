@@ -74,6 +74,9 @@ const COLORS = {
   },
 };
 
+const BEAUTY_CONTENT_WARNING =
+  'Posting nudity or exposing private parts is not permitted on this platform.';
+
 /**
  * Legacy multipart upload via XHR to POST /api/posts
  * Used for: image uploads (no HLS needed) and fallback when signed URL is unavailable
@@ -236,6 +239,7 @@ export default function CreatePostScreen() {
   const [caption, setCaption] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const showBeautySafetyNotice = selectedGroup.trim().toLowerCase() === 'beauty';
   const [recordedVideoUri, setRecordedVideoUri] = useState<string | null>(null);
   const [capturedImageUri, setCapturedImageUri] = useState<string | null>(null);
   const [editedVideoUri, setEditedVideoUri] = useState<string | null>(null);
@@ -2072,6 +2076,29 @@ export default function CreatePostScreen() {
                     {errors.category && (
                       <Text style={[styles.errorText, { color: C.error }]}>{errors.category}</Text>
                     )}
+                  </View>
+                )}
+
+                {showBeautySafetyNotice && (
+                  <View
+                    style={[
+                      styles.warningBanner,
+                      {
+                        backgroundColor: C.warningBg,
+                        borderColor: C.warningBorder,
+                        marginTop: 12,
+                      },
+                    ]}
+                  >
+                    <View style={styles.warningBannerHeader}>
+                      <MaterialIcons name="warning-amber" size={20} color={C.warning} />
+                      <Text style={[styles.warningBannerTitle, { color: C.warning }]}>
+                        Beauty Category Notice
+                      </Text>
+                    </View>
+                    <Text style={[styles.warningBannerText, { color: C.text }]}>
+                      {BEAUTY_CONTENT_WARNING}
+                    </Text>
                   </View>
                 )}
 
