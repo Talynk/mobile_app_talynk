@@ -17,7 +17,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, postsApi, likesApi, challengesApi } from '@/lib/api';
@@ -39,6 +39,7 @@ import { getCachedPostDetail, getPostDetailsCached, primePostDetailsCache } from
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getPostVideoAssetsCached } from '@/lib/post-video-assets-cache';
 import { setProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import { PostAppealModal } from '@/components/PostAppealModal';
 import {
   isRecentVideoUpload,
   needsChallengeMetaEnrichment,
@@ -65,6 +66,8 @@ interface VideoThumbnailProps {
 
 const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onUseContentPress, onViewsPress }: VideoThumbnailProps) => {
   const [imageError, setImageError] = useState(false);
+  const [showAppealModal, setShowAppealModal] = useState(false);
+  const isSuspended = (post.status as string) === 'suspended' || (post.status as string) === 'rejected' || (post.status as string) === 'reported';
 
   const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
   const challengeMeta = getChallengePostMeta(post);
@@ -268,6 +271,28 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
             <Text style={styles.submitToCompetitionDraftButtonText}>Use Content</Text>
           </TouchableOpacity>
         )}
+
+      {/* Suspended post appeal button */}
+      {isSuspended && (
+        <TouchableOpacity
+          style={styles.suspendedAppealButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            setShowAppealModal(true);
+          }}
+          activeOpacity={0.8}
+        >
+          <MaterialIcons name="gavel" size={14} color="#fff" />
+          <Text style={styles.suspendedAppealButtonText}>Appeal</Text>
+        </TouchableOpacity>
+      )}
+
+      <PostAppealModal
+        visible={showAppealModal}
+        postId={post.id}
+        onClose={() => setShowAppealModal(false)}
+        onAppealed={() => setShowAppealModal(false)}
+      />
     </TouchableOpacity>
   );
 };
@@ -428,6 +453,7 @@ export default function ProfileScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
+  const searchParams = useLocalSearchParams<{ tab?: string }>();
   const [firstVisibleIndex, setFirstVisibleIndex] = useState(0);
 
   // CRITICAL FIX: Define onViewableItemsChanged outside JSX to fix React Hooks error
@@ -489,6 +515,13 @@ export default function ProfileScreen() {
       };
     }, [user])
   );
+
+  // Auto-switch to tab from notification deep-link (e.g. tab=suspended)
+  useEffect(() => {
+    if (searchParams.tab && ['active', 'draft', 'suspended'].includes(searchParams.tab)) {
+      setActiveTab(searchParams.tab);
+    }
+  }, [searchParams.tab]);
 
   useEffect(() => {
     if (!user) {
@@ -2216,11 +2249,11 @@ const styles = StyleSheet.create({
   },
   publishDraftButton: {
     position: 'absolute',
-    bottom: 4,
+    bottom: 36,
+    left: 4,
     right: 4,
-    backgroundColor: '#10b981',
-    borderRadius: 16,
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    borderRadius: 8,
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2234,16 +2267,17 @@ const styles = StyleSheet.create({
   publishDraftButtonText: {
     color: '#fff',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     marginLeft: 4,
   },
   submitToCompetitionDraftButton: {
     position: 'absolute',
     bottom: 4,
     left: 4,
-    backgroundColor: '#60a5fa',
-    borderRadius: 16,
-    paddingHorizontal: 8,
+    right: 4,
+    backgroundColor: 'rgba(96, 165, 250, 0.9)',
+    borderRadius: 8,
+    paddingHorizontal: 4,
     paddingVertical: 6,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2252,8 +2286,8 @@ const styles = StyleSheet.create({
   },
   submitToCompetitionDraftButtonText: {
     color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
   },
   submitToChallengeOverlay: {
     flex: 1,
@@ -2718,5 +2752,23 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 16,
     marginTop: 16,
+  },
+  suspendedAppealButton: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    right: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.92)',
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  suspendedAppealButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

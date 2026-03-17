@@ -9,6 +9,7 @@ import websocketService, {
   ChallengeLikesUpdate,
 } from './websocket-service';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authEventEmitter } from './auth-event-emitter';
 
 interface RealtimeContextType {
   isConnected: boolean;
@@ -139,6 +140,14 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
           websocketService.on('likeUpdate', handleLikeUpdate);
           websocketService.on('challengeLikesUpdated', handleChallengeLikesUpdated);
 
+          // Handle account suspension via WebSocket
+          const handleAccountSuspended = (data: any) => {
+            if (!data?.userId || data.userId === user.id) {
+              authEventEmitter.emitAccountSuspended(data?.reason);
+            }
+          };
+          websocketService.on('accountSuspended', handleAccountSuspended);
+
           return () => {
             websocketService.off('connected', handleConnected);
             websocketService.off('disconnected', handleDisconnected);
@@ -148,6 +157,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
             websocketService.off('newNotification', handleNewNotification);
             websocketService.off('likeUpdate', handleLikeUpdate);
             websocketService.off('challengeLikesUpdated', handleChallengeLikesUpdated);
+            websocketService.off('accountSuspended', handleAccountSuspended);
             websocketService.disconnect();
           };
         }

@@ -6,7 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useCallback, useState } from 'react';
 import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
-import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated } from 'react-native';
+import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -25,6 +25,9 @@ import { VideoReadyWatcher } from '@/components/VideoReadyWatcher';
 import NetworkBanner from '@/components/NetworkBanner';
 import { API_BASE_URL } from '@/lib/config';
 import { networkStatus } from '@/lib/network-status';
+import { RealtimeProvider } from '@/lib/realtime-context';
+import { NotificationBadgeProvider } from '@/lib/notification-badge-context';
+import { useAuth } from '@/lib/auth-context';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -268,11 +271,14 @@ function RootLayoutNav() {
       <CacheProvider>
         <MuteProvider>
           <AuthProvider>
+            <RealtimeProvider>
+            <NotificationBadgeProvider>
             <CreateFocusProvider>
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
                 <VideoReadyWatcher />
                 <NetworkBanner />
+                <SuspensionModal />
                 <Stack
                   screenOptions={{
                     headerShown: false,
@@ -296,11 +302,14 @@ function RootLayoutNav() {
                   <Stack.Screen name="settings/report-problem" options={{ headerShown: false }} />
                   <Stack.Screen name="settings/about" options={{ headerShown: false }} />
                   <Stack.Screen name="settings/privacy-policy" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/my-appeals" options={{ headerShown: false }} />
                 </Stack>
               </View>
               <StatusBar style="light" />
             </ThemeProvider>
             </CreateFocusProvider>
+            </NotificationBadgeProvider>
+            </RealtimeProvider>
           </AuthProvider>
         </MuteProvider>
       </CacheProvider>
@@ -308,6 +317,100 @@ function RootLayoutNav() {
     </QueryClientProvider>
   );
 }
+
+/** Full-screen modal shown when the account is suspended */
+function SuspensionModal() {
+  const { isSuspended, suspensionReason, clearSuspension } = useAuth();
+
+  const handleDismiss = () => {
+    clearSuspension();
+    router.replace('/auth/login' as any);
+  };
+
+  if (!isSuspended) return null;
+
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent>
+      <View style={suspensionStyles.overlay}>
+        <View style={suspensionStyles.card}>
+          <View style={suspensionStyles.iconWrapper}>
+            <View style={suspensionStyles.iconCircle}>
+              <Text style={suspensionStyles.iconText}>⚠️</Text>
+            </View>
+          </View>
+          <Text style={suspensionStyles.title}>Account Suspended</Text>
+          <Text style={suspensionStyles.message}>
+            {suspensionReason || 'Your account has been suspended. Please contact support for more information.'}
+          </Text>
+          <TouchableOpacity style={suspensionStyles.button} onPress={handleDismiss} activeOpacity={0.8}>
+            <Text style={suspensionStyles.buttonText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const suspensionStyles = RNStyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 24,
+    padding: 32,
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  iconWrapper: {
+    marginBottom: 20,
+  },
+  iconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  iconText: {
+    fontSize: 36,
+  },
+  title: {
+    color: '#ef4444',
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  message: {
+    color: '#ccc',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 28,
+  },
+  button: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    borderRadius: 14,
+    width: '100%',
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+});
 
 // In dev, never load Sentry so Dev Launcher doesn't hit "App react context shouldn't be created before". In prod, wrap with Sentry.
 const RootLayout = __DEV__

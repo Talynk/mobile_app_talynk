@@ -20,6 +20,20 @@ class AuthEventEmitter extends SimpleEventEmitter {
   offUnauthorized(callback: () => void) {
     this.off('unauthorized', callback);
   }
+
+  // Event: Account Suspended (403 with code 'account_suspended' or WS event)
+  emitAccountSuspended(reason?: string) {
+    console.log('[AuthEvents] Emitting account suspended event', reason ? `reason: ${reason}` : '');
+    this.emit('accountSuspended', reason);
+  }
+
+  onAccountSuspended(callback: (reason?: string) => void) {
+    this.on('accountSuspended', callback);
+  }
+
+  offAccountSuspended(callback: (reason?: string) => void) {
+    this.off('accountSuspended', callback);
+  }
 }
 
 export const authEventEmitter = new AuthEventEmitter();

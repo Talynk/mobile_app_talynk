@@ -304,6 +304,12 @@ export default function NotificationsScreen() {
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'appeal_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      case 'post_suspended':
+        return { name: 'block', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      case 'report_reviewed':
+        return { name: 'fact-check', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.15)' };
+      case 'support_issue_update':
+        return { name: 'support-agent', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.15)' };
 
       // View milestone notification
       case 'view_milestone':
@@ -419,17 +425,36 @@ export default function NotificationsScreen() {
         }
         break;
 
-      // Post flagging/appeals - navigate to user's posts
+      // Post flagged/suspended — navigate to profile's Suspended tab
       case 'post_flagged':
+      case 'post_suspended':
+        router.push({
+          pathname: '/(tabs)/profile',
+          params: { tab: 'suspended' },
+        } as any);
+        break;
+
+      // Appeals & report reviewed — navigate to the specific post
       case 'appeal_approved':
       case 'appeal_rejected':
       case 'post_unfrozen':
-        if (user?.id) {
+      case 'report_reviewed':
+        if (postId) {
+          router.push({
+            pathname: '/post/[id]',
+            params: { id: postId }
+          });
+        } else if (user?.id) {
           router.push({
             pathname: '/user/[id]',
             params: { id: user.id }
           });
         }
+        break;
+
+      // Support issue updates - navigate to help center
+      case 'support_issue_update':
+        router.push('/settings/help-center' as any);
         break;
 
       // Follow notifications - navigate to user profile

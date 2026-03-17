@@ -40,6 +40,22 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
+    // Handle 403 Account Suspended
+    if (error.response?.status === 403) {
+      const responseData = error.response?.data as any;
+      if (responseData?.code === 'account_suspended') {
+        const reason = responseData?.reason || responseData?.message || undefined;
+        try {
+          await AsyncStorage.removeItem('talynk_token');
+          await AsyncStorage.removeItem('talynk_user');
+          authEventEmitter.emitAccountSuspended(reason);
+        } catch (storageError) {
+          // Silently handle storage errors
+        }
+        return Promise.reject(error);
+      }
+    }
+
     // Handle 401 Unauthorized
     if (error.response?.status === 401) {
       // Token expired, clear storage and notify auth context

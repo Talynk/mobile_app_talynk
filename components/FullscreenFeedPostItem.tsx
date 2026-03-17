@@ -23,29 +23,30 @@ import { router } from 'expo-router';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useAppSelector } from '@/lib/store/hooks';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { getVideoSource } from '@/lib/utils/video-source';
 import { Avatar } from '@/components/Avatar';
-import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
+import { PostAppealModal } from '@/components/PostAppealModal';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { useMute } from '@/lib/mute-context';
+import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { networkStatus } from '@/lib/network-status';
 
 const VIDEO_BUFFER_OPTIONS = Platform.select({
   ios: {
-    preferredForwardBufferDuration: 4,
+    preferredForwardBufferDuration: 2,
     waitsToMinimizeStalling: true,
   },
   android: {
-    preferredForwardBufferDuration: 4,
-    minBufferForPlayback: 1.5,
-    maxBufferBytes: 2 * 1024 * 1024,
+    preferredForwardBufferDuration: 2,
+    minBufferForPlayback: 0.5,
+    maxBufferBytes: 1 * 1024 * 1024,
     prioritizeTimeOverSizeThreshold: true,
   },
   default: {},
@@ -310,6 +311,7 @@ export interface FullscreenFeedPostItemProps {
   likesDuringChallenge?: number;
   isChallengeEnded?: boolean;
   challengeName?: string;
+  onPublishPress?: (postId: string) => void;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -321,6 +323,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   onReport,
   onFollow,
   onUnfollow,
+  onPublishPress,
   isLiked,
   isFollowing,
   isActive,
@@ -373,6 +376,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [videoProgress, setVideoProgress] = useState(0);
   const [retryCount, setRetryCount] = useState(0);
   const [showUnfollowModal, setShowUnfollowModal] = useState(false);
+  const [showAppealModal, setShowAppealModal] = useState(false);
+  const isSuspendedPost = (item as any).status === 'suspended' || (item as any).is_suspended;
+  const isDraftPost = (item as any).status === 'draft' || (item as any).status === 'Draft';
+  const isOwnPost = Boolean(user?.id && (user.id === item.user?.id || user.id === (item as any).user_id || user.id === (item as any).userId));
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
   const [pausedByUser, setPausedByUser] = useState(false);
@@ -502,13 +509,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
     let cancelled = false;
     let frameId = 0;
-    let interactionHandle: { cancel?: () => void } | null = null;
 
+    // Mount video players immediately for preloaded items (no
+    // InteractionManager delay) so HLS manifests start fetching
+    // right away. Only use requestAnimationFrame to batch.
     frameId = requestAnimationFrame(() => {
-      interactionHandle = InteractionManager.runAfterInteractions(() => {
-        if (cancelled) return;
+      if (!cancelled) {
         setCanMountVideoPlayer(true);
-      });
+      }
     });
 
     return () => {
@@ -516,7 +524,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (frameId) {
         cancelAnimationFrame(frameId);
       }
-      interactionHandle?.cancel?.();
     };
   }, [item.id, shouldLoadVideo]);
 
@@ -626,7 +633,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (isActive && isPlaying && videoReady) {
       Animated.timing(thumbnailOpacity, {
         toValue: 0,
-        duration: 200,
+        duration: 80,
         useNativeDriver: true,
       }).start();
     } else {
@@ -1063,6 +1070,54 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
         </Pressable>
       </Modal>
+
+      {/* Draft Post Overlay — own posts only */}
+      {isDraftPost && isOwnPost && (
+        <View style={styles.draftOverlayContainer}>
+          <View style={styles.draftBanner}>
+            <MaterialIcons name="edit-document" size={16} color="#10b981" />
+            <Text style={styles.draftText}>Draft Post</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.publishDraftButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              if (onPublishPress) {
+                onPublishPress(item.id);
+              }
+            }}
+            activeOpacity={0.8}
+          >
+            <Feather name="upload-cloud" size={18} color="#fff" />
+            <Text style={styles.publishDraftButtonText}>Publish</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Suspended Post Overlay — own posts only */}
+      {isSuspendedPost && isOwnPost && (
+        <View style={styles.suspendedOverlay} pointerEvents="box-none">
+          <View style={styles.suspendedBanner}>
+            <MaterialIcons name="block" size={16} color="#ef4444" />
+            <Text style={styles.suspendedText}>Suspended</Text>
+            <TouchableOpacity
+              style={styles.appealButton}
+              onPress={() => setShowAppealModal(true)}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons name="gavel" size={14} color="#fff" />
+              <Text style={styles.appealButtonText}>Appeal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <PostAppealModal
+        visible={showAppealModal}
+        postId={item.id}
+        onClose={() => setShowAppealModal(false)}
+        onAppealed={() => setShowAppealModal(false)}
+      />
     </View>
   );
 };
@@ -1485,5 +1540,84 @@ const styles = StyleSheet.create({
   videoProgressBarFill: {
     height: '100%',
     backgroundColor: 'rgba(255, 255, 255, 0.7)',
+  },
+  draftOverlayContainer: {
+    position: 'absolute',
+    top: '40%',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    gap: 16,
+    zIndex: 25,
+  },
+  draftBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+  },
+  draftText: {
+    color: '#10b981',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  publishDraftButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+  },
+  publishDraftButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  suspendedOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 80,
+    zIndex: 200,
+  },
+  suspendedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(20, 20, 20, 0.92)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  suspendedText: {
+    color: '#ef4444',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  appealButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginLeft: 4,
+  },
+  appealButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

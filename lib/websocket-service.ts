@@ -266,6 +266,14 @@ class WebSocketService extends SimpleEventEmitter {
         this.emit('followUpdate', data);
         break;
 
+      case 'user:account_suspended':
+        console.log('[WS] ⚠️ Account suspended event received');
+        this.emit('accountSuspended', {
+          userId: data?.userId,
+          reason: data?.reason,
+        });
+        break;
+
       default:
         break;
     }

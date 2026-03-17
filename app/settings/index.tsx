@@ -165,6 +165,16 @@ export default function SettingsScreen() {
           iconFamily: 'feather',
           onPress: () => router.push('/settings/report-problem' as any),
         },
+        {
+          key: 'my_appeals',
+          label: 'My Appeals',
+          subtitle: 'Track your post appeal status',
+          icon: 'gavel',
+          iconFamily: 'material',
+          color: '#f59e0b',
+          bgColor: 'rgba(245, 158, 11, 0.12)',
+          onPress: () => router.push('/settings/my-appeals' as any),
+        },
       ],
     },
     {

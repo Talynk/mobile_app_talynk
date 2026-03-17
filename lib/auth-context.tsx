@@ -11,6 +11,9 @@ interface AuthContextType extends AuthState {
   refreshToken: () => Promise<void>;
   error: string | null;
   clearError: () => void;
+  isSuspended: boolean;
+  suspensionReason: string | null;
+  clearSuspension: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -21,9 +24,10 @@ type AuthAction =
   | { type: 'SET_TOKEN'; payload: string }
   | { type: 'LOGOUT' }
   | { type: 'SET_AUTHENTICATED'; payload: boolean }
-  | { type: 'SET_ERROR'; payload: string | null };
+  | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'SET_SUSPENDED'; payload: { isSuspended: boolean; reason?: string | null } };
 
-const authReducer = (state: AuthState & { error: string | null }, action: AuthAction): AuthState & { error: string | null } => {
+const authReducer = (state: AuthState & { error: string | null; isSuspended: boolean; suspensionReason: string | null }, action: AuthAction): AuthState & { error: string | null; isSuspended: boolean; suspensionReason: string | null } => {
   switch (action.type) {
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
@@ -37,17 +41,21 @@ const authReducer = (state: AuthState & { error: string | null }, action: AuthAc
       return { ...state, isAuthenticated: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
+    case 'SET_SUSPENDED':
+      return { ...state, isSuspended: action.payload.isSuspended, suspensionReason: action.payload.reason ?? null };
     default:
       return state;
   }
 };
 
-const initialState: AuthState & { error: string | null } = {
+const initialState: AuthState & { error: string | null; isSuspended: boolean; suspensionReason: string | null } = {
   isAuthenticated: false,
   user: null,
   token: null,
   loading: true,
   error: null,
+  isSuspended: false,
+  suspensionReason: null,
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -68,6 +76,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => {
       authEventEmitter.offUnauthorized(handleUnauthorized);
+    };
+  }, []);
+
+  // Listen for account suspended events (403 or WebSocket)
+  useEffect(() => {
+    const handleAccountSuspended = (reason?: string) => {
+      console.log('[Auth] Account suspended:', reason || 'No reason provided');
+      dispatch({ type: 'SET_SUSPENDED', payload: { isSuspended: true, reason } });
+      dispatch({ type: 'LOGOUT' });
+    };
+
+    authEventEmitter.onAccountSuspended(handleAccountSuspended);
+
+    return () => {
+      authEventEmitter.offAccountSuspended(handleAccountSuspended);
     };
   }, []);
 
@@ -222,6 +245,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     dispatch({ type: 'SET_ERROR', payload: null });
   };
 
+  const clearSuspension = () => {
+    dispatch({ type: 'SET_SUSPENDED', payload: { isSuspended: false, reason: null } });
+  };
+
   const value: AuthContextType = {
     ...state,
     login,
@@ -229,6 +256,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     refreshToken,
     clearError,
+    isSuspended: state.isSuspended,
+    suspensionReason: state.suspensionReason,
+    clearSuspension,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

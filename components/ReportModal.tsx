@@ -15,6 +15,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { reportsApi } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Report reasons matching backend enum
 const REPORT_REASONS = [
@@ -42,6 +43,7 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
   const [alreadyReported, setAlreadyReported] = useState(false);
   const [checkingReport, setCheckingReport] = useState(false);
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   // Check if user has already reported this post when modal opens
   useEffect(() => {
@@ -238,7 +240,7 @@ export default function ReportModal({ isVisible, onClose, postId, onReported }: 
 
           {/* Footer */}
           {!alreadyReported && !checkingReport && (
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
               <TouchableOpacity
                 style={[
                   styles.submitButton,
@@ -271,7 +273,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#18181b',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    maxHeight: '75%',
   },
   header: {
     flexDirection: 'row',

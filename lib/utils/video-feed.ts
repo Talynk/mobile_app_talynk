@@ -1,6 +1,6 @@
-export const VIDEO_FEED_WINDOW_SIZE = 3;
+export const VIDEO_FEED_WINDOW_SIZE = 5;
 export const VIDEO_FEED_INITIAL_NUM_TO_RENDER = 1;
-export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = 2;
+export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = 3;
 export const VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS = false;
 
 export function shouldPreloadFeedVideo(
@@ -16,7 +16,9 @@ export function shouldPreloadFeedVideo(
     return false;
   }
 
-  // Keep only the immediate next item warm. Loading previous + next was
-  // starting too many HLS streams at once and causing stalls during scroll.
-  return index - activeIndex === 1;
+  // Preload ±2 items around the active item. Since Talynk videos are
+  // KB-sized HLS streams (Cloudflare-hosted), this concurrent preload
+  // is lightweight and ensures near-instant playback when scrolling.
+  const distance = Math.abs(index - activeIndex);
+  return distance >= 1 && distance <= 2;
 }
