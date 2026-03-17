@@ -28,6 +28,7 @@ import { networkStatus } from '@/lib/network-status';
 import { RealtimeProvider } from '@/lib/realtime-context';
 import { NotificationBadgeProvider } from '@/lib/notification-badge-context';
 import { useAuth } from '@/lib/auth-context';
+import { UploadNotificationService } from '@/lib/notification-service';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -137,6 +138,11 @@ function RootLayoutNav() {
 
   useEffect(() => {
     initializeStore().catch(() => {});
+    
+    // Request notification permissions on app start if not already granted
+    UploadNotificationService.getInstance().requestPermissions().catch(err => {
+      console.warn('Failed to ask for notification permissions on startup', err);
+    });
   }, []);
 
   useEffect(() => {

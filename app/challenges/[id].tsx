@@ -1294,25 +1294,29 @@ export default function ChallengeDetailScreen() {
             )
           }
         >
-          <View style={styles.winnerUserRankWrap}>
-            {medal ? (
-              <LinearGradient colors={medal.colors} style={styles.winnerUserRankBadge}>
-                <MaterialIcons name="workspace-premium" size={14} color={medal.text} />
-                <Text style={[styles.winnerUserRankText, { color: medal.text }]}>{winnerRank}</Text>
-              </LinearGradient>
-            ) : (
-              <View style={styles.winnerUserRankPlain}>
-                <Text style={styles.winnerUserRankPlainText}>#{winnerRank}</Text>
-              </View>
-            )}
+          {/* Left Column: Rank Badge + Avatar */}
+          <View style={styles.winnerUserLeftCol}>
+            <View style={styles.winnerUserRankWrap}>
+              {medal ? (
+                <LinearGradient colors={medal.colors} style={styles.winnerUserRankBadge}>
+                  <MaterialIcons name="workspace-premium" size={14} color={medal.text} />
+                  <Text style={[styles.winnerUserRankText, { color: medal.text }]}>{winnerRank}</Text>
+                </LinearGradient>
+              ) : (
+                <View style={styles.winnerUserRankPlain}>
+                  <Text style={styles.winnerUserRankPlainText}>#{winnerRank}</Text>
+                </View>
+              )}
+            </View>
+
+            <Avatar
+              user={winnerUser}
+              size={54}
+              style={styles.winnerUserAvatar}
+            />
           </View>
 
-          <Avatar
-            user={winnerUser}
-            size={54}
-            style={styles.winnerUserAvatar}
-          />
-
+          {/* Right Column: User Info */}
           <View style={styles.winnerUserInfo}>
             <Text style={[styles.winnerUserName, { color: C.text }]}>
               {winnerUser.display_name || winnerUser.username || 'Unknown'}
@@ -1320,22 +1324,26 @@ export default function ChallengeDetailScreen() {
             <Text style={[styles.winnerUserUsername, { color: C.textSecondary }]}>
               @{winnerUser.username || 'unknown'}
             </Text>
+            
             <View style={styles.winnerUserStatsRow}>
               <View style={styles.winnerUserStatChip}>
+                <MaterialIcons name="video-library" size={12} color="#cbd5e1" style={{ marginRight: 4 }} />
                 <Text style={styles.winnerUserStatChipText}>{winnerPostsCount} posts</Text>
               </View>
               <View style={styles.winnerUserStatChip}>
-                <Text style={styles.winnerUserStatChipText}>{winnerLikes} likes</Text>
+                <MaterialIcons name="favorite" size={12} color="#cbd5e1" style={{ marginRight: 4 }} />
+                <Text style={styles.winnerUserStatChipText}>{Number(winnerLikes).toLocaleString()} likes</Text>
               </View>
             </View>
+            
             {item.latest_submission_at && (
               <Text style={[styles.winnerUserMeta, { color: C.textSecondary }]}>
-                Latest submission {formatDate(item.latest_submission_at)}
+                Latest sub: {formatDate(item.latest_submission_at)}
               </Text>
             )}
           </View>
 
-          <Feather name="chevron-right" size={18} color={C.textSecondary} />
+          <Feather name="chevron-right" size={20} color={C.textSecondary} style={{ marginLeft: 8 }} />
         </TouchableOpacity>
       );
     }
@@ -2082,84 +2090,101 @@ const styles = StyleSheet.create({
   winnerUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
+    padding: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 12,
+    gap: 16,
   },
   winnerUserRowTopThree: {
     backgroundColor: '#111827',
+    borderColor: '#1f2937',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  winnerUserLeftCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    width: 64, // Fixed width to align avatars consistently
   },
   winnerUserRankWrap: {
     justifyContent: 'center',
     alignItems: 'center',
   },
   winnerUserRankBadge: {
-    minWidth: 56,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
   winnerUserRankText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '900',
   },
   winnerUserRankPlain: {
-    minWidth: 56,
     paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderRadius: 999,
+    paddingVertical: 4,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0f172a',
+    backgroundColor: '#1e293b',
   },
   winnerUserRankPlainText: {
-    color: '#f8fafc',
+    color: '#94a3b8',
     fontSize: 13,
     fontWeight: '800',
   },
   winnerUserAvatar: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   winnerUserInfo: {
     flex: 1,
-    gap: 4,
+    gap: 3,
+    justifyContent: 'center',
   },
   winnerUserName: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '800',
+    letterSpacing: -0.3,
   },
   winnerUserUsername: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
   },
   winnerUserStatsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 2,
+    marginTop: 4,
   },
   winnerUserStatChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: '#0f172a',
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#1e293b',
   },
   winnerUserStatChipText: {
     color: '#cbd5e1',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   winnerUserMeta: {
     fontSize: 12,
     lineHeight: 18,
-    marginTop: 2,
+    marginTop: 6,
   },
   winnerListItem: {
     flexDirection: 'row',
