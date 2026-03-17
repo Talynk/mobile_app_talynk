@@ -104,7 +104,7 @@ While we strive to protect your data, no method of electronic transmission or st
     title: '10. Contact Us',
     content: `If you have questions or concerns about this Privacy Policy or our data practices, please contact us:
 
-• **Email**: support@talynk.com
+• **Email**: contact@support.talentix.net
 • **In-App**: Settings > Support > Report a Problem`,
   },
 ];

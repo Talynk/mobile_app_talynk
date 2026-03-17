@@ -340,7 +340,7 @@ function SuspensionModal() {
           </View>
           <Text style={suspensionStyles.title}>Account Suspended</Text>
           <Text style={suspensionStyles.message}>
-            {suspensionReason || 'Your account has been suspended. Please contact support for more information.'}
+            {suspensionReason || 'Your account has been suspended. Please contact support [email: contact@support.talentix.net] for more information or inquiries.'}
           </Text>
           <TouchableOpacity style={suspensionStyles.button} onPress={handleDismiss} activeOpacity={0.8}>
             <Text style={suspensionStyles.buttonText}>OK</Text>

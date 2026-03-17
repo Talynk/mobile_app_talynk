@@ -158,7 +158,7 @@ export default function TermsAndConditionsScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: C.text }]}>11. Contact Information</Text>
           <Text style={[styles.sectionText, { color: C.textSecondary }]}>
-            If you have any questions about these Terms and Conditions, please contact us at support@talynk.com.
+            If you have any questions about these Terms and Conditions, please contact us at contact@support.talentix.net.
           </Text>
         </View>
 

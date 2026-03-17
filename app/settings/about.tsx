@@ -114,7 +114,7 @@ export default function AboutScreen() {
         <View style={styles.footer}>
           <Text style={styles.footerText}>Made with ❤️ for creators everywhere</Text>
           <Text style={styles.footerCopy}>© {new Date().getFullYear()} Talentix. All rights reserved.</Text>
-          <Text style={styles.footerContact}>support@talynk.com</Text>
+          <Text style={styles.footerContact}>contact@support.talentix.net</Text>
         </View>
       </ScrollView>
     </View>
