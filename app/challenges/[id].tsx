@@ -1170,7 +1170,7 @@ export default function ChallengeDetailScreen() {
               >
                 <MaterialIcons
                   name="video-library"
-                  size={18}
+                  size={16}
                   color={activeTab === 'posts' ? C.primary : C.textSecondary}
                 />
                 <Text style={[
@@ -1191,7 +1191,7 @@ export default function ChallengeDetailScreen() {
               >
                 <MaterialIcons
                   name="people"
-                  size={18}
+                  size={16}
                   color={activeTab === 'participants' ? C.primary : C.textSecondary}
                 />
                 <Text style={[
@@ -1209,7 +1209,7 @@ export default function ChallengeDetailScreen() {
                 >
                   <MaterialIcons
                     name="emoji-events"
-                    size={18}
+                    size={16}
                     color={activeTab === 'winners' ? C.primary : C.textSecondary}
                   />
                   <Text style={[
@@ -1954,55 +1954,55 @@ const styles = StyleSheet.create({
   },
   tabsSection: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
+    paddingTop: 16,
+    paddingBottom: 16,
     borderTopWidth: 1,
     borderTopColor: '#2a2a2a',
   },
   tabsContainer: {
     flexDirection: 'row',
     gap: 8,
+    backgroundColor: '#1f2937', 
+    padding: 4,
+    borderRadius: 999,
   },
   tab: {
     flex: 1,
-    minWidth: 0,
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
     paddingHorizontal: 8,
-    minHeight: 68,
-    borderRadius: 10,
-    gap: 3,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    borderRadius: 999,
+    gap: 6,
   },
   tabActive: {
-    backgroundColor: 'rgba(96, 165, 250, 0.10)',
-    borderColor: '#60a5fa',
-    borderBottomColor: '#60a5fa',
+    backgroundColor: '#374151',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
   },
   tabText: {
-    fontSize: 12,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '700',
     textAlign: 'center',
   },
   tabCountBadge: {
-    minWidth: 28,
-    paddingHorizontal: 8,
+    minWidth: 22,
+    paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 999,
-    backgroundColor: '#1f2937',
+    backgroundColor: '#4b5563',
   },
   tabCountBadgeActive: {
     backgroundColor: '#60a5fa',
   },
   tabCountText: {
-    color: '#cbd5e1',
-    fontSize: 12,
-    fontWeight: '700',
+    color: '#d1d5db',
+    fontSize: 10,
+    fontWeight: '800',
     textAlign: 'center',
   },
   tabCountTextActive: {
