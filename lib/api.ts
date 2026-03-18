@@ -1629,13 +1629,14 @@ export const challengesApi = {
         data: {
           participants: rows,
           pagination: apiResponse?.pagination || {},
+          max_winners: apiResponse?.max_winners,
         },
       };
     } catch (error: any) {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to fetch participants ranking',
-        data: { participants: [], pagination: {} },
+        data: { participants: [], pagination: {}, max_winners: undefined },
       };
     }
   },
@@ -1773,17 +1774,20 @@ export const challengesApi = {
         `/api/challenges/${challengeId}/winners?page=${page}&limit=${limit}`,
       );
       const apiResponse = response.data;
-      const winners = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
+      const winnersArray = Array.isArray(apiResponse?.data) ? apiResponse.data : [];
 
       return {
         status: apiResponse?.status ?? 'success',
         message: apiResponse?.message || 'Challenge winners fetched successfully',
         data: {
-          winners,
+          winners: winnersArray,
           pagination: apiResponse?.pagination || {},
-          winners_visible: apiResponse?.winners_visible ?? winners.length > 0,
+          winners_visible: apiResponse?.winners_visible ?? winnersArray.length > 0,
           winners_confirmed_at: apiResponse?.winners_confirmed_at ?? null,
           challenge_status: apiResponse?.challenge_status,
+          ordered_by: apiResponse?.ordered_by,
+          max_winners: apiResponse?.max_winners,
+          winners_list: undefined,
         },
       };
     } catch (error: any) {
@@ -1796,6 +1800,9 @@ export const challengesApi = {
           winners_visible: false,
           winners_confirmed_at: null,
           challenge_status: undefined,
+          ordered_by: undefined,
+          max_winners: undefined,
+          winners_list: undefined,
         },
       };
     }
@@ -1892,10 +1899,17 @@ export const challengesApi = {
       );
       return response.data;
     } catch (error: any) {
+      const apiData = error.response?.data;
+      const message =
+        apiData?.message ||
+        apiData?.error ||
+        error.message ||
+        'Failed to add post to challenge';
       return {
         status: 'error',
-        message: error.response?.data?.message || 'Failed to add post to challenge',
-        data: null,
+        message,
+        data: apiData?.data ?? apiData ?? null,
+        code: apiData?.code,
       };
     }
   }

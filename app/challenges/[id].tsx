@@ -410,6 +410,7 @@ export default function ChallengeDetailScreen() {
           total_likes_during_challenge: Number(winner?.total_likes_during_challenge ?? 0),
           latest_submission_at: winner?.latest_submission_at ?? null,
           posts: Array.isArray(winner?.posts) ? winner.posts : [],
+          is_winner: winner?.is_winner === true,
         }));
 
         setWinners(normalizedWinners);
@@ -602,7 +603,7 @@ export default function ChallengeDetailScreen() {
     }
   };
 
-  const handleCreatePost = () => {
+  const handleCreatePost = async () => {
     if (challenge?.organizer_id === user?.id || challenge?.organizer?.id === user?.id) {
       Alert.alert('Not Allowed', 'You cannot create a post in a competition that you organized.');
       return;
@@ -616,6 +617,27 @@ export default function ChallengeDetailScreen() {
     if (!challenge?.is_participant) {
       Alert.alert('Join Required', 'You must join the competition before posting');
       return;
+    }
+
+    const maxContentPerParticipant =
+      Number((challenge as any)?.max_content_per_account ?? (challenge as any)?.min_content_per_account) || 5;
+
+    if (user?.id && maxContentPerParticipant > 0) {
+      try {
+        const res = await challengesApi.getParticipantPosts(id as string, user.id, 1, 200);
+        if (res?.status === 'success') {
+          const currentCount = Array.isArray(res.data?.posts) ? res.data.posts.length : 0;
+          if (currentCount >= maxContentPerParticipant) {
+            Alert.alert(
+              'Maximum reached',
+              `You have reached the maximum number of posts allowed for this competition (${maxContentPerParticipant}).`
+            );
+            return;
+          }
+        }
+      } catch {
+        // If this pre-check fails (network/server), allow navigation and let backend enforce.
+      }
     }
 
     router.push({
@@ -1126,6 +1148,16 @@ export default function ChallengeDetailScreen() {
             <View style={styles.detailBlock}>
               <Text style={[styles.detailLabel, { color: C.detailLabel }]}>About the organizer</Text>
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.what_you_do || (challenge as any).what_you_do}</Text>
+            </View>
+          )}
+
+          {((challenge as any).max_content_per_account ??
+            (challenge as any).min_content_per_account) != null && (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Maximum content per participant</Text>
+              <Text style={[styles.detailText, { color: C.text }]}>
+                {Number((challenge as any).max_content_per_account ?? (challenge as any).min_content_per_account) || 5}
+              </Text>
             </View>
           )}
 
@@ -1695,7 +1727,8 @@ export default function ChallengeDetailScreen() {
           what_you_do: (challenge as any).what_you_do ?? undefined,
           start_date: challenge.start_date,
           end_date: challenge.end_date,
-          min_content_per_account: (challenge as any).min_content_per_account ?? 1,
+          max_content_per_account: (challenge as any).max_content_per_account ?? (challenge as any).min_content_per_account ?? 5,
+          min_content_per_account: (challenge as any).max_content_per_account ?? (challenge as any).min_content_per_account ?? 5,
           scoring_criteria: (challenge as any).scoring_criteria ?? undefined,
         } : null}
         onUpdated={() => {

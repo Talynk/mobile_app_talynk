@@ -1391,11 +1391,22 @@ export default function CreatePostScreen() {
         }
 
         let challengeLinkFailed = false;
+        let challengeLinkErrorCode: string | undefined;
+        let challengeLinkCap: number | undefined;
         if (effectiveSelectedChallengeId && status !== 'draft') {
           const linkRes = await challengesApi.addPostToChallenge(effectiveSelectedChallengeId, postId);
           if (linkRes.status !== 'success') {
             challengeLinkFailed = true;
-            console.warn('[Upload] Failed to link uploaded post to challenge:', linkRes.message);
+            console.warn('[Upload] Failed to link uploaded post to challenge:', linkRes.message, (linkRes as any)?.code);
+
+            challengeLinkErrorCode = (linkRes as any)?.code;
+            if (challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED') {
+              challengeLinkCap =
+                Number((linkRes as any)?.data?.max_content_per_account) ||
+                Number((linkRes as any)?.data?.challenge_max_content_per_account) ||
+                Number((linkRes as any)?.data?.challenge_max_posts_per_account) ||
+                5;
+            }
           }
         }
 
@@ -1416,7 +1427,9 @@ export default function CreatePostScreen() {
           ? 'Draft uploaded. You will be notified when it is ready.'
           : effectiveSelectedChallengeId
             ? challengeLinkFailed
-              ? 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
+              ? challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED'
+                ? `Video uploaded. You have reached the maximum number of posts allowed for this competition (${challengeLinkCap ?? 5}).`
+                : 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
               : 'Video uploaded. You will be notified when the competition post is ready.'
             : 'Video uploaded. You will be notified when it is ready.';
 

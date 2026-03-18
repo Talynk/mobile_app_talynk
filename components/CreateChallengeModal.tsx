@@ -39,6 +39,7 @@ export interface ChallengeForEdit {
     start_date?: string;
     end_date?: string;
     min_content_per_account?: number;
+    max_content_per_account?: number;
     scoring_criteria?: string | null;
 }
 
@@ -85,7 +86,7 @@ const defaultFormData = {
     what_you_do: '',
     start_date: defaultStartDate,
     end_date: defaultEndDate,
-    min_content_per_account: '1',
+    min_content_per_account: '5',
     scoring_criteria: '',
 };
 
@@ -169,7 +170,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 what_you_do: editChallenge.what_you_do ?? '',
                 start_date: start,
                 end_date: end,
-                min_content_per_account: String(editChallenge.min_content_per_account ?? 1),
+                min_content_per_account: String(editChallenge.max_content_per_account ?? editChallenge.min_content_per_account ?? 5),
                 scoring_criteria: editChallenge.scoring_criteria ?? '',
             });
             setFieldErrors({});
@@ -303,10 +304,15 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
             }
         }
 
-        const minContent = formData.min_content_per_account.trim();
-        const minNum = parseInt(minContent, 10);
-        if (minContent === '' || isNaN(minNum) || minNum < 1) {
-            errors.min_content_per_account = 'Minimum must be at least 1';
+        const rawMaxContent = (formData.min_content_per_account || '').trim();
+        const maxNum = Number(rawMaxContent);
+        const isWholeNumber = Number.isFinite(maxNum) && Math.floor(maxNum) === maxNum;
+        if (!rawMaxContent) {
+            errors.min_content_per_account = 'Maximum content per participant is required';
+        } else if (!isWholeNumber) {
+            errors.min_content_per_account = 'Please enter a whole number (1 to 10)';
+        } else if (maxNum < 1 || maxNum > 10) {
+            errors.min_content_per_account = 'Maximum must be between 1 and 10';
         }
 
         const firstKey = (Object.keys(errors)[0] as FieldErrorKey) || null;
@@ -337,7 +343,9 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                 contact_email: (formData.contact_email || '').trim(),
                 eligibility_criteria: (formData.eligibility_criteria || '').trim() || null,
                 what_you_do: (formData.what_you_do || '').trim() || null,
-                min_content_per_account: parseInt(formData.min_content_per_account, 10) || 1,
+                max_content_per_account: Math.min(10, Math.max(1, parseInt(formData.min_content_per_account, 10) || 5)),
+                // Backward-compat for older backend field name
+                min_content_per_account: Math.min(10, Math.max(1, parseInt(formData.min_content_per_account, 10) || 5)),
                 start_date: parseDateInput(formData.start_date).toISOString(),
                 end_date: parseDateInput(formData.end_date).toISOString(),
                 scoring_criteria: (formData.scoring_criteria || '').trim() || null,
@@ -518,7 +526,7 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                 </TouchableOpacity>
                                 <TextInput
                                     style={[styles.input, styles.phoneDigitsInput, fieldErrors.organizer_contact && styles.inputError]}
-                                    placeholder="Write your number excluding country code"
+                                    placeholder="Number (without country code)"
                                     placeholderTextColor="#9ca3af"
                                     value={formData.contact_phone_digits}
                                     onChangeText={(text) => updateField('contact_phone_digits', text.replace(/\D/g, '').slice(0, 15))}
@@ -526,7 +534,11 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                                     maxLength={15}
                                 />
                             </View>
-                            {fieldErrors.organizer_contact ? <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text> : null}
+                            {fieldErrors.organizer_contact ? (
+                                <Text style={styles.errorText}>{fieldErrors.organizer_contact}</Text>
+                            ) : (
+                                <Text style={styles.helperText}>Write your number excluding country code.</Text>
+                            )}
                         </View>
 
                         <View onLayout={saveFieldLayout('contact_email')} style={styles.inputGroup}>
@@ -661,14 +673,22 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
                         </View>
 
                         <View onLayout={saveFieldLayout('min_content_per_account')} style={styles.inputGroup}>
-                            <Text style={styles.label}>Min content per account *</Text>
+                            <Text style={styles.label}>Maximum content per participant *</Text>
                             <TextInput
                                 style={[styles.input, fieldErrors.min_content_per_account && styles.inputError]}
-                                placeholder="e.g. 1"
+                                placeholder="1 to 10 (default 5)"
                                 placeholderTextColor="#9ca3af"
                                 keyboardType="numeric"
                                 value={formData.min_content_per_account}
-                                onChangeText={(text) => updateField('min_content_per_account', text)}
+                                onChangeText={(text) => {
+                                    const digitsOnly = (text || '').replace(/[^\d]/g, '');
+                                    if (!digitsOnly) {
+                                        updateField('min_content_per_account', '');
+                                        return;
+                                    }
+                                    const nextNum = Math.min(10, Math.max(1, parseInt(digitsOnly, 10)));
+                                    updateField('min_content_per_account', String(nextNum));
+                                }}
                             />
                             {fieldErrors.min_content_per_account ? <Text style={styles.errorText}>{fieldErrors.min_content_per_account}</Text> : null}
                         </View>
@@ -872,6 +892,11 @@ const styles = StyleSheet.create({
     phoneDigitsInput: {
         flex: 1,
         minHeight: 48,
+    },
+    helperText: {
+        marginTop: 4,
+        fontSize: 12,
+        color: '#9ca3af',
     },
     countryPickerOverlay: {
         flex: 1,
