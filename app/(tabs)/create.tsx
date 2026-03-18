@@ -2214,7 +2214,7 @@ export default function CreatePostScreen() {
                     ) : (
                       <View style={{ paddingVertical: 8 }}>
                         <Text style={[styles.subLabel, { color: C.textSecondary }]}>
-                          No challenges joined yet. Join a challenge to post in it.
+                          No Competitions joined yet. Join a Competition to post in it.
                         </Text>
                       </View>
                     )}
