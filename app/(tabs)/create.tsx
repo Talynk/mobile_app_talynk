@@ -43,6 +43,8 @@ import {
   uploadPreparedVideo,
 } from '@/lib/utils/video-upload';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
+import { fetchWithRetry } from '@/lib/utils/fetch-with-retry';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -287,6 +289,9 @@ export default function CreatePostScreen() {
   const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
+  const [challengePostCounts, setChallengePostCounts] = useState<Record<string, { count: number; max: number }>>({});
+  const [categoriesFetchFailed, setCategoriesFetchFailed] = useState(false);
+  const [challengesFetchFailed, setChallengesFetchFailed] = useState(false);
   const [draftReplaceModalVisible, setDraftReplaceModalVisible] = useState(false);
   const [existingDrafts, setExistingDrafts] = useState<any[]>([]);
   const [pendingDraftStatus, setPendingDraftStatus] = useState<'active' | 'draft'>('draft');
@@ -365,29 +370,40 @@ export default function CreatePostScreen() {
 
   const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
 
-  // --- FETCH CATEGORIES ---
+  // --- FETCH CATEGORIES (with aggressive retry) ---
+  const loadCategoriesRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) return;
 
     const loadCategories = async () => {
       setLoadingCategories(true);
-      const res = await categoriesApi.getAll();
-      if (res.status === 'success' && (res.data as any)?.categories) {
-        const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
-        const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
-        mains.sort((a, b) => {
-          const indexA = CATEGORY_ORDER.indexOf(a.name);
-          const indexB = CATEGORY_ORDER.indexOf(b.name);
-          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-          if (indexA !== -1) return -1;
-          if (indexB !== -1) return 1;
-          return a.name.localeCompare(b.name);
-        });
-        setMainCategories(mains);
+      setCategoriesFetchFailed(false);
+      try {
+        const res = await fetchWithRetry(() => categoriesApi.getAll(), { maxAttempts: 4 });
+        if (res.status === 'success' && (res.data as any)?.categories) {
+          const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
+          const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
+          mains.sort((a, b) => {
+            const indexA = CATEGORY_ORDER.indexOf(a.name);
+            const indexB = CATEGORY_ORDER.indexOf(b.name);
+            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+            if (indexA !== -1) return -1;
+            if (indexB !== -1) return 1;
+            return a.name.localeCompare(b.name);
+          });
+          setMainCategories(mains);
+          setCategoriesFetchFailed(false);
+        } else {
+          setCategoriesFetchFailed(true);
+        }
+      } catch {
+        setCategoriesFetchFailed(true);
+      } finally {
+        setLoadingCategories(false);
       }
-      setLoadingCategories(false);
     };
+    loadCategoriesRef.current = loadCategories;
     loadCategories();
   }, [authLoading, isAuthenticated]);
 
@@ -406,7 +422,8 @@ export default function CreatePostScreen() {
     loadSubs();
   }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
-  // Fetch joined challenges
+  // Fetch joined challenges (with aggressive retry)
+  const loadJoinedChallengesRef = useRef<() => void>(() => {});
   useEffect(() => {
     const fetchJoinedChallenges = async () => {
       if (!isAuthenticated || authLoading) {
@@ -415,21 +432,10 @@ export default function CreatePostScreen() {
 
       try {
         setLoadingChallenges(true);
-        console.log('[Create] Fetching joined challenges...');
-        const response = await challengesApi.getJoinedChallenges();
-        console.log('[Create] Joined challenges API response:', JSON.stringify({
-          status: response.status,
-          dataType: typeof response.data,
-          dataIsArray: Array.isArray(response.data),
-          dataKeys: response.data ? Object.keys(response.data) : [],
-          challengesLength: response.data?.challenges?.length,
-        }));
+        setChallengesFetchFailed(false);
+        const response = await fetchWithRetry(() => challengesApi.getJoinedChallenges(), { maxAttempts: 4 });
 
         if (response.status === 'success' && response.data) {
-          // Handle multiple response shapes robustly:
-          // Shape 1: { challenges: [...] } (from API wrapper)
-          // Shape 2: [...] (raw array)
-          // Shape 3: { data: [...] } (legacy)
           let rawList: any[] = [];
           if (Array.isArray(response.data)) {
             rawList = response.data;
@@ -438,7 +444,6 @@ export default function CreatePostScreen() {
           } else if (Array.isArray(response.data.data)) {
             rawList = response.data.data;
           } else if (typeof response.data === 'object') {
-            // Try to extract any array from the response
             const values = Object.values(response.data);
             const arrValue = values.find(v => Array.isArray(v));
             if (arrValue) {
@@ -446,7 +451,6 @@ export default function CreatePostScreen() {
             }
           }
 
-          // Unwrap challenge sub-objects (participations → challenges)
           const allChallenges = rawList
             .map((item: any) => {
               if (item.challenge) return item.challenge;
@@ -454,32 +458,24 @@ export default function CreatePostScreen() {
             })
             .filter((challenge: any) => challenge && challenge.id);
 
-          // Filter to only show challenges where user can actually post:
-          // - Status must be 'active' or 'approved'
-          // - Must be within date range (started and not ended)
           const now = new Date();
           const activeChallenges = allChallenges.filter((c: any) => {
             const status = c.status?.toLowerCase();
             const isActiveStatus = status === 'active' || status === 'approved';
-
-            // Check date range if dates are available
             let isInDateRange = true;
             if (c.start_date) {
               const startDate = new Date(c.start_date);
-              if (now < startDate) isInDateRange = false; // Not started yet
+              if (now < startDate) isInDateRange = false;
             }
             if (c.end_date) {
               const endDate = new Date(c.end_date);
-              if (now > endDate) isInDateRange = false; // Already ended
+              if (now > endDate) isInDateRange = false;
             }
-
             return isActiveStatus && isInDateRange;
           });
 
-          console.log('[Create] Extracted challenges:', allChallenges.length,
-            '→ active/in-range:', activeChallenges.length,
-            activeChallenges.map((c: any) => ({ name: c.name, status: c.status })));
           setJoinedChallenges(activeChallenges);
+          setChallengesFetchFailed(false);
 
           if (
             !isChallengeOnlyFlow &&
@@ -487,27 +483,60 @@ export default function CreatePostScreen() {
             activeChallenges.some((c: any) => c.id === params.challengeId)
           ) {
             setSelectedChallengeId(params.challengeId as string);
-            console.log('[Create] Auto-selected challenge:', params.challengeId);
           }
         } else {
-          console.warn('[Create] No joined challenges found or invalid response:', response);
           setJoinedChallenges([]);
+          setChallengesFetchFailed(true);
         }
       } catch (error: any) {
         console.warn('[Create] Error fetching joined challenges:', error?.message);
-        console.error('[Create] Error details:', {
-          message: error.message,
-          response: error.response?.data,
-          status: error.response?.status
-        });
         setJoinedChallenges([]);
+        setChallengesFetchFailed(true);
       } finally {
         setLoadingChallenges(false);
       }
     };
 
+    loadJoinedChallengesRef.current = fetchJoinedChallenges;
     fetchJoinedChallenges();
   }, [isAuthenticated, authLoading, isChallengeOnlyFlow, params.challengeId]);
+
+  // Fetch post counts for each joined challenge to enforce max-content-per-participant
+  useEffect(() => {
+    if (!user?.id || joinedChallenges.length === 0) return;
+    let cancelled = false;
+    const fetchCounts = async () => {
+      const counts: Record<string, { count: number; max: number }> = {};
+      await Promise.all(
+        joinedChallenges.map(async (c: any) => {
+          try {
+            const res = await challengesApi.getParticipantPosts(c.id, user.id, 1, 200);
+            const posted = Array.isArray(res.data?.posts) ? res.data.posts.length : 0;
+            const max = Number(c.max_content_per_account ?? c.min_content_per_account) || 5;
+            counts[c.id] = { count: posted, max };
+          } catch {
+            counts[c.id] = { count: 0, max: Number(c.max_content_per_account ?? c.min_content_per_account) || 5 };
+          }
+        })
+      );
+      if (!cancelled) setChallengePostCounts(counts);
+    };
+    fetchCounts();
+    return () => { cancelled = true; };
+  }, [joinedChallenges, user?.id]);
+
+  const isMaxPostsReached = (() => {
+    if (!effectiveSelectedChallengeId) return false;
+    const info = challengePostCounts[effectiveSelectedChallengeId];
+    if (!info) return false;
+    return info.count >= info.max;
+  })();
+
+  // Re-fetch categories and joined challenges automatically when connectivity returns
+  useRefetchOnReconnect(() => {
+    loadCategoriesRef.current();
+    loadJoinedChallengesRef.current();
+  });
 
   // --- Handle camera mode changes ---
   useEffect(() => {
@@ -2027,10 +2056,20 @@ export default function CreatePostScreen() {
                         </TouchableOpacity>
                       )
                     )
+                  ) : categoriesFetchFailed ? (
+                    <TouchableOpacity
+                      style={{ paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}
+                      onPress={() => loadCategoriesRef.current?.()}
+                    >
+                      <MaterialIcons name="refresh" size={18} color={C.primary} />
+                      <Text style={{ color: C.primary, fontSize: 13, fontWeight: '600' }}>
+                        Unable to load categories. Tap to retry.
+                      </Text>
+                    </TouchableOpacity>
                   ) : (
                     <View style={{ paddingVertical: 8 }}>
                       <Text style={{ color: C.textSecondary, fontSize: 13 }}>
-                        No categories available. Please try again later.
+                        No categories available.
                       </Text>
                     </View>
                   )}
@@ -2119,10 +2158,34 @@ export default function CreatePostScreen() {
                   <View style={styles.inputGroup}>
                     {loadingChallenges ? (
                       <View style={{ paddingVertical: 12 }}>
-                        <ActivityIndicator size="small" color={C.primary} />
-                        <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
-                          Loading challenges...
+                        <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 10 }]}>
+                          Loading competitions...
                         </Text>
+                        {[1, 2, 3].map((i) => (
+                          <View
+                            key={`chall-skel-${i}`}
+                            style={{
+                              height: 44,
+                              borderRadius: 12,
+                              backgroundColor: C.inputBg,
+                              marginBottom: 8,
+                              opacity: 1 - i * 0.2,
+                            }}
+                          />
+                        ))}
+                      </View>
+                    ) : challengesFetchFailed ? (
+                      <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                        <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 8, textAlign: 'center' }]}>
+                          Unable to load competitions. Check your connection.
+                        </Text>
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 16, backgroundColor: C.primary, borderRadius: 8 }}
+                          onPress={() => loadJoinedChallengesRef.current()}
+                        >
+                          <MaterialIcons name="refresh" size={18} color="#fff" />
+                          <Text style={{ color: '#fff', marginLeft: 6, fontWeight: '600', fontSize: 14 }}>Retry</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : isChallengeOnlyFlow ? (
                       <View style={styles.challengeSelectionStack}>
@@ -2197,30 +2260,47 @@ export default function CreatePostScreen() {
                             showsHorizontalScrollIndicator={false}
                             contentContainerStyle={styles.challengePillRow}
                           >
-                            {joinedChallenges.map((challenge: any) => (
-                              <TouchableOpacity
-                                key={challenge.id}
-                                style={[
-                                  styles.challengePill,
-                                  { borderColor: C.border },
-                                  effectiveSelectedChallengeId === challenge.id && {
-                                    backgroundColor: C.primary,
-                                    borderColor: C.primary,
-                                  },
-                                ]}
-                                onPress={() => setSelectedChallengeId(challenge.id)}
-                              >
-                                <Text
+                            {joinedChallenges.map((challenge: any) => {
+                              const info = challengePostCounts[challenge.id];
+                              const isFull = info ? info.count >= info.max : false;
+                              const isSelected = effectiveSelectedChallengeId === challenge.id;
+                              return (
+                                <TouchableOpacity
+                                  key={challenge.id}
                                   style={[
-                                    styles.challengePillText,
-                                    { color: effectiveSelectedChallengeId === challenge.id ? '#fff' : C.text },
+                                    styles.challengePill,
+                                    { borderColor: C.border },
+                                    isSelected && !isFull && {
+                                      backgroundColor: C.primary,
+                                      borderColor: C.primary,
+                                    },
+                                    isFull && { opacity: 0.5 },
                                   ]}
-                                  numberOfLines={1}
+                                  onPress={() => {
+                                    if (isFull) {
+                                      Alert.alert(
+                                        'Maximum reached',
+                                        `You have reached the maximum number of posts for "${challenge.name}" (${info?.max ?? 5}). Choose another competition or publish to the main feed.`,
+                                      );
+                                      return;
+                                    }
+                                    setSelectedChallengeId(challenge.id);
+                                  }}
                                 >
-                                  {challenge.name}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
+                                  <Text
+                                    style={[
+                                      styles.challengePillText,
+                                      { color: isSelected && !isFull ? '#fff' : C.text },
+                                    ]}
+                                    numberOfLines={1}
+                                  >
+                                    {challenge.name}
+                                    {info ? ` (${info.count}/${info.max})` : ''}
+                                    {isFull ? ' Full' : ''}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
                           </ScrollView>
                         </View>
                       </>
@@ -2286,9 +2366,25 @@ export default function CreatePostScreen() {
 
               {effectiveSelectedChallengeId ? (
                 <View style={styles.quickActionButtonsContainer}>
+                  {isMaxPostsReached && (
+                    <View style={[styles.maxPostsBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}>
+                      <MaterialIcons name="info-outline" size={18} color={C.warning} />
+                      <Text style={{ color: C.warning, fontSize: 13, flex: 1, marginLeft: 8 }}>
+                        You've reached the maximum posts for this competition ({challengePostCounts[effectiveSelectedChallengeId]?.max ?? 5}). Choose another competition or publish to the main feed.
+                      </Text>
+                    </View>
+                  )}
                   <TouchableOpacity
-                    style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
+                    style={[styles.quickActionButton, styles.quickPublishButton, (uploading || isMaxPostsReached) && styles.quickActionButtonDisabled]}
                     onPress={() => {
+                      if (isMaxPostsReached) {
+                        const info = challengePostCounts[effectiveSelectedChallengeId];
+                        Alert.alert(
+                          'Maximum reached',
+                          `You have reached the maximum number of posts for this competition (${info?.max ?? 5}). Choose another competition or publish to the main feed.`,
+                        );
+                        return;
+                      }
                       if (!caption.trim() && !selectedGroup) {
                         showToast('Please add a caption and select a category');
                       } else if (!caption.trim()) {
@@ -2301,7 +2397,7 @@ export default function CreatePostScreen() {
                         handleCreatePost('active');
                       }
                     }}
-                    disabled={uploading || !currentMediaUri}
+                    disabled={uploading || !currentMediaUri || isMaxPostsReached}
                     accessibilityLabel="Post to competition"
                     accessibilityRole="button"
                   >
@@ -3474,6 +3570,14 @@ const styles = StyleSheet.create({
   },
   quickActionButtonDisabled: {
     opacity: 0.5,
+  },
+  maxPostsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 10,
   },
   toastContainer: {
     position: 'absolute',

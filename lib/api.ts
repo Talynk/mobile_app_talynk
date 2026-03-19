@@ -299,8 +299,7 @@ export const countriesApi = {
 export const categoriesApi = {
   getAll: async (): Promise<ApiResponse<{ categories: any[] }>> => {
     try {
-      const response = await apiClient.get('/api/categories');
-      // Backend returns { status, data: Category[] }
+      const response = await apiClient.get('/api/categories', { timeout: 15000 });
       const list = Array.isArray(response.data?.data) ? response.data.data : [];
       return {
         status: response.data?.status || 'success',
@@ -1487,7 +1486,7 @@ export const challengesApi = {
 
   getJoinedChallenges: async (): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.get('/api/challenges/joined');
+      const response = await apiClient.get('/api/challenges/joined', { timeout: 15000 });
       const apiResponse = response.data;
 
       console.log('[API] getJoinedChallenges raw response:', {

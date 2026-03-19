@@ -58,12 +58,18 @@ function initSentryOnce() {
       if (/ExpoAsset\.downloadAsync|Unable to download asset from url|Metro|8081\/assets/.test(msg)) return null;
       if (/App react context shouldn't be created before|DevLauncherAppLoader/.test(msg)) return null;
       if (event.environment === 'development' && /ExpoAsset|MaterialIcons\.ttf|Ionicons\.ttf/.test(msg)) return null;
+      if (/AbortError|Aborted|ECONNABORTED|timeout of \d+ms exceeded/i.test(msg)) return null;
       return event;
     },
     ignoreErrors: [
       'ExpoAsset.downloadAsync',
       'Unable to download asset from url',
       'App react context shouldn\'t be created before',
+      'AbortError',
+      'Aborted',
+      'AbortError: Aborted',
+      'timeout of 0ms exceeded',
+      'ECONNABORTED',
     ],
   });
 }
