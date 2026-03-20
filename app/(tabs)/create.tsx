@@ -17,8 +17,10 @@ import {
   Animated,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { Linking } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, challengesApi } from '@/lib/api';
+import { apiClient } from '@/lib/api-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { uploadNotificationService } from '@/lib/notification-service';
@@ -542,7 +544,7 @@ export default function CreatePostScreen() {
   useEffect(() => {
     if (showCamera && cameraRef.current) {
       console.log('[Camera] Mode changed to:', cameraMode);
-      setIsCameraReady(false); // Reset ready state when mode changes
+      setIsCameraReady(false);
       const timeoutId = setTimeout(() => {
         console.log('[Camera] Reconfigured for mode:', cameraMode);
       }, 100);
@@ -550,6 +552,52 @@ export default function CreatePostScreen() {
       return () => clearTimeout(timeoutId);
     }
   }, [cameraMode, showCamera]);
+
+  // Camera-ready watchdog: auto-retry once after 6s, then warn user at 14s
+  useEffect(() => {
+    if (!showCamera || isCameraReady) return;
+
+    const autoRetry = setTimeout(() => {
+      if (!isCameraReady && showCamera && cameraRetryCountRef.current < 1) {
+        cameraRetryCountRef.current += 1;
+        console.warn('[Camera] Watchdog: auto-retrying camera (attempt', cameraRetryCountRef.current, ')');
+        setShowCamera(false);
+        setTimeout(() => setShowCamera(true), 600);
+      }
+    }, 6000);
+
+    const finalWatchdog = setTimeout(() => {
+      if (!isCameraReady && showCamera) {
+        console.error('[Camera] Watchdog: camera did not become ready after retry');
+        try {
+          const Sentry = require('@sentry/react-native');
+          Sentry.captureMessage('Camera blank/dark: onCameraReady never fired after retry', {
+            level: 'error',
+            extra: {
+              cameraMode,
+              cameraFacing,
+              cameraPermGranted: cameraPermission?.granted,
+              micPermGranted: microphonePermission?.granted,
+              retryCount: cameraRetryCountRef.current,
+              deviceModel: Platform.constants?.Model || 'unknown',
+              osVersion: Platform.Version,
+            },
+          });
+        } catch {}
+        Alert.alert(
+          'Camera not responding',
+          'The camera could not start on this device. This can happen on older or low-memory devices.\n\nTry:\n• Closing all other apps\n• Restarting your phone\n• Using the gallery to pick existing media instead',
+          [
+            { text: 'Try Again', onPress: () => { cameraRetryCountRef.current = 0; setShowCamera(false); setTimeout(() => setShowCamera(true), 800); } },
+            { text: 'Pick from Gallery', onPress: () => { cancelCamera(); handlePickFromGallery(); } },
+            { text: 'Close Camera', style: 'cancel', onPress: cancelCamera },
+          ],
+        );
+      }
+    }, 14000);
+
+    return () => { clearTimeout(autoRetry); clearTimeout(finalWatchdog); };
+  }, [showCamera, isCameraReady]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = useCallback(async () => {
@@ -593,8 +641,58 @@ export default function CreatePostScreen() {
     }
   }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission, cameraMode]);
 
-  const proceedToRecord = () => {
+  const cameraRetryCountRef = useRef(0);
+
+  const proceedToRecord = async () => {
     setShowPreRecordInfoModal(false);
+
+    const camPerm = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+    if (!camPerm.granted) {
+      if (!(camPerm as any).canAskAgain) {
+        Alert.alert(
+          'Camera Permission Denied',
+          'Camera access was permanently denied. Please enable it in your device Settings to record.',
+          [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'Camera Permission Required',
+          'Camera access was denied. Please grant permission to record.',
+          [{ text: 'OK' }],
+        );
+      }
+      return;
+    }
+
+    if (cameraMode === 'video') {
+      const micPerm = microphonePermission?.granted ? microphonePermission : await requestMicrophonePermission();
+      if (!micPerm.granted) {
+        if (!(micPerm as any).canAskAgain) {
+          Alert.alert(
+            'Microphone Permission Denied',
+            'Microphone access was permanently denied. Please enable it in your device Settings for video with audio.',
+            [
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: 'Record without audio', onPress: () => { cameraRetryCountRef.current = 0; setIsCameraReady(false); setShowCamera(true); } },
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+        } else {
+          Alert.alert(
+            'Microphone Permission Required',
+            'Microphone access was denied. Audio won\'t be recorded.',
+            [{ text: 'OK' }],
+          );
+        }
+        return;
+      }
+    }
+
+    cameraRetryCountRef.current = 0;
+    setIsCameraReady(false);
     setShowCamera(true);
   };
 
@@ -1273,14 +1371,44 @@ export default function CreatePostScreen() {
             return;
           }
 
-          // CRITICAL: Check HTTP status FIRST — don't trust response body on server errors
           if (xhr.status < 200 || xhr.status >= 300) {
             let errorMsg = `Server error (${xhr.status})`;
+            let errorCode = '';
+            let errorCap = 5;
             try {
               const errResponse = JSON.parse(xhr.responseText);
               errorMsg = errResponse.message || errResponse.error || errorMsg;
+              errorCode = errResponse.code || '';
+              errorCap = Number(errResponse.max_content_per_account || errResponse.data?.max_content_per_account) || 5;
             } catch (_) { }
-            console.warn('[Upload] Challenge post server error:', xhr.status, errorMsg);
+            console.warn('[Upload] Challenge post server error:', xhr.status, errorMsg, errorCode);
+
+            if (errorCode === 'MAX_CHALLENGE_POSTS_REACHED') {
+              Alert.alert(
+                'Competition Limit Reached',
+                `You've reached the maximum posts for this competition (${errorCap}). Your content was not uploaded. What would you like to do?`,
+                [
+                  {
+                    text: 'Publish to Main Feed',
+                    onPress: () => {
+                      setSelectedChallengeId(null);
+                      handleCreatePost('active');
+                    },
+                  },
+                  {
+                    text: 'Save as Draft',
+                    onPress: () => {
+                      setSelectedChallengeId(null);
+                      handleCreatePost('draft');
+                    },
+                  },
+                  { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
+                ],
+                { cancelable: false },
+              );
+              return;
+            }
+
             await uploadNotificationService.showUploadError(errorMsg, fileName);
             Alert.alert('Upload Failed', errorMsg);
             return;
@@ -1452,13 +1580,59 @@ export default function CreatePostScreen() {
           selectedChallengeName
         );
 
+        if (
+          challengeLinkFailed &&
+          challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED' &&
+          effectiveSelectedChallengeId
+        ) {
+          setUploading(false);
+          setUploadProgress(0);
+          Alert.alert(
+            'Competition Limit Reached',
+            `Your content was uploaded but could not be linked to the competition because you've reached the maximum (${challengeLinkCap ?? 5} posts). What would you like to do?`,
+            [
+              {
+                text: 'Keep on Main Feed',
+                onPress: () => {
+                  void cleanupPreparedVideo(preparedVideo);
+                  resetComposerState();
+                  router.replace('/(tabs)/profile');
+                },
+              },
+              {
+                text: 'Save as Draft',
+                onPress: async () => {
+                  try {
+                    const response = await apiClient.put(`/api/posts/${postId}/status`, { status: 'draft' });
+                    if (__DEV__) console.log('[Upload] Moved to draft:', response.status);
+                  } catch { /* best effort */ }
+                  void cleanupPreparedVideo(preparedVideo);
+                  resetComposerState();
+                  router.replace('/(tabs)/profile');
+                },
+              },
+              {
+                text: 'Delete Post',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await postsApi.deletePost(postId);
+                  } catch { /* best effort */ }
+                  void cleanupPreparedVideo(preparedVideo);
+                  resetComposerState();
+                },
+              },
+            ],
+            { cancelable: false },
+          );
+          return;
+        }
+
         const successMessage = status === 'draft'
           ? 'Draft uploaded. You will be notified when it is ready.'
           : effectiveSelectedChallengeId
             ? challengeLinkFailed
-              ? challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED'
-                ? `Video uploaded. You have reached the maximum number of posts allowed for this competition (${challengeLinkCap ?? 5}).`
-                : 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
+              ? 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
               : 'Video uploaded. You will be notified when the competition post is ready.'
             : 'Video uploaded. You will be notified when it is ready.';
 
@@ -1666,7 +1840,36 @@ export default function CreatePostScreen() {
               console.log('[Camera] Camera is ready');
               setIsCameraReady(true);
             }}
+            onMountError={(error: any) => {
+              console.error('[Camera] Mount error:', error);
+              try {
+                const Sentry = require('@sentry/react-native');
+                Sentry.captureException(new Error(`Camera mount error: ${error?.message || JSON.stringify(error)}`));
+              } catch {}
+              Alert.alert(
+                'Camera Error',
+                'The camera could not start on this device. Please try closing other apps or restart the app.',
+                [{ text: 'Close Camera', onPress: cancelCamera }],
+              );
+            }}
           />
+
+          {!isCameraReady && (
+            <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 50 }}>
+              <ActivityIndicator size="large" color="#60a5fa" />
+              <Text style={{ color: '#fff', marginTop: 16, fontSize: 15, fontWeight: '600' }}>Starting camera...</Text>
+              <Text style={{ color: '#9ca3af', marginTop: 6, fontSize: 13, textAlign: 'center', paddingHorizontal: 40 }}>
+                If this takes too long, try closing other apps or tap Close below.
+              </Text>
+              <TouchableOpacity
+                style={{ marginTop: 24, paddingVertical: 10, paddingHorizontal: 24, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 10 }}
+                onPress={cancelCamera}
+              >
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>Close Camera</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <View style={styles.cameraOverlay}>
             <View style={[styles.cameraTopBar, { paddingTop: insets.top + 16 }]}>
               <TouchableOpacity
@@ -2218,42 +2421,52 @@ export default function CreatePostScreen() {
                         </View>
 
                         <View style={styles.challengeSelectionStack}>
-                          <TouchableOpacity
-                            style={[
-                              styles.challengePrimaryAction,
-                              { borderColor: C.border, backgroundColor: C.card },
-                              !effectiveSelectedChallengeId && {
-                                backgroundColor: C.primary,
-                                borderColor: C.primary,
-                              },
-                            ]}
-                            onPress={() => setSelectedChallengeId(null)}
+                          <View
+                            style={{
+                              borderWidth: 1,
+                              borderColor: C.border,
+                              backgroundColor: C.card,
+                              borderRadius: 12,
+                              padding: 12,
+                              marginBottom: 12,
+                            }}
                           >
-                            <Text
-                              style={[
-                                styles.challengePrimaryActionText,
-                                { color: !effectiveSelectedChallengeId ? '#fff' : C.text },
-                              ]}
-                            >
-                              Publish to Main Feed
+                            <Text style={[styles.subLabel, { color: C.textSecondary, marginBottom: 8, fontWeight: '700' }]}>
+                              Step 1 of 2: Choose destination
                             </Text>
-                            <Text
-                              style={[
-                                styles.challengePrimaryActionHint,
-                                { color: !effectiveSelectedChallengeId ? 'rgba(255,255,255,0.82)' : C.textSecondary },
-                              ]}
-                            >
-                              Post without linking this content to a competition
-                            </Text>
-                          </TouchableOpacity>
 
-                          <View style={styles.challengeOrRow}>
-                            <Text style={[styles.challengeOrText, { color: C.textSecondary }]}>OR</Text>
+                            <TouchableOpacity
+                              style={{
+                                borderWidth: 1,
+                                borderColor: !effectiveSelectedChallengeId ? C.primary : C.border,
+                                backgroundColor: !effectiveSelectedChallengeId ? `${C.primary}20` : 'transparent',
+                                borderRadius: 10,
+                                paddingVertical: 10,
+                                paddingHorizontal: 12,
+                                marginBottom: 8,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                              }}
+                              onPress={() => setSelectedChallengeId(null)}
+                            >
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text style={{ color: C.text, fontSize: 14, fontWeight: '700' }}>Main Feed</Text>
+                                <Text style={{ color: C.textSecondary, fontSize: 12 }}>
+                                  Post normally without linking to a competition
+                                </Text>
+                              </View>
+                              <MaterialIcons
+                                name={!effectiveSelectedChallengeId ? 'radio-button-checked' : 'radio-button-unchecked'}
+                                size={20}
+                                color={!effectiveSelectedChallengeId ? C.primary : C.textSecondary}
+                              />
+                            </TouchableOpacity>
+
+                            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                              Or choose one joined competition below:
+                            </Text>
                           </View>
-
-                          <Text style={[styles.subLabel, styles.challengeListLabel, { color: C.textSecondary }]}>
-                            Choose a Competition from the ones below you've joined so far
-                          </Text>
 
                           <ScrollView
                             horizontal
@@ -2302,6 +2515,10 @@ export default function CreatePostScreen() {
                               );
                             })}
                           </ScrollView>
+
+                          <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
+                            Step 2 of 2: Use the submit buttons below (Publish, Save Draft, or Discard).
+                          </Text>
                         </View>
                       </>
                     ) : (
@@ -2364,150 +2581,182 @@ export default function CreatePostScreen() {
                 </View>
               )}
 
-              {effectiveSelectedChallengeId ? (
-                <View style={styles.quickActionButtonsContainer}>
-                  {isMaxPostsReached && (
-                    <View style={[styles.maxPostsBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}>
-                      <MaterialIcons name="info-outline" size={18} color={C.warning} />
-                      <Text style={{ color: C.warning, fontSize: 13, flex: 1, marginLeft: 8 }}>
-                        You've reached the maximum posts for this competition ({challengePostCounts[effectiveSelectedChallengeId]?.max ?? 5}). Choose another competition or publish to the main feed.
-                      </Text>
-                    </View>
-                  )}
-                  <TouchableOpacity
+              {/* ── Submit actions section ── */}
+              <View style={styles.submitSectionContainer}>
+                <View style={styles.submitSectionDivider}>
+                  <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+                  <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '700', marginHorizontal: 12, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                    {effectiveSelectedChallengeId ? 'Submit' : 'How would you like to submit?'}
+                  </Text>
+                  <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+                </View>
+
+                {effectiveSelectedChallengeId && isMaxPostsReached && (
+                  <View style={[styles.maxPostsBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}>
+                    <MaterialIcons name="info-outline" size={18} color={C.warning} />
+                    <Text style={{ color: C.warning, fontSize: 13, flex: 1, marginLeft: 8 }}>
+                      You've reached the maximum posts for this competition ({challengePostCounts[effectiveSelectedChallengeId]?.max ?? 5}). Choose another competition or publish to the main feed.
+                    </Text>
+                  </View>
+                )}
+
+                {effectiveSelectedChallengeId ? (
+                  <View style={styles.quickActionButtonsContainer}>
+                    <TouchableOpacity
                     style={[styles.quickActionButton, styles.quickPublishButton, (uploading || isMaxPostsReached) && styles.quickActionButtonDisabled]}
-                    onPress={() => {
-                      if (isMaxPostsReached) {
-                        const info = challengePostCounts[effectiveSelectedChallengeId];
+                      onPress={() => {
+                        if (isMaxPostsReached) {
+                          setShowPostActionModal(true);
+                          return;
+                        }
+                        if (!caption.trim() && !selectedGroup) {
+                          showToast('Please add a caption and select a category');
+                        } else if (!caption.trim()) {
+                          showToast('Caption is required');
+                        } else if (!selectedGroup) {
+                          showToast('Please select a category group');
+                        } else if (!selectedCategoryId) {
+                          showToast('Please select a specific category');
+                        } else {
+                          handleCreatePost('active');
+                        }
+                      }}
+                    disabled={uploading || !currentMediaUri}
+                      accessibilityLabel="Post to competition"
+                      accessibilityRole="button"
+                    >
+                      {uploading ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <>
+                          <MaterialIcons name="emoji-events" size={20} color="#fff" />
+                          <Text style={styles.quickActionButtonText}>Post to Competition</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
+                      onPress={async () => {
+                        if (!caption.trim() && !selectedGroup) {
+                          showToast('Please add a caption and select a category');
+                        } else if (!caption.trim()) {
+                          showToast('Caption is required');
+                        } else if (!selectedGroup) {
+                          showToast('Please select a category group');
+                        } else if (!selectedCategoryId) {
+                          showToast('Please select a specific category');
+                        } else {
+                          setSelectedChallengeId(null);
+                          await handleCreatePost('draft');
+                        }
+                      }}
+                      disabled={uploading || !currentMediaUri}
+                      accessibilityLabel="Save as draft"
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons name="save" size={20} color="#fff" />
+                      <Text style={styles.quickActionButtonText}>Save Draft</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.quickDiscardButton]}
+                      onPress={() => {
                         Alert.alert(
-                          'Maximum reached',
-                          `You have reached the maximum number of posts for this competition (${info?.max ?? 5}). Choose another competition or publish to the main feed.`,
+                          uploading ? 'Discard anyway?' : 'Discard Post?',
+                          uploading
+                            ? 'Upload in progress. Discard will cancel and clear this post.'
+                            : 'Are you sure you want to discard this post? This action cannot be undone.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
+                          ]
                         );
-                        return;
-                      }
-                      if (!caption.trim() && !selectedGroup) {
-                        showToast('Please add a caption and select a category');
-                      } else if (!caption.trim()) {
-                        showToast('Caption is required');
-                      } else if (!selectedGroup) {
-                        showToast('Please select a category group');
-                      } else if (!selectedCategoryId) {
-                        showToast('Please select a specific category');
-                      } else {
-                        handleCreatePost('active');
-                      }
-                    }}
-                    disabled={uploading || !currentMediaUri || isMaxPostsReached}
-                    accessibilityLabel="Post to competition"
-                    accessibilityRole="button"
-                  >
-                    {uploading ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <MaterialIcons name="emoji-events" size={20} color="#fff" />
-                        <Text style={styles.quickActionButtonText}>Post to Competition</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                      }}
+                      accessibilityLabel="Discard post"
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons name="delete-outline" size={20} color="#fff" />
+                      <Text style={styles.quickActionButtonText}>Discard</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.quickActionButtonsContainer}>
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
+                      onPress={() => {
+                        if (!caption.trim() && !selectedGroup) {
+                          showToast('Please add a caption and select a category');
+                        } else if (!caption.trim()) {
+                          showToast('Caption is required to publish');
+                        } else if (!selectedGroup) {
+                          showToast('Please select a category group');
+                        } else if (!selectedCategoryId) {
+                          showToast('Please select a specific category');
+                        } else {
+                          handleCreatePost('active');
+                        }
+                      }}
+                      disabled={uploading || !currentMediaUri}
+                      accessibilityLabel="Publish post"
+                      accessibilityRole="button"
+                    >
+                      {uploading ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <>
+                          <MaterialIcons name="rocket-launch" size={20} color="#fff" />
+                          <Text style={styles.quickActionButtonText}>Publish</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.quickDiscardButton]}
-                    onPress={() => {
-                      Alert.alert(
-                        uploading ? 'Discard anyway?' : 'Discard Post?',
-                        uploading
-                          ? 'Upload in progress. Discard will cancel and clear this post.'
-                          : 'Are you sure you want to discard this post? This action cannot be undone.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
-                        ]
-                      );
-                    }}
-                    accessibilityLabel="Discard post"
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons name="delete-outline" size={20} color="#fff" />
-                    <Text style={styles.quickActionButtonText}>Discard</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.quickActionButtonsContainer}>
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.quickPublishButton, uploading && styles.quickActionButtonDisabled]}
-                    onPress={() => {
-                      if (!caption.trim() && !selectedGroup) {
-                        showToast('Please add a caption and select a category');
-                      } else if (!caption.trim()) {
-                        showToast('Caption is required to publish');
-                      } else if (!selectedGroup) {
-                        showToast('Please select a category group');
-                      } else if (!selectedCategoryId) {
-                        showToast('Please select a specific category');
-                      } else {
-                        handleCreatePost('active');
-                      }
-                    }}
-                    disabled={uploading || !currentMediaUri}
-                    accessibilityLabel="Publish post"
-                    accessibilityRole="button"
-                  >
-                    {uploading ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <MaterialIcons name="rocket-launch" size={20} color="#fff" />
-                        <Text style={styles.quickActionButtonText}>Publish</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
+                      onPress={async () => {
+                        if (!caption.trim() && !selectedGroup) {
+                          showToast('Please add a caption and select a category');
+                        } else if (!caption.trim()) {
+                          showToast('Caption is required to save draft');
+                        } else if (!selectedGroup) {
+                          showToast('Please select a category group');
+                        } else if (!selectedCategoryId) {
+                          showToast('Please select a specific category');
+                        } else {
+                          await handleCreatePost('draft');
+                        }
+                      }}
+                      disabled={uploading || !currentMediaUri}
+                      accessibilityLabel="Save as draft"
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons name="save" size={20} color="#fff" />
+                      <Text style={styles.quickActionButtonText}>Save Draft</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.quickDraftButton, uploading && styles.quickActionButtonDisabled]}
-                    onPress={async () => {
-                      if (!caption.trim() && !selectedGroup) {
-                        showToast('Please add a caption and select a category');
-                      } else if (!caption.trim()) {
-                        showToast('Caption is required to save draft');
-                      } else if (!selectedGroup) {
-                        showToast('Please select a category group');
-                      } else if (!selectedCategoryId) {
-                        showToast('Please select a specific category');
-                      } else {
-                        await handleCreatePost('draft');
-                      }
-                    }}
-                    disabled={uploading || !currentMediaUri}
-                    accessibilityLabel="Save as draft"
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons name="save" size={20} color="#fff" />
-                    <Text style={styles.quickActionButtonText}>Save Draft</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.quickActionButton, styles.quickDiscardButton]}
-                    onPress={() => {
-                      Alert.alert(
-                        uploading ? 'Discard anyway?' : 'Discard Post?',
-                        uploading
-                          ? 'Upload in progress. Discard will cancel and clear this post.'
-                          : 'Are you sure you want to discard this post? This action cannot be undone.',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
-                        ]
-                      );
-                    }}
-                    accessibilityLabel="Discard post"
-                    accessibilityRole="button"
-                  >
-                    <MaterialIcons name="delete-outline" size={20} color="#fff" />
-                    <Text style={styles.quickActionButtonText}>Discard</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+                    <TouchableOpacity
+                      style={[styles.quickActionButton, styles.quickDiscardButton]}
+                      onPress={() => {
+                        Alert.alert(
+                          uploading ? 'Discard anyway?' : 'Discard Post?',
+                          uploading
+                            ? 'Upload in progress. Discard will cancel and clear this post.'
+                            : 'Are you sure you want to discard this post? This action cannot be undone.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Discard', style: 'destructive', onPress: () => resetComposerState() },
+                          ]
+                        );
+                      }}
+                      accessibilityLabel="Discard post"
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons name="delete-outline" size={20} color="#fff" />
+                      <Text style={styles.quickActionButtonText}>Discard</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
 
               <View style={{ height: insets.bottom + 20 }} />
             </View>
@@ -2515,6 +2764,73 @@ export default function CreatePostScreen() {
           </KeyboardAvoidingView>
         </View>
       )}
+
+      {/* Post Action Modal: shown when max competition posts reached */}
+      <Modal visible={showPostActionModal} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#18181b', borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, alignItems: 'center' }}>
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(245,158,11,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+              <MaterialIcons name="warning-amber" size={32} color="#f59e0b" />
+            </View>
+            <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 8 }}>
+              Competition Limit Reached
+            </Text>
+            <Text style={{ color: '#9ca3af', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
+              You've reached the maximum number of posts for this competition ({challengePostCounts[effectiveSelectedChallengeId ?? '']?.max ?? 5}). What would you like to do with this content?
+            </Text>
+
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#60a5fa', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 20, width: '100%', marginBottom: 10 }}
+              onPress={() => {
+                setShowPostActionModal(false);
+                setSelectedChallengeId(null);
+                if (!caption.trim() || !selectedGroup || !selectedCategoryId) {
+                  showToast('Please fill in caption and category first');
+                  return;
+                }
+                handleCreatePost('active');
+              }}
+            >
+              <MaterialIcons name="public" size={20} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 8 }}>Publish to Main Feed</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#374151', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 20, width: '100%', marginBottom: 10 }}
+              onPress={() => {
+                setShowPostActionModal(false);
+                setSelectedChallengeId(null);
+                if (!caption.trim() || !selectedGroup || !selectedCategoryId) {
+                  showToast('Please fill in caption and category first');
+                  return;
+                }
+                handleCreatePost('draft');
+              }}
+            >
+              <MaterialIcons name="save" size={20} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 8 }}>Save as Draft</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#7f1d1d', borderRadius: 12, paddingVertical: 14, paddingHorizontal: 20, width: '100%', marginBottom: 4 }}
+              onPress={() => {
+                setShowPostActionModal(false);
+                resetComposerState();
+              }}
+            >
+              <MaterialIcons name="delete-outline" size={20} color="#fca5a5" />
+              <Text style={{ color: '#fca5a5', fontSize: 15, fontWeight: '600', marginLeft: 8 }}>Discard</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ paddingVertical: 10, marginTop: 4 }}
+              onPress={() => setShowPostActionModal(false)}
+            >
+              <Text style={{ color: '#6b7280', fontSize: 13 }}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={draftReplaceModalVisible} transparent animationType="slide">
         <TouchableOpacity
@@ -3536,6 +3852,16 @@ const styles = StyleSheet.create({
   draftSaveButtonText: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  submitSectionContainer: {
+    marginTop: 16,
+    paddingTop: 4,
+  },
+  submitSectionDivider: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 16,
+    marginBottom: 14,
   },
   quickActionButtonsContainer: {
     flexDirection: 'row',
