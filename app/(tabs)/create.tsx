@@ -263,6 +263,7 @@ export default function CreatePostScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [showPostActionModal, setShowPostActionModal] = useState(false);
+  const [maxReachedContext, setMaxReachedContext] = useState<{ challengeName: string; max: number } | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<CameraView>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -579,7 +580,10 @@ export default function CreatePostScreen() {
               cameraPermGranted: cameraPermission?.granted,
               micPermGranted: microphonePermission?.granted,
               retryCount: cameraRetryCountRef.current,
-              deviceModel: Platform.constants?.Model || 'unknown',
+              deviceModel:
+                ((Platform.constants as { Model?: string; model?: string } | undefined)?.Model ??
+                  (Platform.constants as { Model?: string; model?: string } | undefined)?.model ??
+                  'unknown'),
               osVersion: Platform.Version,
             },
           });
@@ -2463,16 +2467,12 @@ export default function CreatePostScreen() {
                               />
                             </TouchableOpacity>
 
-                            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, marginTop: 20 }}>
                               Or choose one joined competition below:
                             </Text>
                           </View>
 
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.challengePillRow}
-                          >
+                          <View style={styles.competitionOptionsGrid}>
                             {joinedChallenges.map((challenge: any) => {
                               const info = challengePostCounts[challenge.id];
                               const isFull = info ? info.count >= info.max : false;
@@ -2481,40 +2481,40 @@ export default function CreatePostScreen() {
                                 <TouchableOpacity
                                   key={challenge.id}
                                   style={[
-                                    styles.challengePill,
-                                    { borderColor: C.border },
-                                    isSelected && !isFull && {
-                                      backgroundColor: C.primary,
-                                      borderColor: C.primary,
-                                    },
-                                    isFull && { opacity: 0.5 },
+                                    styles.competitionOptionCard,
+                                    { borderColor: C.border, backgroundColor: C.card },
+                                    isSelected && !isFull && { borderColor: C.primary, backgroundColor: `${C.primary}20` },
+                                    isFull && { borderColor: C.warning, backgroundColor: `${C.warning}18` },
                                   ]}
                                   onPress={() => {
                                     if (isFull) {
-                                      Alert.alert(
-                                        'Maximum reached',
-                                        `You have reached the maximum number of posts for "${challenge.name}" (${info?.max ?? 5}). Choose another competition or publish to the main feed.`,
-                                      );
+                                      setMaxReachedContext({
+                                        challengeName: challenge.name || 'this competition',
+                                        max: info?.max ?? 5,
+                                      });
+                                      setShowPostActionModal(true);
                                       return;
                                     }
                                     setSelectedChallengeId(challenge.id);
                                   }}
                                 >
-                                  <Text
-                                    style={[
-                                      styles.challengePillText,
-                                      { color: isSelected && !isFull ? '#fff' : C.text },
-                                    ]}
-                                    numberOfLines={1}
-                                  >
-                                    {challenge.name}
-                                    {info ? ` (${info.count}/${info.max})` : ''}
-                                    {isFull ? ' Full' : ''}
-                                  </Text>
+                                  <View style={{ flex: 1, minWidth: 0 }}>
+                                    <Text style={[styles.competitionOptionTitle, { color: C.text }]} numberOfLines={1}>
+                                      {challenge.name}
+                                    </Text>
+                                    <Text style={[styles.competitionOptionMeta, { color: C.textSecondary }]}>
+                                      {info ? `${info.count}/${info.max} submitted` : 'Loading limit...'}
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.competitionOptionBadge, { backgroundColor: isFull ? `${C.warning}30` : isSelected ? `${C.primary}25` : `${C.border}66` }]}>
+                                    <Text style={[styles.competitionOptionBadgeText, { color: isFull ? C.warning : isSelected ? C.primary : C.textSecondary }]}>
+                                      {isFull ? 'Full' : isSelected ? 'Selected' : 'Use'}
+                                    </Text>
+                                  </View>
                                 </TouchableOpacity>
                               );
                             })}
-                          </ScrollView>
+                          </View>
 
                           <Text style={[styles.subLabel, { color: C.textSecondary, marginTop: 8 }]}>
                             Step 2 of 2: Use the submit buttons below (Publish, Save Draft, or Discard).
@@ -2605,7 +2605,13 @@ export default function CreatePostScreen() {
                     <TouchableOpacity
                     style={[styles.quickActionButton, styles.quickPublishButton, (uploading || isMaxPostsReached) && styles.quickActionButtonDisabled]}
                       onPress={() => {
-                        if (isMaxPostsReached) {
+                      if (isMaxPostsReached) {
+                        const info = challengePostCounts[effectiveSelectedChallengeId];
+                        const selectedChallenge = joinedChallenges.find((c: any) => c.id === effectiveSelectedChallengeId);
+                        setMaxReachedContext({
+                          challengeName: selectedChallenge?.name || 'this competition',
+                          max: info?.max ?? 5,
+                        });
                           setShowPostActionModal(true);
                           return;
                         }
@@ -2776,7 +2782,7 @@ export default function CreatePostScreen() {
               Competition Limit Reached
             </Text>
             <Text style={{ color: '#9ca3af', fontSize: 14, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>
-              You've reached the maximum number of posts for this competition ({challengePostCounts[effectiveSelectedChallengeId ?? '']?.max ?? 5}). What would you like to do with this content?
+              You've reached the maximum number of posts for "{maxReachedContext?.challengeName || 'this competition'}" ({maxReachedContext?.max ?? challengePostCounts[effectiveSelectedChallengeId ?? '']?.max ?? 5}). What would you like to do with this content?
             </Text>
 
             <TouchableOpacity
@@ -3039,6 +3045,43 @@ const styles = StyleSheet.create({
   challengePillRow: {
     paddingHorizontal: 4,
     paddingBottom: 4,
+  },
+  competitionOptionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 2,
+  },
+  competitionOptionCard: {
+    minWidth: 150,
+    flexGrow: 1,
+    flexBasis: '46%',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  competitionOptionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  competitionOptionMeta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  competitionOptionBadge: {
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    alignSelf: 'center',
+  },
+  competitionOptionBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   pill: {
     paddingVertical: 10,
@@ -3936,3 +3979,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+function handlePickFromGallery() {
+  throw new Error('Function not implemented.');
+}
+
