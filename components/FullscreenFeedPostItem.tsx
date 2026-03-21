@@ -398,7 +398,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const challengeMeta = getChallengePostMeta(item);
   const activeChallengeName = challengeName || challengeMeta.challengeName;
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
-  const playbackStallSource = `feed-playback:${item.id}`;
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
   const shouldLoadVideo = isVideo && hlsReady && isAppActive && (isActive || shouldPreload) && !videoError;
@@ -412,8 +411,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
 
   const clearPlaybackStall = useCallback((options?: { resume?: boolean }) => {
-    networkStatus.reportOnline({ source: playbackStallSource });
-
     const stalledAt = stalledAtRef.current;
     awaitingNetworkRecoveryRef.current = false;
     stalledAtRef.current = null;
@@ -428,7 +425,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         controller.play();
       } catch (_) {}
     }
-  }, [isActive, isAppActive, pausedByUser, playbackStallSource]);
+  }, [isActive, isAppActive, pausedByUser]);
 
   const markPlaybackStall = useCallback((currentTime: number) => {
     if (awaitingNetworkRecoveryRef.current) {
@@ -439,12 +436,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     stalledAtRef.current = currentTime;
     setIsPlaying(false);
     setVideoReady(false);
-    networkStatus.reportOffline({
-      source: playbackStallSource,
-      message: 'No or low internet connection. Video will continue automatically when connection returns.',
-      immediate: true,
-    });
-  }, [playbackStallSource]);
+  }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -487,14 +479,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
-    networkStatus.reportOnline({ source: playbackStallSource });
-  }, [item.id, playbackStallSource]);
-
-  useEffect(() => {
-    return () => {
-      networkStatus.reportOnline({ source: playbackStallSource });
-    };
-  }, [playbackStallSource]);
+  }, [item.id]);
 
   useEffect(() => {
     if (!shouldLoadVideo) {

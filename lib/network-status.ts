@@ -9,7 +9,8 @@ const pendingOfflineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const offlineSources = new Map<string, { message?: string }>();
 const connectivityFailureCounts = new Map<string, { count: number; lastAt: number }>();
 const CONNECTIVITY_FAILURE_WINDOW_MS = 6_000;
-const API_CLIENT_FAILURE_THRESHOLD = 2;
+const API_CLIENT_FAILURE_THRESHOLD = 3;
+const OFFLINE_ACTIVATION_DELAY_MS = 2_500;
 
 function getSourceKey(source?: string): string {
   return source?.trim() || 'unknown';
@@ -116,7 +117,7 @@ export const networkStatus = {
     // Guard against transient request hiccups on otherwise healthy connections.
     const timer = setTimeout(() => {
       activateOfflineSource(source, meta?.message);
-    }, 1500);
+    }, OFFLINE_ACTIVATION_DELAY_MS);
 
     pendingOfflineTimers.set(source, timer);
   },

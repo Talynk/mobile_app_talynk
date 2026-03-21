@@ -71,10 +71,7 @@ apiClient.interceptors.response.use(
     
     // Handle network errors - silently handle, no console logs
     if (isNetworkError(error)) {
-      networkStatus.reportOffline({
-        source: 'api-client',
-        message: `${error.config?.method || 'request'} ${error.config?.url || ''}`.trim(),
-      });
+      networkStatus.reportOffline({ source: 'api-client' });
     }
     
     return Promise.reject(error);

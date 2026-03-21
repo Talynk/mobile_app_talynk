@@ -47,6 +47,12 @@ import {
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { fetchWithRetry } from '@/lib/utils/fetch-with-retry';
+import {
+  getCachedCreateCategories,
+  getCachedJoinedChallenges,
+  setCachedCreateCategories,
+  setCachedJoinedChallenges,
+} from '@/lib/create-screen-cache';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -258,6 +264,7 @@ export default function CreatePostScreen() {
   const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraMode, setCameraMode] = useState<'video' | 'picture'>('video');
+  const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
   const [isRecording, setIsRecording] = useState(false);
@@ -299,6 +306,7 @@ export default function CreatePostScreen() {
   const [existingDrafts, setExistingDrafts] = useState<any[]>([]);
   const [pendingDraftStatus, setPendingDraftStatus] = useState<'active' | 'draft'>('draft');
   const effectiveSelectedChallengeId = isChallengeOnlyFlow ? forcedChallengeId : selectedChallengeId;
+  const loadingChallengeCountsRef = useRef<Set<string>>(new Set());
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -306,6 +314,14 @@ export default function CreatePostScreen() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      if (recordingSafetyTimeoutRef.current) {
+        clearTimeout(recordingSafetyTimeoutRef.current);
+        recordingSafetyTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -347,6 +363,9 @@ export default function CreatePostScreen() {
   // --- CONFIGURE AUDIO MODE ---
   useEffect(() => {
     const configureAudio = async () => {
+      if (Platform.OS !== 'ios') {
+        return;
+      }
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
@@ -373,6 +392,67 @@ export default function CreatePostScreen() {
 
   const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
 
+  const normalizeCategories = useCallback((categories: any[]) => {
+    const mains = (categories || []).map((category) => ({
+      id: category.id,
+      name: category.name,
+      children: (category.children || []).map((child: any) => ({
+        id: child.id,
+        name: child.name,
+      })),
+    }));
+
+    mains.sort((a, b) => {
+      const indexA = CATEGORY_ORDER.indexOf(a.name);
+      const indexB = CATEGORY_ORDER.indexOf(b.name);
+      if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    return mains;
+  }, []);
+
+  const normalizeJoinedChallenges = useCallback((input: any) => {
+    let rawList: any[] = [];
+    if (Array.isArray(input)) {
+      rawList = input;
+    } else if (Array.isArray(input?.challenges)) {
+      rawList = input.challenges;
+    } else if (Array.isArray(input?.data)) {
+      rawList = input.data;
+    } else if (typeof input === 'object' && input) {
+      const values = Object.values(input);
+      const arrayValue = values.find((value) => Array.isArray(value));
+      if (arrayValue) {
+        rawList = arrayValue as any[];
+      }
+    }
+
+    const now = new Date();
+    return rawList
+      .map((item: any) => item?.challenge || item)
+      .filter((challenge: any) => challenge && challenge.id)
+      .filter((challenge: any) => {
+        const status = challenge.status?.toLowerCase();
+        const isActiveStatus = status === 'active' || status === 'approved';
+        if (!isActiveStatus) {
+          return false;
+        }
+
+        if (challenge.start_date && now < new Date(challenge.start_date)) {
+          return false;
+        }
+
+        if (challenge.end_date && now > new Date(challenge.end_date)) {
+          return false;
+        }
+
+        return true;
+      });
+  }, []);
+
   // --- FETCH CATEGORIES (with aggressive retry) ---
   const loadCategoriesRef = useRef<() => void>(() => {});
   useEffect(() => {
@@ -380,35 +460,41 @@ export default function CreatePostScreen() {
     if (!isAuthenticated) return;
 
     const loadCategories = async () => {
-      setLoadingCategories(true);
-      setCategoriesFetchFailed(false);
+      let hydratedFromCache = false;
+      const cachedCategories = await getCachedCreateCategories<any[]>();
+
+      if (cachedCategories?.length) {
+        hydratedFromCache = true;
+        setMainCategories(normalizeCategories(cachedCategories));
+        setLoadingCategories(false);
+        setCategoriesFetchFailed(false);
+      } else {
+        setLoadingCategories(true);
+        setCategoriesFetchFailed(false);
+      }
+
       try {
-        const res = await fetchWithRetry(() => categoriesApi.getAll(), { maxAttempts: 4 });
+        const res = await fetchWithRetry(() => categoriesApi.getAll(), {
+          maxAttempts: hydratedFromCache ? 2 : 4,
+          initialDelayMs: hydratedFromCache ? 500 : 1000,
+        });
         if (res.status === 'success' && (res.data as any)?.categories) {
-          const cats = (res.data as any).categories as { id: number, name: string, children?: any[] }[];
-          const mains = cats.map(c => ({ id: c.id, name: c.name, children: (c.children || []).map(sc => ({ id: sc.id, name: sc.name })) }));
-          mains.sort((a, b) => {
-            const indexA = CATEGORY_ORDER.indexOf(a.name);
-            const indexB = CATEGORY_ORDER.indexOf(b.name);
-            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-            if (indexA !== -1) return -1;
-            if (indexB !== -1) return 1;
-            return a.name.localeCompare(b.name);
-          });
-          setMainCategories(mains);
+          const categories = (res.data as any).categories as any[];
+          setMainCategories(normalizeCategories(categories));
+          void setCachedCreateCategories(categories);
           setCategoriesFetchFailed(false);
         } else {
-          setCategoriesFetchFailed(true);
+          setCategoriesFetchFailed(!hydratedFromCache);
         }
       } catch {
-        setCategoriesFetchFailed(true);
+        setCategoriesFetchFailed(!hydratedFromCache);
       } finally {
         setLoadingCategories(false);
       }
     };
     loadCategoriesRef.current = loadCategories;
     loadCategories();
-  }, [authLoading, isAuthenticated]);
+  }, [authLoading, isAuthenticated, normalizeCategories]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -433,51 +519,43 @@ export default function CreatePostScreen() {
         return;
       }
 
-      try {
+      let hydratedFromCache = false;
+      const cachedChallenges = user?.id
+        ? await getCachedJoinedChallenges<any[]>(user.id)
+        : null;
+
+      if (cachedChallenges?.length) {
+        hydratedFromCache = true;
+        const normalizedCachedChallenges = normalizeJoinedChallenges(cachedChallenges);
+        setJoinedChallenges(normalizedCachedChallenges);
+        setLoadingChallenges(false);
+        setChallengesFetchFailed(false);
+
+        if (
+          !isChallengeOnlyFlow &&
+          params.challengeId &&
+          normalizedCachedChallenges.some((challenge: any) => challenge.id === params.challengeId)
+        ) {
+          setSelectedChallengeId(params.challengeId as string);
+        }
+      } else {
         setLoadingChallenges(true);
         setChallengesFetchFailed(false);
-        const response = await fetchWithRetry(() => challengesApi.getJoinedChallenges(), { maxAttempts: 4 });
+      }
+
+      try {
+        const response = await fetchWithRetry(() => challengesApi.getJoinedChallenges(), {
+          maxAttempts: hydratedFromCache ? 2 : 4,
+          initialDelayMs: hydratedFromCache ? 500 : 1000,
+        });
 
         if (response.status === 'success' && response.data) {
-          let rawList: any[] = [];
-          if (Array.isArray(response.data)) {
-            rawList = response.data;
-          } else if (Array.isArray(response.data.challenges)) {
-            rawList = response.data.challenges;
-          } else if (Array.isArray(response.data.data)) {
-            rawList = response.data.data;
-          } else if (typeof response.data === 'object') {
-            const values = Object.values(response.data);
-            const arrValue = values.find(v => Array.isArray(v));
-            if (arrValue) {
-              rawList = arrValue as any[];
-            }
-          }
-
-          const allChallenges = rawList
-            .map((item: any) => {
-              if (item.challenge) return item.challenge;
-              return item;
-            })
-            .filter((challenge: any) => challenge && challenge.id);
-
-          const now = new Date();
-          const activeChallenges = allChallenges.filter((c: any) => {
-            const status = c.status?.toLowerCase();
-            const isActiveStatus = status === 'active' || status === 'approved';
-            let isInDateRange = true;
-            if (c.start_date) {
-              const startDate = new Date(c.start_date);
-              if (now < startDate) isInDateRange = false;
-            }
-            if (c.end_date) {
-              const endDate = new Date(c.end_date);
-              if (now > endDate) isInDateRange = false;
-            }
-            return isActiveStatus && isInDateRange;
-          });
+          const activeChallenges = normalizeJoinedChallenges(response.data);
 
           setJoinedChallenges(activeChallenges);
+          if (user?.id) {
+            void setCachedJoinedChallenges(user.id, response.data);
+          }
           setChallengesFetchFailed(false);
 
           if (
@@ -488,13 +566,17 @@ export default function CreatePostScreen() {
             setSelectedChallengeId(params.challengeId as string);
           }
         } else {
-          setJoinedChallenges([]);
-          setChallengesFetchFailed(true);
+          if (!hydratedFromCache) {
+            setJoinedChallenges([]);
+            setChallengesFetchFailed(true);
+          }
         }
       } catch (error: any) {
         console.warn('[Create] Error fetching joined challenges:', error?.message);
-        setJoinedChallenges([]);
-        setChallengesFetchFailed(true);
+        if (!hydratedFromCache) {
+          setJoinedChallenges([]);
+          setChallengesFetchFailed(true);
+        }
       } finally {
         setLoadingChallenges(false);
       }
@@ -502,31 +584,71 @@ export default function CreatePostScreen() {
 
     loadJoinedChallengesRef.current = fetchJoinedChallenges;
     fetchJoinedChallenges();
-  }, [isAuthenticated, authLoading, isChallengeOnlyFlow, params.challengeId]);
+  }, [
+    authLoading,
+    isAuthenticated,
+    isChallengeOnlyFlow,
+    normalizeJoinedChallenges,
+    params.challengeId,
+    user?.id,
+  ]);
 
-  // Fetch post counts for each joined challenge to enforce max-content-per-participant
+  const ensureChallengePostCount = useCallback(async (challenge: any) => {
+    if (!challenge?.id || !user?.id || loadingChallengeCountsRef.current.has(challenge.id)) {
+      return;
+    }
+
+    if (challengePostCounts[challenge.id]) {
+      return;
+    }
+
+    loadingChallengeCountsRef.current.add(challenge.id);
+
+    try {
+      const response = await challengesApi.getParticipantPosts(challenge.id, user.id, 1, 100);
+      const count = Array.isArray(response.data?.posts) ? response.data.posts.length : 0;
+      const max = Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5;
+
+      if (!isMountedRef.current) return;
+
+      setChallengePostCounts((prev) => ({
+        ...prev,
+        [challenge.id]: { count, max },
+      }));
+    } catch {
+      if (!isMountedRef.current) return;
+
+      setChallengePostCounts((prev) => ({
+        ...prev,
+        [challenge.id]: {
+          count: prev[challenge.id]?.count ?? 0,
+          max: Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5,
+        },
+      }));
+    } finally {
+      loadingChallengeCountsRef.current.delete(challenge.id);
+    }
+  }, [challengePostCounts, user?.id]);
+
+  // Warm a small subset of challenge counts after the list is visible instead of blocking initial rendering.
   useEffect(() => {
     if (!user?.id || joinedChallenges.length === 0) return;
+
     let cancelled = false;
-    const fetchCounts = async () => {
-      const counts: Record<string, { count: number; max: number }> = {};
-      await Promise.all(
-        joinedChallenges.map(async (c: any) => {
-          try {
-            const res = await challengesApi.getParticipantPosts(c.id, user.id, 1, 200);
-            const posted = Array.isArray(res.data?.posts) ? res.data.posts.length : 0;
-            const max = Number(c.max_content_per_account ?? c.min_content_per_account) || 5;
-            counts[c.id] = { count: posted, max };
-          } catch {
-            counts[c.id] = { count: 0, max: Number(c.max_content_per_account ?? c.min_content_per_account) || 5 };
-          }
-        })
-      );
-      if (!cancelled) setChallengePostCounts(counts);
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        for (const challenge of joinedChallenges.slice(0, 6)) {
+          if (cancelled) return;
+          await ensureChallengePostCount(challenge);
+        }
+      })();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
     };
-    fetchCounts();
-    return () => { cancelled = true; };
-  }, [joinedChallenges, user?.id]);
+  }, [ensureChallengePostCount, joinedChallenges, user?.id]);
 
   const isMaxPostsReached = (() => {
     if (!effectiveSelectedChallengeId) return false;
@@ -541,18 +663,82 @@ export default function CreatePostScreen() {
     loadJoinedChallengesRef.current();
   });
 
-  // --- Handle camera mode changes ---
-  useEffect(() => {
-    if (showCamera && cameraRef.current) {
-      console.log('[Camera] Mode changed to:', cameraMode);
+  const remountCamera = useCallback((nextMode: 'video' | 'picture') => {
+    const mountFreshInstance = () => {
+      if (!isMountedRef.current) return;
+      setCameraMode(nextMode);
       setIsCameraReady(false);
-      const timeoutId = setTimeout(() => {
-        console.log('[Camera] Reconfigured for mode:', cameraMode);
-      }, 100);
+      setShowCamera(true);
+      setCameraSessionKey((prev) => prev + 1);
+    };
 
-      return () => clearTimeout(timeoutId);
+    stoppedDueToMaxDurationRef.current = false;
+    setRecordingDuration(0);
+
+    if (showCamera) {
+      setShowCamera(false);
+      setTimeout(mountFreshInstance, 180);
+      return;
     }
-  }, [cameraMode, showCamera]);
+
+    mountFreshInstance();
+  }, [showCamera]);
+
+  const ensureCameraPermissions = useCallback(
+    async (mode: 'video' | 'picture') => {
+      const camPerm = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
+      if (!camPerm?.granted) {
+        if (!(camPerm as any)?.canAskAgain) {
+          Alert.alert(
+            'Camera Permission Denied',
+            'Camera access was permanently denied. Please enable it in Settings to continue.',
+            [
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+        }
+        return false;
+      }
+
+      if (mode === 'video') {
+        const micPerm = microphonePermission?.granted
+          ? microphonePermission
+          : await requestMicrophonePermission();
+
+        if (!micPerm?.granted) {
+          const canAskAgain = (micPerm as any)?.canAskAgain !== false;
+          Alert.alert(
+            'Microphone Access',
+            canAskAgain
+              ? 'Microphone permission was denied. You can continue and record silently, or grant microphone access for video with audio.'
+              : 'Microphone permission was permanently denied. You can continue and record silently, or enable microphone access in Settings.',
+            [
+              {
+                text: canAskAgain ? 'Continue Silent' : 'Record Silent',
+                onPress: () => remountCamera(mode),
+              },
+              ...(!canAskAgain
+                ? [{ text: 'Open Settings', onPress: () => Linking.openSettings() }]
+                : []),
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+          return false;
+        }
+      }
+
+      remountCamera(mode);
+      return true;
+    },
+    [
+      cameraPermission,
+      microphonePermission,
+      remountCamera,
+      requestCameraPermission,
+      requestMicrophonePermission,
+    ],
+  );
 
   // Camera-ready watchdog: auto-retry once after 6s, then warn user at 14s
   useEffect(() => {
@@ -562,8 +748,7 @@ export default function CreatePostScreen() {
       if (!isCameraReady && showCamera && cameraRetryCountRef.current < 1) {
         cameraRetryCountRef.current += 1;
         console.warn('[Camera] Watchdog: auto-retrying camera (attempt', cameraRetryCountRef.current, ')');
-        setShowCamera(false);
-        setTimeout(() => setShowCamera(true), 600);
+        remountCamera(cameraMode);
       }
     }, 6000);
 
@@ -592,7 +777,7 @@ export default function CreatePostScreen() {
           'Camera not responding',
           'The camera could not start on this device. This can happen on older or low-memory devices.\n\nTry:\n• Closing all other apps\n• Restarting your phone\n• Using the gallery to pick existing media instead',
           [
-            { text: 'Try Again', onPress: () => { cameraRetryCountRef.current = 0; setShowCamera(false); setTimeout(() => setShowCamera(true), 800); } },
+            { text: 'Try Again', onPress: () => { cameraRetryCountRef.current = 0; remountCamera(cameraMode); } },
             { text: 'Pick from Gallery', onPress: () => { cancelCamera(); handlePickFromGallery(); } },
             { text: 'Close Camera', style: 'cancel', onPress: cancelCamera },
           ],
@@ -601,103 +786,36 @@ export default function CreatePostScreen() {
     }, 14000);
 
     return () => { clearTimeout(autoRetry); clearTimeout(finalWatchdog); };
-  }, [showCamera, isCameraReady]);
+  }, [showCamera, isCameraReady, remountCamera, cameraMode]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = useCallback(async () => {
     try {
-      if (!cameraPermission?.granted) {
-        const cameraResult = await requestCameraPermission();
-        if (!cameraResult.granted) {
-          Alert.alert('Permission Required', 'Camera permission is required to record videos.');
-          return;
-        }
-      }
-
-      if (cameraMode === 'video' && !microphonePermission?.granted) {
-        const micResult = await requestMicrophonePermission();
-        if (!micResult.granted) {
-          Alert.alert('Permission Required', 'Microphone permission is required to record audio with your video.');
-          return;
-        }
-      }
-
-      try {
+      if (Platform.OS === 'ios') {
         await Audio.setAudioModeAsync({
-          allowsRecordingIOS: cameraMode === 'video',
+          allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
           shouldDuckAndroid: false,
           playThroughEarpieceAndroid: false,
         });
-        await new Promise(resolve => setTimeout(resolve, 200));
-      } catch (audioError) {
-        console.error('Error setting audio mode:', audioError);
       }
 
       // Show informative 2-min limit modal first (only for video); user taps "Proceed to record" to open camera
       setCameraMode('video');
       setRecordingDuration(0);
       setShowPreRecordInfoModal(true);
-
     } catch (error: any) {
       console.error('Camera error:', error);
       Alert.alert('Error', error.message || 'Failed to open camera. Please try again.');
     }
-  }, [cameraPermission, microphonePermission, requestCameraPermission, requestMicrophonePermission, cameraMode]);
+  }, []);
 
   const cameraRetryCountRef = useRef(0);
 
   const proceedToRecord = async () => {
     setShowPreRecordInfoModal(false);
-
-    const camPerm = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
-    if (!camPerm.granted) {
-      if (!(camPerm as any).canAskAgain) {
-        Alert.alert(
-          'Camera Permission Denied',
-          'Camera access was permanently denied. Please enable it in your device Settings to record.',
-          [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
-            { text: 'Cancel', style: 'cancel' },
-          ],
-        );
-      } else {
-        Alert.alert(
-          'Camera Permission Required',
-          'Camera access was denied. Please grant permission to record.',
-          [{ text: 'OK' }],
-        );
-      }
-      return;
-    }
-
-    if (cameraMode === 'video') {
-      const micPerm = microphonePermission?.granted ? microphonePermission : await requestMicrophonePermission();
-      if (!micPerm.granted) {
-        if (!(micPerm as any).canAskAgain) {
-          Alert.alert(
-            'Microphone Permission Denied',
-            'Microphone access was permanently denied. Please enable it in your device Settings for video with audio.',
-            [
-              { text: 'Open Settings', onPress: () => Linking.openSettings() },
-              { text: 'Record without audio', onPress: () => { cameraRetryCountRef.current = 0; setIsCameraReady(false); setShowCamera(true); } },
-              { text: 'Cancel', style: 'cancel' },
-            ],
-          );
-        } else {
-          Alert.alert(
-            'Microphone Permission Required',
-            'Microphone access was denied. Audio won\'t be recorded.',
-            [{ text: 'OK' }],
-          );
-        }
-        return;
-      }
-    }
-
     cameraRetryCountRef.current = 0;
-    setIsCameraReady(false);
-    setShowCamera(true);
+    await ensureCameraPermissions('video');
   };
 
   // --- AUTO OPEN CAMERA ON FIRST MOUNT WHEN AUTHENTICATED ---
@@ -784,6 +902,57 @@ export default function CreatePostScreen() {
       Alert.alert('Processing Error', 'Failed to process captured image. Please try again.');
     }
   };
+
+  const handlePickFromGallery = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission Required',
+          'Photo library access is required to choose existing media.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsEditing: false,
+        quality: 1,
+        videoMaxDuration: 120,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset?.uri) {
+        Alert.alert('Error', 'The selected media could not be loaded.');
+        return;
+      }
+
+      if (asset.type === 'video') {
+        setCapturedImageUri(null);
+        setEditedVideoUri(null);
+        setRecordedVideoUri(asset.uri);
+        setShowCamera(false);
+        setIsCameraReady(false);
+
+        const pickedThumbnail = await generateThumbnail(asset.uri).catch(() => null);
+        if (pickedThumbnail) {
+          setThumbnailUri(pickedThumbnail);
+        }
+
+        showToast('Video selected successfully!');
+        return;
+      }
+
+      await processCapturedImage(asset.uri);
+    } catch (error: any) {
+      console.error('[Gallery] Failed to pick media:', error);
+      Alert.alert('Error', error?.message || 'Failed to pick media from gallery.');
+    }
+  }, [processCapturedImage]);
 
   // --- IMAGE CAPTURE ---
   const takePicture = async () => {
@@ -895,20 +1064,12 @@ export default function CreatePostScreen() {
   };
 
   const startRecording = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current || isRecording) return;
 
     try {
-      if (!microphonePermission?.granted) {
-        const micResult = await requestMicrophonePermission();
-        if (!micResult.granted) {
-          Alert.alert(
-            'Microphone Permission Required',
-            'Microphone access is required to record audio with your video. Please enable it in your device settings.',
-            [{ text: 'OK' }]
-          );
-          setIsRecording(false);
-          return;
-        }
+      if (!isCameraReady) {
+        Alert.alert('Camera Starting', 'Please wait for the camera preview to finish loading.');
+        return;
       }
 
       setIsRecording(true);
@@ -930,7 +1091,7 @@ export default function CreatePostScreen() {
         stopRecording();
       }, (MAX_RECORDING_SECONDS + 1) * 1000);
 
-      try {
+      if (Platform.OS === 'ios') {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
@@ -938,35 +1099,16 @@ export default function CreatePostScreen() {
           playThroughEarpieceAndroid: false,
           staysActiveInBackground: false,
         });
-
-        if (!microphonePermission?.granted) {
-          console.error('Microphone permission not granted before recording');
-          Alert.alert('Error', 'Microphone permission is required for audio recording.');
-          setIsRecording(false);
-          return;
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        console.log('Audio mode set for recording, microphone permission verified');
-      } catch (audioError) {
-        console.error('Error setting audio mode:', audioError);
-        Alert.alert('Audio Error', 'Failed to configure audio for recording. Please try again.');
-        setIsRecording(false);
-        return;
+        await new Promise((resolve) => setTimeout(resolve, 160));
       }
 
-      const recordingOptions: any = {
+      const recordingOptions: Parameters<CameraView['recordAsync']>[0] = {
         maxDuration: MAX_RECORDING_SECONDS,
-        mute: false,
       };
 
       if (Platform.OS === 'ios') {
-        recordingOptions.codec = 'h264';
+        recordingOptions.codec = 'avc1';
       }
-
-      console.log('Starting recording with options:', recordingOptions);
-      console.log('Audio mode set, microphone permission:', microphonePermission?.granted);
 
       const recordingPromise = cameraRef.current.recordAsync(recordingOptions);
 
@@ -985,12 +1127,16 @@ export default function CreatePostScreen() {
             clearInterval(recordingTimerRef.current);
             recordingTimerRef.current = null;
           }
+          if (recordingSafetyTimeoutRef.current) {
+            clearTimeout(recordingSafetyTimeoutRef.current);
+            recordingSafetyTimeoutRef.current = null;
+          }
 
           if (video && video.uri) {
             // Verify video file exists before processing
             try {
               const fileInfo = await FileSystem.getInfoAsync(video.uri);
-              if (!fileInfo.exists) {
+              if (!fileInfo.exists || Number((fileInfo as any).size || 0) < 1024) {
                 console.error('[Recording] Video file does not exist:', video.uri);
                 if (isMountedRef.current) {
                   Alert.alert('Error', 'Video file was not saved properly. Please try again.');
@@ -1062,6 +1208,10 @@ export default function CreatePostScreen() {
             clearInterval(recordingTimerRef.current);
             recordingTimerRef.current = null;
           }
+          if (recordingSafetyTimeoutRef.current) {
+            clearTimeout(recordingSafetyTimeoutRef.current);
+            recordingSafetyTimeoutRef.current = null;
+          }
           if (error?.message && !error.message.includes('cancel')) {
             Alert.alert('Error', 'Failed to record video. Please try again.');
           }
@@ -1079,6 +1229,10 @@ export default function CreatePostScreen() {
         clearInterval(recordingTimerRef.current);
         recordingTimerRef.current = null;
       }
+      if (recordingSafetyTimeoutRef.current) {
+        clearTimeout(recordingSafetyTimeoutRef.current);
+        recordingSafetyTimeoutRef.current = null;
+      }
     }
   };
 
@@ -1090,6 +1244,10 @@ export default function CreatePostScreen() {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
+    if (recordingSafetyTimeoutRef.current) {
+      clearTimeout(recordingSafetyTimeoutRef.current);
+      recordingSafetyTimeoutRef.current = null;
+    }
 
     cameraRef.current.stopRecording();
   };
@@ -1099,11 +1257,16 @@ export default function CreatePostScreen() {
       stopRecording();
     }
     setShowCamera(false);
+    setIsCameraReady(false);
     setRecordingDuration(0);
     setIsRecording(false);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
+    }
+    if (recordingSafetyTimeoutRef.current) {
+      clearTimeout(recordingSafetyTimeoutRef.current);
+      recordingSafetyTimeoutRef.current = null;
     }
   };
 
@@ -1830,16 +1993,16 @@ export default function CreatePostScreen() {
           style={[styles.cameraContainer, { paddingTop: insets.top }]}
         >
           <CameraView
+            key={`camera-${cameraSessionKey}-${cameraMode}-${cameraFacing}`}
             ref={cameraRef}
             style={styles.camera}
             facing={cameraFacing}
             mode={cameraMode}
-            autofocus="on"
             zoom={0}
+            mirror={cameraFacing === 'front'}
+            mute={cameraMode === 'video' && !microphonePermission?.granted}
             enableTorch={false}
-            flash={cameraMode === 'picture' ? 'on' : 'off'}
-            videoQuality="720p"
-            videoBitrate={1_800_000}
+            flash="off"
             onCameraReady={() => {
               console.log('[Camera] Camera is ready');
               setIsCameraReady(true);
@@ -1905,7 +2068,10 @@ export default function CreatePostScreen() {
               <View style={styles.cameraBottomControls}>
                 <TouchableOpacity
                   style={styles.cameraModeButton}
-                  onPress={() => setCameraMode(cameraMode === 'video' ? 'picture' : 'video')}
+                  onPress={() => {
+                    const nextMode = cameraMode === 'video' ? 'picture' : 'video';
+                    void ensureCameraPermissions(nextMode);
+                  }}
                   disabled={isRecording}
                   accessibilityLabel={`Switch to ${cameraMode === 'video' ? 'picture' : 'video'} mode`}
                   accessibilityRole="button"
@@ -2113,11 +2279,10 @@ export default function CreatePostScreen() {
                         handleRecordVideo();
                       } else {
                         setServerMediaUrl(null);
-                        setCameraMode('picture');
-                        setShowCamera(true);
                         setTimeout(() => {
                           setCapturedImageUri(null);
                         }, 100);
+                        void ensureCameraPermissions('picture');
                       }
                     }}
                     disabled={uploading}
@@ -2495,6 +2660,7 @@ export default function CreatePostScreen() {
                                       setShowPostActionModal(true);
                                       return;
                                     }
+                                    void ensureChallengePostCount(challenge);
                                     setSelectedChallengeId(challenge.id);
                                   }}
                                 >
@@ -2503,7 +2669,9 @@ export default function CreatePostScreen() {
                                       {challenge.name}
                                     </Text>
                                     <Text style={[styles.competitionOptionMeta, { color: C.textSecondary }]}>
-                                      {info ? `${info.count}/${info.max} submitted` : 'Loading limit...'}
+                                      {info
+                                        ? `${info.count}/${info.max} submitted`
+                                        : `Up to ${Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5} posts`}
                                     </Text>
                                   </View>
                                   <View style={[styles.competitionOptionBadge, { backgroundColor: isFull ? `${C.warning}30` : isSelected ? `${C.primary}25` : `${C.border}66` }]}>
@@ -3980,7 +4148,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-function handlePickFromGallery() {
-  throw new Error('Function not implemented.');
-}
-
