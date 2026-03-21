@@ -2467,7 +2467,7 @@ export default function CreatePostScreen() {
                               />
                             </TouchableOpacity>
 
-                            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, marginTop: 20 }}>
+                            <Text style={{ color: C.textSecondary, fontSize: 16, marginBottom: 8, marginTop: 20, fontWeight: '700' }}>
                               Or choose one joined competition below:
                             </Text>
                           </View>
@@ -3747,7 +3747,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     padding: 14,
-    marginBottom: 20,
+    marginBottom: 8,
+    marginTop: -80,
   },
   warningBannerHeader: {
     flexDirection: 'row',
