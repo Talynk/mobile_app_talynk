@@ -500,6 +500,7 @@ export default function ProfileScreen() {
   const loadPostsRequestIdRef = useRef(0);
   const loadPostsRef = useRef<(showLoading?: boolean) => Promise<void> | void>(() => {});
   const loadProfileRef = useRef<(showLoading?: boolean) => Promise<void> | void>(() => {});
+  const publishedPostsCountRef = useRef(0);
 
   // Handle screen focus for video playback and refresh posts
   useFocusEffect(
@@ -671,7 +672,7 @@ export default function ProfileScreen() {
           name: userData.username,
           followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
           following_count: followingCount,
-          posts_count: prev?.posts_count ?? 0, // loadPosts() overwrites with published-only count
+          posts_count: publishedPostsCountRef.current || prev?.posts_count || userData.posts_count || userData.postsCount || 0,
           phone1: userData.phone1,
           phone2: userData.phone2,
           email: userData.email,
@@ -850,6 +851,7 @@ export default function ProfileScreen() {
         prefetchProfileThumbnails(fresh);
 
         const publishedCount = fresh.length;
+        publishedPostsCountRef.current = publishedCount;
         setProfile((prev: any) => (prev ? { ...prev, posts_count: publishedCount } : null));
 
         // Calculate total likes

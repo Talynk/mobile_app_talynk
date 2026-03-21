@@ -332,6 +332,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const teaserIntervalRef = useRef<any>(null);
+  const approvedPostsCountRef = useRef(0);
 
   const prefetchProfileThumbnails = useCallback((items: Post[]) => {
     const urls = items
@@ -404,6 +405,25 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (response.status === 'success' && response.data) {
           const userData = response.data;
           // Normalize user data structure
+          const rawFollowers =
+            (userData as any).followersCount ??
+            userData.followers_count ??
+            (userData as any).follower_count ??
+            (userData as any).followers?.count ??
+            0;
+          const rawFollowing =
+            (userData as any).followingCount ??
+            userData.following_count ??
+            (userData as any).subscribers ??
+            (userData as any).following?.count ??
+            0;
+          const rawPosts =
+            approvedPostsCountRef.current ||
+            userData.posts_count ||
+            (userData as any).postsCount ||
+            (userData as any).posts?.count ||
+            0;
+
           setProfile({
             ...userData,
             name: userData.name || (userData as any).fullName || userData.username || 'User',
@@ -413,9 +433,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             email: (userData as any).email || '',
             phone1: (userData as any).phone1 || '',
             phone2: (userData as any).phone2 || '',
-            followers_count: (userData as any).followersCount ?? userData.followers_count ?? (userData as any).follower_count ?? 0,
-            following_count: (userData as any).followingCount ?? userData.following_count ?? (userData as any).subscribers ?? 0,
-            posts_count: userData.posts_count || (userData as any).postsCount || 0,
+            followers_count: rawFollowers,
+            following_count: rawFollowing,
+            posts_count: rawPosts,
             id: userData.id || id as string,
           } as any);
         } else {
@@ -615,6 +635,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const visiblePosts = filterHlsReady(normalized);
         prefetchProfileThumbnails(visiblePosts);
         setApprovedPosts(visiblePosts);
+        approvedPostsCountRef.current = normalized.length;
         // Profile "Posts" stat = count of published (approved) posts only, not drafts
         setProfile((prev) => (prev ? { ...prev, posts_count: normalized.length } : null));
       } else {
