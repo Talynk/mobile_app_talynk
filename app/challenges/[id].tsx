@@ -147,6 +147,7 @@ export default function ChallengeDetailScreen() {
   const [postsWindowMessage, setPostsWindowMessage] = useState<string | null>(null);
   const [postsFetched, setPostsFetched] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
+  const [showUpcomingJoinModal, setShowUpcomingJoinModal] = useState(false);
   const fallbackChallengeDataRef = useRef<any>(null);
   const hasHandledInitialFocusRef = useRef(false);
 
@@ -686,6 +687,15 @@ export default function ChallengeDetailScreen() {
     return isChallengeRunning(challenge) && !challenge.is_participant;
   };
 
+  const handleJoinTap = () => {
+    if (joining) return;
+    if (!hasStarted() && !challengeEnded) {
+      setShowUpcomingJoinModal(true);
+      return;
+    }
+    handleJoinChallenge();
+  };
+
   const getDateInfo = () => {
     return getChallengeDateInfo(challenge);
   };
@@ -1024,10 +1034,10 @@ export default function ChallengeDetailScreen() {
                     style={[
                       styles.joinButton,
                       { backgroundColor: C.primary },
-                      (!canJoin() || joining) && { opacity: 0.5 }
+                      (!canJoin() || joining) && { opacity: 0.82 }
                     ]}
-                    onPress={handleJoinChallenge}
-                    disabled={!canJoin() || joining}
+                    onPress={handleJoinTap}
+                    disabled={joining}
                   >
                     {joining ? (
                       <ActivityIndicator size="small" color="#fff" />
@@ -1641,6 +1651,37 @@ export default function ChallengeDetailScreen() {
         postId={commentsPostId || ''}
       />
 
+      <Modal
+        visible={showUpcomingJoinModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowUpcomingJoinModal(false)}
+      >
+        <View style={styles.upcomingJoinOverlay}>
+          <View style={[styles.upcomingJoinCard, { backgroundColor: C.card, borderColor: C.border }]}>
+            <View style={styles.upcomingJoinIconWrap}>
+              <MaterialIcons name="schedule" size={34} color={C.warning} />
+            </View>
+            <Text style={[styles.upcomingJoinTitle, { color: C.text }]}>Competition Hasn't Started Yet</Text>
+            <Text style={[styles.upcomingJoinMessage, { color: C.textSecondary }]}>
+              Joining will open on:
+            </Text>
+            <Text style={[styles.upcomingJoinDate, { color: C.primary }]}>
+              {challenge?.start_date ? formatChallengeDateTime(challenge.start_date, { month: 'short' }) : 'Start date not available'}
+            </Text>
+            <Text style={[styles.upcomingJoinHint, { color: C.textSecondary }]}>
+              Please wait for the starting date and time, then tap Join Competition.
+            </Text>
+            <TouchableOpacity
+              style={[styles.upcomingJoinButton, { backgroundColor: C.primary }]}
+              onPress={() => setShowUpcomingJoinModal(false)}
+            >
+              <Text style={styles.upcomingJoinButtonText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Participants Modal */}
       <Modal visible={participantsModalVisible} transparent animationType="slide">
         <TouchableOpacity
@@ -1957,6 +1998,63 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginLeft: 8,
+  },
+  upcomingJoinOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  upcomingJoinCard: {
+    width: '100%',
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingVertical: 22,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+  },
+  upcomingJoinIconWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  upcomingJoinTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  upcomingJoinMessage: {
+    marginTop: 8,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  upcomingJoinDate: {
+    marginTop: 6,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  upcomingJoinHint: {
+    marginTop: 10,
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  upcomingJoinButton: {
+    marginTop: 16,
+    paddingVertical: 11,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+  },
+  upcomingJoinButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   organizerActions: {
     gap: 12,
