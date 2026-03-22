@@ -449,6 +449,11 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                                     Ends {formatChallengeDateTime(dateInfo.endDate, { month: 'short' })}
                                 </Text>
                             )}
+                            {dateInfo.note && (
+                                <Text style={[styles.dateText, { color: '#f59e0b' }]}>
+                                    {dateInfo.note}
+                                </Text>
+                            )}
                         </View>
                     </View>
                 ) : null}

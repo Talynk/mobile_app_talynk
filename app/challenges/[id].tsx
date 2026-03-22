@@ -34,6 +34,7 @@ import { useAppSelector } from '@/lib/store/hooks';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { Share } from 'react-native';
 import { useRealtime } from '@/lib/realtime-context';
+import websocketService from '@/lib/websocket-service';
 import {
   formatChallengeDateTime,
   getChallengeDateInfo,
@@ -497,6 +498,32 @@ export default function ChallengeDetailScreen() {
       }
     }, [id, activeTab])
   );
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    const handleChallengeUpdated = (update: { challengeId?: string }) => {
+      if (String(update?.challengeId) !== String(id)) {
+        return;
+      }
+
+      fetchChallenge({ showLoader: false });
+      if (activeTab === 'participants') {
+        fetchParticipants();
+      } else if (activeTab === 'winners') {
+        fetchWinners({ forceRefresh: true });
+      } else {
+        fetchPosts({ forceRefresh: true });
+      }
+    };
+
+    websocketService.on('challengeUpdated', handleChallengeUpdated);
+    return () => {
+      websocketService.off('challengeUpdated', handleChallengeUpdated);
+    };
+  }, [activeTab, id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1123,6 +1150,11 @@ export default function ChallengeDetailScreen() {
                     {dateInfo.showEndDate && dateInfo.endDate && (
                       <Text style={[styles.detailText, { color: C.text }]}>
                         Ends {formatDate(dateInfo.endDate.toISOString())}
+                      </Text>
+                    )}
+                    {dateInfo.note && (
+                      <Text style={[styles.detailMetaText, { color: C.warning }]}>
+                        {dateInfo.note}
                       </Text>
                     )}
                     <Text style={[styles.detailMetaText, { color: C.textSecondary }]}>

@@ -177,6 +177,9 @@ export interface Notification {
     milestone?: number;
     views?: number;
     status?: string;
+    action?: string;
+    startDate?: string;
+    endDate?: string;
     reason?: string;
   };
   // Legacy fields for backward compatibility

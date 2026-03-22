@@ -12,7 +12,6 @@ import {
   Share,
   Alert,
   RefreshControl,
-  Dimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
@@ -47,9 +46,6 @@ import {
 } from '@/lib/utils/post-detail-enrichment';
 
 
-const { width: screenWidth } = Dimensions.get('window');
-const POST_CARD_WIDTH = Math.floor(screenWidth / 3) - 1; // 3 columns, edge-to-edge
-
 function normalizeUserProfilePost(post: any, fallbackProfile?: any): Post {
   const userFromPost = post?.user;
   const authorName = post?.authorName || post?.username || userFromPost?.username || fallbackProfile?.username;
@@ -72,6 +68,30 @@ function normalizeUserProfilePost(post: any, fallbackProfile?: any): Post {
         : undefined),
   });
 }
+
+const getExternalPostTimestamp = (post: Post) =>
+  new Date(post.createdAt || post.uploadDate || (post as any).created_at || 0).getTime();
+
+const sortExternalProfilePostsNewestFirst = (items: Post[]) =>
+  [...items].sort((a, b) => getExternalPostTimestamp(b) - getExternalPostTimestamp(a));
+
+const hasRenderableExternalProfileMedia = (post: any) => {
+  const isVideo =
+    post.type === 'video' ||
+    post.mediaType === 'video' ||
+    !!(post.video_url || post.videoUrl);
+
+  const hasImage =
+    !!getThumbnailUrl(post) ||
+    !!getFileUrl(post.image || post.imageUrl || '');
+
+  if (!isVideo) {
+    return hasImage;
+  }
+
+  const hasHls = filterHlsReady([post]).length > 0;
+  return hasHls || hasImage;
+};
 
 
 // Video thumbnail with teaser playback
@@ -333,8 +353,14 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const teaserIntervalRef = useRef<any>(null);
   const approvedPostsCountRef = useRef(0);
+  const profileSnapshotRef = useRef<User | null>(null);
+  const postsRequestIdRef = useRef(0);
 
-  const prefetchProfileThumbnails = useCallback((items: Post[]) => {
+  useEffect(() => {
+    profileSnapshotRef.current = profile;
+  }, [profile]);
+
+  const prefetchRenderableThumbnails = useCallback((items: Post[]) => {
     const urls = items
       .map((post: any) => getThumbnailUrl(post) || null)
       .filter((url): url is string => !!url);
@@ -346,6 +372,27 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     void ExpoImage.prefetch(urls, 'memory-disk').catch(() => {
       // Best-effort only.
     });
+  }, []);
+
+  const buildRenderableApprovedPosts = useCallback((items: any[], fallbackProfile?: User | null) => {
+    const byId = new Map<string, Post>();
+
+    sortExternalProfilePostsNewestFirst(
+      items.map((post: any) => normalizeUserProfilePost(post, fallbackProfile ?? profileSnapshotRef.current ?? undefined))
+    )
+      .forEach((post: Post) => {
+        if (!post?.id || byId.has(post.id)) {
+          return;
+        }
+
+        if (!hasRenderableExternalProfileMedia(post)) {
+          return;
+        }
+
+        byId.set(post.id, post);
+      });
+
+    return Array.from(byId.values());
   }, []);
 
   // Error and loading states
@@ -490,83 +537,42 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     checkFollow();
   }, [id, currentUser]);
 
-  // Real-time updates for profile stats
-  useEffect(() => {
-    if (!isConnected || !id) return;
-
-    // Listen for new posts from this user
-    const handleNewPost = (data: any) => {
-      if (data.userId === id) {
-        console.log('New post detected for user:', id);
-        // Refresh posts and update count
-        fetchApprovedPosts();
-        // Update profile stats
-        if (profile) {
-          setProfile(prev => prev ? { ...prev, posts_count: (prev.posts_count || 0) + 1 } : null);
-        }
-      }
-    };
-
-    // Listen for follow/unfollow actions
-    const handleFollowAction = (data: any) => {
-      if (data.targetUserId === id) {
-        console.log('Follow action detected for user:', id);
-        // Update followers count
-        if (profile) {
-          const newFollowersCount = data.action === 'follow'
-            ? (profile.followers_count || 0) + 1
-            : Math.max(0, (profile.followers_count || 0) - 1);
-          setProfile(prev => prev ? { ...prev, followers_count: newFollowersCount } : null);
-        }
-      }
-    };
-
-    // Listen for post approval/rejection
-    const handlePostStatusChange = (data: any) => {
-      if (data.userId === id) {
-        console.log('Post status change detected for user:', id);
-        // Refresh posts to get updated list
-        fetchApprovedPosts();
-        // Update profile stats based on action
-        if (profile) {
-          const newPostsCount = data.action === 'approve'
-            ? (profile.posts_count || 0) + 1
-            : Math.max(0, (profile.posts_count || 0) - 1);
-          setProfile(prev => prev ? { ...prev, posts_count: newPostsCount } : null);
-        }
-      }
-    };
-
-    // Set up real-time listeners using the existing realtime context
-    // This will depend on your realtime context implementation
-    // For now, we'll use a polling approach as fallback
-    const pollInterval = setInterval(() => {
-      // Poll for updates every 30 seconds
-      fetchApprovedPosts();
-    }, 30000);
-
-    return () => {
-      clearInterval(pollInterval);
-    };
-  }, [isConnected, id, profile]);
-
   // Fetch approved posts
-  const fetchApprovedPosts = async () => {
+  const fetchApprovedPosts = useCallback(async (options?: { background?: boolean }) => {
     if (!id) return;
-    setLoadingPosts(true);
+
+    const requestId = postsRequestIdRef.current + 1;
+    postsRequestIdRef.current = requestId;
+    const fallbackProfile = profileSnapshotRef.current;
+
+    if (!options?.background || approvedPostsCountRef.current === 0) {
+      setLoadingPosts(true);
+    }
     setPostsError(null);
+
     try {
       const response = await fetchAllApprovedPosts(id as string);
+      if (requestId !== postsRequestIdRef.current) {
+        return;
+      }
+
       if (response.status === 'success' && response.data) {
         // Handle both array and object with posts property
-        const posts = Array.isArray(response.data)
+        const rawPosts = Array.isArray(response.data)
           ? response.data
           : (response.data as any)?.posts || [];
         // Normalize backend shapes so UI always has `user`, `fullUrl`, and consistent fields
-        const normalized = (posts as any[]).map((p: any) => {
-          return normalizeUserProfilePost(p, profile);
+        const normalized = (rawPosts as any[]).map((p: any) => {
+          return normalizeUserProfilePost(p, fallbackProfile ?? undefined);
         });
         primePostDetailsCache(normalized);
+
+        const initialVisiblePosts = buildRenderableApprovedPosts(normalized, fallbackProfile);
+        prefetchRenderableThumbnails(initialVisiblePosts);
+        setApprovedPosts(initialVisiblePosts);
+        approvedPostsCountRef.current = initialVisiblePosts.length;
+        setProfile((prev) => (prev ? { ...prev, posts_count: initialVisiblePosts.length } : null));
+        setLoadingPosts(false);
 
         // CRITICAL ENRICHMENT: Backend user-post endpoints return hlsReady:true
         // but OMIT hls_url and thumbnail_url. Fetch from individual post endpoint.
@@ -625,19 +631,22 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                     ...enriched,
                     user: enriched?.user || normalized[i].user,
                   },
-                  profile,
+                  fallbackProfile ?? undefined,
                 ),
               };
             }
           }
         }
 
-        const visiblePosts = filterHlsReady(normalized);
-        prefetchProfileThumbnails(visiblePosts);
+        if (requestId !== postsRequestIdRef.current) {
+          return;
+        }
+
+        const visiblePosts = buildRenderableApprovedPosts(normalized, fallbackProfile);
+        prefetchRenderableThumbnails(visiblePosts);
         setApprovedPosts(visiblePosts);
-        approvedPostsCountRef.current = normalized.length;
-        // Profile "Posts" stat = count of published (approved) posts only, not drafts
-        setProfile((prev) => (prev ? { ...prev, posts_count: normalized.length } : null));
+        approvedPostsCountRef.current = visiblePosts.length;
+        setProfile((prev) => (prev ? { ...prev, posts_count: visiblePosts.length } : null));
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }
@@ -647,13 +656,63 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         ? 'Network error. Please check your connection.'
         : err?.message || 'Failed to fetch posts');
     } finally {
-      setLoadingPosts(false);
+      if (requestId === postsRequestIdRef.current) {
+        setLoadingPosts(false);
+      }
     }
-  };
+  }, [approvedPostsCountRef, buildRenderableApprovedPosts, id, prefetchRenderableThumbnails]);
 
   useEffect(() => {
     fetchApprovedPosts();
-  }, [id]);
+  }, [fetchApprovedPosts]);
+
+  // Real-time updates for profile stats
+  useEffect(() => {
+    if (!isConnected || !id) return;
+
+    const handleNewPost = (data: any) => {
+      if (data.userId === id) {
+        console.log('New post detected for user:', id);
+        void fetchApprovedPosts({ background: true });
+        setProfile(prev => prev ? { ...prev, posts_count: (prev.posts_count || 0) + 1 } : null);
+      }
+    };
+
+    const handleFollowAction = (data: any) => {
+      if (data.targetUserId === id) {
+        console.log('Follow action detected for user:', id);
+        setProfile(prev => {
+          if (!prev) return prev;
+          const newFollowersCount = data.action === 'follow'
+            ? (prev.followers_count || 0) + 1
+            : Math.max(0, (prev.followers_count || 0) - 1);
+          return { ...prev, followers_count: newFollowersCount };
+        });
+      }
+    };
+
+    const handlePostStatusChange = (data: any) => {
+      if (data.userId === id) {
+        console.log('Post status change detected for user:', id);
+        void fetchApprovedPosts({ background: true });
+        setProfile(prev => {
+          if (!prev) return prev;
+          const newPostsCount = data.action === 'approve'
+            ? (prev.posts_count || 0) + 1
+            : Math.max(0, (prev.posts_count || 0) - 1);
+          return { ...prev, posts_count: newPostsCount };
+        });
+      }
+    };
+
+    const pollInterval = setInterval(() => {
+      void fetchApprovedPosts({ background: true });
+    }, 30000);
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [fetchApprovedPosts, id, isConnected]);
 
   // Refresh function
   const onRefresh = () => {
@@ -985,7 +1044,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         {/* Posts Section */}
         <View style={[styles.postsSection, { backgroundColor: C.background }]}>
           <Text style={[styles.sectionTitle, { color: C.text }]}>Posts ({approvedPosts.length})</Text>
-          {loadingPosts ? (
+          {loadingPosts && approvedPosts.length === 0 ? (
             <View style={styles.loadingContainer}>
               <DotsSpinner size={8} color={C.primary} />
               <Text style={[styles.loadingText, { color: C.textSecondary, marginTop: 12 }]}>Loading posts...</Text>
@@ -1014,10 +1073,10 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 />
               )}
               keyExtractor={item => item.id}
-              numColumns={3}
-              columnWrapperStyle={{ gap: 1 }}
+              numColumns={2}
+              columnWrapperStyle={styles.postsRow}
               scrollEnabled={false}
-              contentContainerStyle={{ paddingBottom: 40 }}
+              contentContainerStyle={styles.postsListContent}
             />
           )}
         </View>
@@ -1197,6 +1256,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 16,
+  },
+  postsRow: {
+    justifyContent: 'space-between',
+  },
+  postsListContent: {
+    paddingBottom: 40,
   },
   postCard: {
     borderRadius: 12,

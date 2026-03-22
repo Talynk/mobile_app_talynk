@@ -284,6 +284,10 @@ export default function NotificationsScreen() {
         return { name: 'check-circle', color: '#10b981', bg: 'rgba(16, 185, 129, 0.15)' };
       case 'challenge_rejected':
         return { name: 'cancel', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)' };
+      case 'challenge_live':
+        return { name: 'bolt', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' };
+      case 'challenge_schedule_updated':
+        return { name: 'event-repeat', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)' };
 
       // Post status notification types
       case 'post_status_update':
@@ -470,6 +474,8 @@ export default function NotificationsScreen() {
       // Challenge notifications - navigate to challenge
       case 'challenge_approved':
       case 'challenge_rejected':
+      case 'challenge_live':
+      case 'challenge_schedule_updated':
         if (challengeId) {
           router.push({
             pathname: '/challenges/[id]',

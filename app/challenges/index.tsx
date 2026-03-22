@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
+import websocketService from '@/lib/websocket-service';
 import {
   formatChallengeDateTime,
   getChallengeDateInfo,
@@ -146,6 +147,17 @@ export default function ChallengesScreen() {
       fetchChallenges();
     }, [])
   );
+
+  useEffect(() => {
+    const handleChallengeUpdated = () => {
+      void fetchChallenges();
+    };
+
+    websocketService.on('challengeUpdated', handleChallengeUpdated);
+    return () => {
+      websocketService.off('challengeUpdated', handleChallengeUpdated);
+    };
+  }, [isAuthenticated]);
 
   const visibleChallenges = useMemo(() => {
     if (activeTab === 'live_upcoming') {
@@ -304,6 +316,11 @@ export default function ChallengesScreen() {
                 {dateInfo.showEndDate && dateInfo.endDate && (
                   <Text style={[styles.dateText, { color: C.textSecondary }]}>
                     Ends {formatDate(dateInfo.endDate.toISOString())}
+                  </Text>
+                )}
+                {dateInfo.note && (
+                  <Text style={[styles.dateText, { color: C.warning }]}>
+                    {dateInfo.note}
                   </Text>
                 )}
               </View>

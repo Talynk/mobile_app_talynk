@@ -13,6 +13,16 @@ interface VideoReadyNotificationInput {
   challengeName?: string;
 }
 
+interface ChallengeStatusNotificationInput {
+  userId: string;
+  challengeId: string;
+  challengeName?: string;
+  type: 'challenge_live' | 'challenge_schedule_updated';
+  action?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
 const storageKey = (userId: string) => `@frontend_notifications:${userId}`;
 
 async function readNotifications(userId: string): Promise<Notification[]> {
@@ -39,6 +49,16 @@ function buildVideoReadyMessage(input: VideoReadyNotificationInput): string {
   }
 
   return 'Your video is ready.';
+}
+
+function buildChallengeStatusMessage(input: ChallengeStatusNotificationInput): string {
+  const challengeLabel = input.challengeName || 'A competition';
+
+  if (input.type === 'challenge_live') {
+    return `${challengeLabel} is live now. Started early by admin.`;
+  }
+
+  return `${challengeLabel} schedule was updated by admin.`;
 }
 
 export const frontendNotifications = {
@@ -80,6 +100,44 @@ export const frontendNotifications = {
         status: input.destination,
       },
       related_post_id: input.postId,
+    };
+
+    await writeNotifications(input.userId, [notification, ...notifications]);
+    localNotificationEvents.emitChanged();
+    return notification;
+  },
+
+  async addChallengeStatusNotification(input: ChallengeStatusNotificationInput): Promise<Notification> {
+    const notifications = await readNotifications(input.userId);
+    const message = buildChallengeStatusMessage(input);
+    const existing = notifications.find(
+      (notification) =>
+        notification.type === input.type &&
+        notification.metadata?.challengeId === input.challengeId &&
+        notification.message === message &&
+        notification.metadata?.action === input.action &&
+        notification.metadata?.startDate === input.startDate &&
+        notification.metadata?.endDate === input.endDate
+    );
+
+    if (existing) {
+      return existing;
+    }
+
+    const notification: Notification = {
+      id: -Date.now(),
+      userID: input.userId,
+      message,
+      type: input.type,
+      isRead: false,
+      createdAt: new Date().toISOString(),
+      metadata: {
+        challengeId: input.challengeId,
+        challengeName: input.challengeName,
+        action: input.action,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      },
     };
 
     await writeNotifications(input.userId, [notification, ...notifications]);

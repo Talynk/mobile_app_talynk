@@ -113,6 +113,24 @@ export function isChallengeParticipationOpen(challenge: any, now = new Date()): 
   return true;
 }
 
+export function isChallengeStartedEarly(challenge: any, now = new Date()): boolean {
+  if (!challenge || isChallengeOver(challenge, now)) {
+    return false;
+  }
+
+  const status = getChallengeStatusValue(challenge);
+  const startDate = parseChallengeDate(challenge.start_date);
+
+  if (!startDate) {
+    return false;
+  }
+
+  return (
+    (status === 'active' || challenge.is_currently_active === true) &&
+    now.getTime() < startDate.getTime()
+  );
+}
+
 export function isChallengeRunning(challenge: any, now = new Date()): boolean {
   return isChallengeParticipationOpen(challenge, now);
 }
@@ -137,6 +155,10 @@ export function getChallengeDisplayStatus(challenge: any): {
 
   if (status === 'stopped') {
     return { key: 'ended_early', label: 'Ended early' };
+  }
+
+  if (isChallengeStartedEarly(challenge)) {
+    return { key: 'ongoing', label: 'Live now' };
   }
 
   if (isChallengeRunning(challenge)) {
@@ -167,6 +189,16 @@ export function getChallengeDateInfo(challenge: any, now = new Date()) {
       date: endDate || startDate || now,
       showEndDate: false,
       endDate: endDate || undefined,
+    };
+  }
+
+  if (isChallengeStartedEarly(challenge, now)) {
+    return {
+      label: 'Live now until',
+      date: endDate || now,
+      showEndDate: false,
+      endDate: endDate || undefined,
+      note: 'Started early by admin',
     };
   }
 

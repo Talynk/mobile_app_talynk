@@ -7,9 +7,12 @@ import websocketService, {
   NotificationUpdate,
   LikeUpdate,
   ChallengeLikesUpdate,
+  ChallengeUpdatedEvent,
 } from './websocket-service';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authEventEmitter } from './auth-event-emitter';
+import { getCachedJoinedChallenges } from './create-screen-cache';
+import { frontendNotifications } from './frontend-notifications';
 
 interface RealtimeContextType {
   isConnected: boolean;
@@ -131,6 +134,36 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
             challengeLikeCallbacks.current.forEach(callback => callback(update));
           };
 
+          const handleChallengeUpdated = async (update: ChallengeUpdatedEvent) => {
+            if (!user.id || !update?.challengeId) {
+              return;
+            }
+
+            const joinedChallenges = (await getCachedJoinedChallenges<any[]>(user.id)) ?? [];
+            const matchingChallenge = joinedChallenges.find(
+              (challenge: any) => String(challenge?.id) === String(update.challengeId)
+            );
+
+            if (!matchingChallenge) {
+              return;
+            }
+
+            const notificationType =
+              update.action === 'start_now' || update.status === 'active'
+                ? 'challenge_live'
+                : 'challenge_schedule_updated';
+
+            await frontendNotifications.addChallengeStatusNotification({
+              userId: user.id,
+              challengeId: String(update.challengeId),
+              challengeName: matchingChallenge.name,
+              type: notificationType,
+              action: update.action,
+              startDate: update.start_date,
+              endDate: update.end_date,
+            });
+          };
+
           websocketService.on('connected', handleConnected);
           websocketService.on('disconnected', handleDisconnected);
           websocketService.on('disabled', handleDisabled);
@@ -139,6 +172,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
           websocketService.on('newNotification', handleNewNotification);
           websocketService.on('likeUpdate', handleLikeUpdate);
           websocketService.on('challengeLikesUpdated', handleChallengeLikesUpdated);
+          websocketService.on('challengeUpdated', handleChallengeUpdated);
 
           // Handle account suspension via WebSocket
           const handleAccountSuspended = (data: any) => {
@@ -157,6 +191,7 @@ export const RealtimeProvider: React.FC<RealtimeProviderProps> = ({ children }) 
             websocketService.off('newNotification', handleNewNotification);
             websocketService.off('likeUpdate', handleLikeUpdate);
             websocketService.off('challengeLikesUpdated', handleChallengeLikesUpdated);
+            websocketService.off('challengeUpdated', handleChallengeUpdated);
             websocketService.off('accountSuspended', handleAccountSuspended);
             websocketService.disconnect();
           };
