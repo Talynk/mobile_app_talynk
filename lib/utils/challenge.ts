@@ -1,11 +1,46 @@
-const ACTIVE_STATUSES = new Set(['approved', 'active']);
 const OVER_STATUSES = new Set(['ended', 'stopped']);
 
 type DateLike = string | number | Date | null | undefined;
 
 export function parseChallengeDate(value: DateLike): Date | null {
   if (!value) return null;
-  const date = value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const input = String(value).trim();
+  if (!input) return null;
+
+  const nativeDate = new Date(input);
+  if (!Number.isNaN(nativeDate.getTime())) {
+    return nativeDate;
+  }
+
+  const normalized = input.replace(' ', 'T');
+  const match = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2})(?::(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?)?$/
+  );
+
+  if (match) {
+    const [, year, month, day, hour = '00', minute = '00', second = '00', millisecond = '0'] = match;
+    const date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      Number(millisecond.padEnd(3, '0')),
+    );
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(input);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -30,18 +65,21 @@ export function isChallengeUpcoming(challenge: any, now = new Date()): boolean {
     return false;
   }
 
-  const startDate = parseChallengeDate(challenge.start_date);
-  return !!startDate && now.getTime() < startDate.getTime();
-}
-
-export function isChallengeRunning(challenge: any, now = new Date()): boolean {
-  if (!challenge) return false;
-
   const status = getChallengeStatusValue(challenge);
-  if (challenge.is_currently_active === true) {
-    return true;
+  if (status === 'active' || challenge.is_currently_active === true) {
+    return false;
   }
 
+  const startDate = parseChallengeDate(challenge.start_date);
+  return status === 'approved' && !!startDate && now.getTime() < startDate.getTime();
+}
+
+export function isChallengeParticipationOpen(challenge: any, now = new Date()): boolean {
+  if (!challenge || isChallengeOver(challenge, now)) {
+    return false;
+  }
+
+  const status = getChallengeStatusValue(challenge);
   if (
     status === 'pending' ||
     status === 'draft' ||
@@ -52,14 +90,31 @@ export function isChallengeRunning(challenge: any, now = new Date()): boolean {
     return false;
   }
 
+  if (challenge.is_currently_active === true || status === 'active') {
+    const endDate = parseChallengeDate(challenge.end_date);
+    return !endDate || now.getTime() <= endDate.getTime();
+  }
+
+  if (status !== 'approved') {
+    return false;
+  }
+
   const startDate = parseChallengeDate(challenge.start_date);
   const endDate = parseChallengeDate(challenge.end_date);
 
-  if (!startDate || !endDate) {
-    return ACTIVE_STATUSES.has(status);
+  if (startDate && now.getTime() < startDate.getTime()) {
+    return false;
   }
 
-  return ACTIVE_STATUSES.has(status) && now >= startDate && now <= endDate;
+  if (endDate && now.getTime() > endDate.getTime()) {
+    return false;
+  }
+
+  return true;
+}
+
+export function isChallengeRunning(challenge: any, now = new Date()): boolean {
+  return isChallengeParticipationOpen(challenge, now);
 }
 
 export function getChallengeDisplayStatus(challenge: any): {
@@ -115,7 +170,7 @@ export function getChallengeDateInfo(challenge: any, now = new Date()) {
     };
   }
 
-  if (startDate && now < startDate) {
+  if (status !== 'active' && challenge.is_currently_active !== true && startDate && now < startDate) {
     return {
       label: 'Starts on',
       date: startDate,

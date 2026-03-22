@@ -42,6 +42,28 @@ async function retryApiRequest<T>(
   throw lastError;
 }
 
+function extractJoinedChallenges(apiResponse: any) {
+  const data = apiResponse?.data;
+  const participations = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.participations)
+      ? data.participations
+      : Array.isArray(data?.joined)
+        ? data.joined
+        : Array.isArray(data?.challenges)
+          ? data.challenges
+          : [];
+
+  const challenges = participations
+    .map((item: any) => item?.challenge || item)
+    .filter((challenge: any) => challenge && challenge.id);
+
+  return {
+    challenges,
+    pagination: apiResponse?.pagination || data?.pagination || {},
+  };
+}
+
 // Auth API
 export const authApi = {
   login: async (usernameOrEmail: string, password: string): Promise<ApiResponse<LoginResponseData>> => {
@@ -1484,37 +1506,42 @@ export const challengesApi = {
     }
   },
 
-  getJoinedChallenges: async (): Promise<ApiResponse<any>> => {
+  getJoinedChallenges: async (
+    options?: { fresh?: boolean; timeout?: number; maxAttempts?: number }
+  ): Promise<ApiResponse<any>> => {
     try {
-      const response = await apiClient.get('/api/challenges/joined', { timeout: 15000 });
-      const apiResponse = response.data;
+      const fresh = options?.fresh === true;
+      const timeout = options?.timeout ?? 15000;
+      const maxAttempts = options?.maxAttempts ?? (fresh ? 3 : 2);
 
-      console.log('[API] getJoinedChallenges raw response:', {
-        status: apiResponse?.status,
-        dataIsArray: Array.isArray(apiResponse?.data),
-        dataLength: Array.isArray(apiResponse?.data) ? apiResponse.data.length : 'N/A',
-        firstItem: apiResponse?.data?.[0] ? Object.keys(apiResponse.data[0]) : 'none',
-      });
+      const response = await retryApiRequest(
+        () =>
+          apiClient.get('/api/challenges/joined', {
+            timeout,
+            params: fresh ? { t: Date.now() } : undefined,
+            headers: fresh
+              ? {
+                  'Cache-Control': 'no-cache, no-store, max-age=0',
+                  Pragma: 'no-cache',
+                }
+              : undefined,
+          }),
+        maxAttempts,
+        700,
+      );
+      const apiResponse = response.data;
 
       // Backend returns: { status: 'success', data: [...participations], pagination: {...} }
       // Each participation is { id, user_id, challenge_id, joined_at, challenge: { ...challengeData } }
       if (apiResponse?.status === 'success' && apiResponse?.data) {
-        const participations = Array.isArray(apiResponse.data) ? apiResponse.data : [];
-
-        // Unwrap challenge sub-objects from participations
-        const challenges = participations
-          .map((item: any) => item.challenge || item)
-          .filter((c: any) => c && c.id);
-
-        console.log('[API] getJoinedChallenges extracted challenges:', challenges.length,
-          challenges.map((c: any) => ({ id: c.id, name: c.name, status: c.status })));
+        const { challenges, pagination } = extractJoinedChallenges(apiResponse);
 
         return {
           status: 'success',
           message: apiResponse.message || 'Joined challenges fetched successfully',
           data: {
             challenges: challenges,
-            pagination: apiResponse.pagination || {}
+            pagination,
           }
         };
       }
@@ -1525,7 +1552,6 @@ export const challengesApi = {
         data: { challenges: [], pagination: {} },
       };
     } catch (error: any) {
-      console.warn('[API] getJoinedChallenges error:', error.message, error.response?.status);
       const isNetwork =
         error?.message?.includes('Network') ||
         error?.message?.includes('timeout') ||
@@ -1908,7 +1934,6 @@ export const challengesApi = {
         status: 'error',
         message,
         data: apiData?.data ?? apiData ?? null,
-        code: apiData?.code,
       };
     }
   }

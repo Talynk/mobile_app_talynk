@@ -39,9 +39,11 @@ import {
   getChallengeDateInfo,
   getChallengeDisplayStatus,
   getCurrentTimeZoneLabel,
+  isChallengeParticipationOpen,
   isChallengeOver,
   isChallengeRunning,
 } from '@/lib/utils/challenge';
+import { upsertCachedJoinedChallenge } from '@/lib/create-screen-cache';
 import {
   loadFallbackChallengePosts,
   sortChallengePostsByLikes,
@@ -558,6 +560,12 @@ export default function ChallengeDetailScreen() {
       const response = await challengesApi.join(id as string);
 
       if (response?.status === 'success') {
+        if (user?.id && challenge?.id) {
+          void upsertCachedJoinedChallenge(user.id, {
+            ...challenge,
+            is_participant: true,
+          });
+        }
         Alert.alert('Success', response.message || 'You have joined the competition!', [
           { text: 'OK', onPress: () => fetchChallenge() }
         ]);
@@ -678,7 +686,7 @@ export default function ChallengeDetailScreen() {
 
   const hasStarted = () => {
     if (!challenge) return false;
-    return new Date() >= new Date(challenge.start_date);
+    return isChallengeParticipationOpen(challenge);
   };
 
   const canJoin = () => {
@@ -689,7 +697,7 @@ export default function ChallengeDetailScreen() {
 
   const handleJoinTap = () => {
     if (joining) return;
-    if (!hasStarted() && !challengeEnded) {
+    if (!canJoin() && !challengeEnded && !challenge?.is_participant) {
       setShowUpcomingJoinModal(true);
       return;
     }

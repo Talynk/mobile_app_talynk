@@ -59,6 +59,14 @@ export interface ChallengeLikesUpdate {
   likeCount: number;
 }
 
+export interface ChallengeUpdatedEvent {
+  challengeId: string;
+  action?: 'start_now' | 'dates_updated' | string;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
 class WebSocketService extends SimpleEventEmitter {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
@@ -223,6 +231,14 @@ class WebSocketService extends SimpleEventEmitter {
 
       case 'challenge:likesUpdated':
         this.emit('challengeLikesUpdated', data as ChallengeLikesUpdate);
+        break;
+
+      case 'challenge:updated':
+        this.emit('challengeUpdated', data as ChallengeUpdatedEvent);
+        break;
+
+      case 'challenge:winnersConfirmed':
+        this.emit('challengeWinnersConfirmed', data);
         break;
 
       case 'comment':

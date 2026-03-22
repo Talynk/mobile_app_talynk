@@ -33,6 +33,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { getFileUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
 import { Avatar } from '@/components/Avatar';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
+import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
 import { localNotificationEvents } from '@/lib/local-notification-events';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getCachedPostDetail, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
@@ -1120,14 +1121,7 @@ export default function ProfileScreen() {
         if (res.status === 'success' && res.data) {
           const raw = res.data?.challenges ?? (Array.isArray(res.data) ? res.data : []);
           const list = raw.map((item: any) => item.challenge || item).filter((c: any) => c?.id);
-          const now = new Date();
-          const active = list.filter((c: any) => {
-            const status = (c.status || '').toLowerCase();
-            if (status !== 'active' && status !== 'approved') return false;
-            if (c.start_date && new Date(c.start_date) > now) return false;
-            if (c.end_date && new Date(c.end_date) < now) return false;
-            return true;
-          });
+          const active = list.filter((c: any) => isChallengeParticipationOpen(c));
           setJoinedChallengesForSubmit(active);
         } else {
           setJoinedChallengesForSubmit([]);

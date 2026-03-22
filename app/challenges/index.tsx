@@ -25,6 +25,8 @@ import {
   formatChallengeDateTime,
   getChallengeDateInfo,
   getChallengeDisplayStatus,
+  isChallengeParticipationOpen,
+  isChallengeUpcoming,
 } from '@/lib/utils/challenge';
 
 const COLORS = {
@@ -114,17 +116,8 @@ export default function ChallengesScreen() {
       const allListRaw = normalizeChallenges(allRes);
       const now = new Date();
 
-      // Separate active vs upcoming based on date
-      const activeList = allListRaw.filter((ch: any) => {
-        const startDate = new Date(ch.start_date);
-        const endDate = new Date(ch.end_date);
-        return (ch.status === 'active' || ch.status === 'approved') && startDate <= now && endDate >= now;
-      });
-
-      const upcomingList = allListRaw.filter((ch: any) => {
-        const startDate = new Date(ch.start_date);
-        return (ch.status === 'active' || ch.status === 'approved') && startDate > now;
-      });
+      const activeList = allListRaw.filter((ch: any) => isChallengeParticipationOpen(ch, now));
+      const upcomingList = allListRaw.filter((ch: any) => isChallengeUpcoming(ch, now));
 
       // Ended: GET /api/challenges/ended
       const endedFromApi = (endedRes.data?.challenges ?? []) as any[];
@@ -158,11 +151,11 @@ export default function ChallengesScreen() {
     if (activeTab === 'live_upcoming') {
       const merged = [...activeChallenges, ...upcomingChallenges];
       return merged.sort((a, b) => {
+        const now = new Date();
         const aStart = new Date(a.start_date).getTime();
         const bStart = new Date(b.start_date).getTime();
-        const now = Date.now();
-        const aActive = aStart <= now && new Date(a.end_date).getTime() >= now;
-        const bActive = bStart <= now && new Date(b.end_date).getTime() >= now;
+        const aActive = isChallengeParticipationOpen(a, now);
+        const bActive = isChallengeParticipationOpen(b, now);
         if (aActive && !bActive) return -1;
         if (!aActive && bActive) return 1;
         return aStart - bStart;

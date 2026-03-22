@@ -53,6 +53,8 @@ import {
   setCachedCreateCategories,
   setCachedJoinedChallenges,
 } from '@/lib/create-screen-cache';
+import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
+import websocketService from '@/lib/websocket-service';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -307,6 +309,8 @@ export default function CreatePostScreen() {
   const [pendingDraftStatus, setPendingDraftStatus] = useState<'active' | 'draft'>('draft');
   const effectiveSelectedChallengeId = isChallengeOnlyFlow ? forcedChallengeId : selectedChallengeId;
   const loadingChallengeCountsRef = useRef<Set<string>>(new Set());
+  const joinedChallengesRequestIdRef = useRef(0);
+  const joinedChallengesRef = useRef<any[]>([]);
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -431,26 +435,19 @@ export default function CreatePostScreen() {
     }
 
     const now = new Date();
-    return rawList
+    const deduped = new Map<string, any>();
+
+    rawList
       .map((item: any) => item?.challenge || item)
       .filter((challenge: any) => challenge && challenge.id)
       .filter((challenge: any) => {
-        const status = challenge.status?.toLowerCase();
-        const isActiveStatus = status === 'active' || status === 'approved';
-        if (!isActiveStatus) {
-          return false;
-        }
-
-        if (challenge.start_date && now < new Date(challenge.start_date)) {
-          return false;
-        }
-
-        if (challenge.end_date && now > new Date(challenge.end_date)) {
-          return false;
-        }
-
-        return true;
+        return isChallengeParticipationOpen(challenge, now);
+      })
+      .forEach((challenge: any) => {
+        deduped.set(String(challenge.id), challenge);
       });
+
+    return Array.from(deduped.values());
   }, []);
 
   // --- FETCH CATEGORIES (with aggressive retry) ---
@@ -511,87 +508,168 @@ export default function CreatePostScreen() {
     loadSubs();
   }, [authLoading, isAuthenticated, selectedGroup, mainCategories]);
 
-  // Fetch joined challenges (with aggressive retry)
-  const loadJoinedChallengesRef = useRef<() => void>(() => {});
   useEffect(() => {
-    const fetchJoinedChallenges = async () => {
-      if (!isAuthenticated || authLoading) {
+    joinedChallengesRef.current = joinedChallenges;
+  }, [joinedChallenges]);
+
+  const syncSelectedJoinedChallenge = useCallback((availableChallenges: any[]) => {
+    if (
+      !isChallengeOnlyFlow &&
+      params.challengeId &&
+      availableChallenges.some((challenge: any) => String(challenge.id) === String(params.challengeId))
+    ) {
+      setSelectedChallengeId(params.challengeId as string);
+    }
+  }, [isChallengeOnlyFlow, params.challengeId]);
+
+  const applyJoinedChallenges = useCallback(
+    async (
+      input: any,
+      options?: {
+        requestId?: number;
+        persist?: boolean;
+        keepCurrentOnEmpty?: boolean;
+      },
+    ) => {
+      if (
+        typeof options?.requestId === 'number' &&
+        options.requestId !== joinedChallengesRequestIdRef.current
+      ) {
+        return [];
+      }
+
+      const normalized = normalizeJoinedChallenges(input);
+      const nextChallenges =
+        options?.keepCurrentOnEmpty && normalized.length === 0 && joinedChallengesRef.current.length > 0
+          ? joinedChallengesRef.current
+          : normalized;
+
+      joinedChallengesRef.current = nextChallenges;
+      setJoinedChallenges(nextChallenges);
+      syncSelectedJoinedChallenge(nextChallenges);
+
+      if (options?.persist && user?.id) {
+        await setCachedJoinedChallenges(user.id, normalized);
+      }
+
+      return normalized;
+    },
+    [normalizeJoinedChallenges, syncSelectedJoinedChallenge, user?.id],
+  );
+
+  // Fetch joined challenges with immediate cache hydration, no-cache network fetch, and stale-response protection.
+  const loadJoinedChallengesRef = useRef<() => void>(() => {});
+  const loadJoinedChallenges = useCallback(async (options?: { background?: boolean }) => {
+    if (!isAuthenticated || authLoading || !user?.id) {
+      return;
+    }
+
+    const requestId = joinedChallengesRequestIdRef.current + 1;
+    joinedChallengesRequestIdRef.current = requestId;
+
+    let hadCachedChallenges = false;
+    const cachedChallenges = await getCachedJoinedChallenges<any[]>(user.id);
+    if (requestId !== joinedChallengesRequestIdRef.current) {
+      return;
+    }
+
+    if (cachedChallenges?.length) {
+      hadCachedChallenges = true;
+      await applyJoinedChallenges(cachedChallenges, { requestId });
+      setLoadingChallenges(false);
+      setChallengesFetchFailed(false);
+    } else if (!options?.background) {
+      setLoadingChallenges(true);
+      setChallengesFetchFailed(false);
+    }
+
+    const fetchFreshJoinedChallenges = () =>
+      challengesApi.getJoinedChallenges({ fresh: true, timeout: 20000, maxAttempts: 3 });
+
+    try {
+      let response = await fetchFreshJoinedChallenges();
+      if (requestId !== joinedChallengesRequestIdRef.current) {
         return;
       }
 
-      let hydratedFromCache = false;
-      const cachedChallenges = user?.id
-        ? await getCachedJoinedChallenges<any[]>(user.id)
-        : null;
+      let normalized = response.status === 'success'
+        ? normalizeJoinedChallenges(response.data?.challenges ?? response.data)
+        : [];
 
-      if (cachedChallenges?.length) {
-        hydratedFromCache = true;
-        const normalizedCachedChallenges = normalizeJoinedChallenges(cachedChallenges);
-        setJoinedChallenges(normalizedCachedChallenges);
-        setLoadingChallenges(false);
-        setChallengesFetchFailed(false);
-
-        if (
-          !isChallengeOnlyFlow &&
-          params.challengeId &&
-          normalizedCachedChallenges.some((challenge: any) => challenge.id === params.challengeId)
-        ) {
-          setSelectedChallengeId(params.challengeId as string);
+      // Some devices appear to get an empty first payload right after join; do one fast second pass before
+      // accepting the empty result.
+      if (response.status === 'success' && normalized.length === 0 && hadCachedChallenges) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        if (requestId !== joinedChallengesRequestIdRef.current) {
+          return;
         }
-      } else {
-        setLoadingChallenges(true);
-        setChallengesFetchFailed(false);
+        response = await fetchFreshJoinedChallenges();
+        if (requestId !== joinedChallengesRequestIdRef.current) {
+          return;
+        }
+        normalized = response.status === 'success'
+          ? normalizeJoinedChallenges(response.data?.challenges ?? response.data)
+          : [];
       }
 
-      try {
-        const response = await fetchWithRetry(() => challengesApi.getJoinedChallenges(), {
-          maxAttempts: hydratedFromCache ? 2 : 4,
-          initialDelayMs: hydratedFromCache ? 500 : 1000,
+      if (response.status === 'success') {
+        await applyJoinedChallenges(normalized, {
+          requestId,
+          persist: true,
+          keepCurrentOnEmpty: hadCachedChallenges,
         });
-
-        if (response.status === 'success' && response.data) {
-          const activeChallenges = normalizeJoinedChallenges(response.data);
-
-          setJoinedChallenges(activeChallenges);
-          if (user?.id) {
-            void setCachedJoinedChallenges(user.id, response.data);
-          }
-          setChallengesFetchFailed(false);
-
-          if (
-            !isChallengeOnlyFlow &&
-            params.challengeId &&
-            activeChallenges.some((c: any) => c.id === params.challengeId)
-          ) {
-            setSelectedChallengeId(params.challengeId as string);
-          }
-        } else {
-          if (!hydratedFromCache) {
-            setJoinedChallenges([]);
-            setChallengesFetchFailed(true);
-          }
-        }
-      } catch (error: any) {
-        console.warn('[Create] Error fetching joined challenges:', error?.message);
-        if (!hydratedFromCache) {
-          setJoinedChallenges([]);
-          setChallengesFetchFailed(true);
-        }
-      } finally {
+        setChallengesFetchFailed(false);
+      } else if (!hadCachedChallenges) {
+        joinedChallengesRef.current = [];
+        setJoinedChallenges([]);
+        setChallengesFetchFailed(true);
+      }
+    } catch (error: any) {
+      console.warn('[Create] Error fetching joined challenges:', error?.message);
+      if (!hadCachedChallenges) {
+        joinedChallengesRef.current = [];
+        setJoinedChallenges([]);
+        setChallengesFetchFailed(true);
+      }
+    } finally {
+      if (requestId === joinedChallengesRequestIdRef.current) {
         setLoadingChallenges(false);
       }
+    }
+  }, [applyJoinedChallenges, authLoading, isAuthenticated, normalizeJoinedChallenges, user?.id]);
+
+  useEffect(() => {
+    loadJoinedChallengesRef.current = () => {
+      void loadJoinedChallenges();
+    };
+  }, [loadJoinedChallenges]);
+
+  useEffect(() => {
+    void loadJoinedChallenges();
+  }, [loadJoinedChallenges]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading && isAuthenticated && user?.id) {
+        void loadJoinedChallenges({ background: joinedChallengesRef.current.length > 0 });
+      }
+    }, [authLoading, isAuthenticated, loadJoinedChallenges, user?.id]),
+  );
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    const handleChallengeUpdated = () => {
+      void loadJoinedChallenges({ background: joinedChallengesRef.current.length > 0 });
     };
 
-    loadJoinedChallengesRef.current = fetchJoinedChallenges;
-    fetchJoinedChallenges();
-  }, [
-    authLoading,
-    isAuthenticated,
-    isChallengeOnlyFlow,
-    normalizeJoinedChallenges,
-    params.challengeId,
-    user?.id,
-  ]);
+    websocketService.on('challengeUpdated', handleChallengeUpdated);
+    return () => {
+      websocketService.off('challengeUpdated', handleChallengeUpdated);
+    };
+  }, [loadJoinedChallenges, user?.id]);
 
   const ensureChallengePostCount = useCallback(async (challenge: any) => {
     if (!challenge?.id || !user?.id || loadingChallengeCountsRef.current.has(challenge.id)) {

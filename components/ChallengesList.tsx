@@ -20,6 +20,8 @@ import {
     formatChallengeDateTime,
     getChallengeDateInfo,
     getChallengeDisplayStatus,
+    isChallengeParticipationOpen,
+    isChallengeUpcoming,
 } from '@/lib/utils/challenge';
 
 interface Challenge {
@@ -120,7 +122,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
             if (user) {
                 const joinedRes = await challengesApi.getJoinedChallenges();
                 if (joinedRes.status === 'success') {
-                    const joined = joinedRes.data || [];
+                    const joined = joinedRes.data?.challenges ?? joinedRes.data ?? [];
                     Array.isArray(joined) && joined.forEach((item: any) => {
                         const challenge = item.challenge || item;
                         if (challenge?.id) {
@@ -140,15 +142,13 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                         const data = response.data?.challenges || response.data || [];
                         const all = Array.isArray(data) ? data : [];
                         challengesToDisplay = all.filter((challenge: any) => {
-                            if (challenge.status !== 'approved' && challenge.status !== 'active') return false;
-                            const endDate = new Date(challenge.end_date).getTime();
-                            return endDate >= now.getTime();
+                            return isChallengeParticipationOpen(challenge, now) || isChallengeUpcoming(challenge, now);
                         });
                         challengesToDisplay.sort((a: any, b: any) => {
                             const aStart = new Date(a.start_date).getTime();
                             const bStart = new Date(b.start_date).getTime();
-                            const aActive = aStart <= now.getTime() && new Date(a.end_date).getTime() >= now.getTime();
-                            const bActive = bStart <= now.getTime() && new Date(b.end_date).getTime() >= now.getTime();
+                            const aActive = isChallengeParticipationOpen(a, now);
+                            const bActive = isChallengeParticipationOpen(b, now);
                             if (aActive && !bActive) return -1;
                             if (!aActive && bActive) return 1;
                             return aStart - bStart;
@@ -169,18 +169,14 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                     combined = all.filter((challenge: any) => challenge.status === 'approved' || challenge.status === 'active');
                 }
 
-                const activeList = combined.filter((challenge: any) => {
-                    const startDate = new Date(challenge.start_date);
-                    const endDate = new Date(challenge.end_date);
-                    return startDate <= now && endDate >= now;
-                });
-                const upcomingList = combined.filter((challenge: any) => new Date(challenge.start_date) > now);
+                const activeList = combined.filter((challenge: any) => isChallengeParticipationOpen(challenge, now));
+                const upcomingList = combined.filter((challenge: any) => isChallengeUpcoming(challenge, now));
 
                 challengesToDisplay = [...activeList, ...upcomingList].sort((a: any, b: any) => {
                     const aStart = new Date(a.start_date).getTime();
                     const bStart = new Date(b.start_date).getTime();
-                    const aActive = new Date(a.start_date) <= now && new Date(a.end_date) >= now;
-                    const bActive = new Date(b.start_date) <= now && new Date(b.end_date) >= now;
+                    const aActive = isChallengeParticipationOpen(a, now);
+                    const bActive = isChallengeParticipationOpen(b, now);
                     if (aActive && !bActive) return -1;
                     if (!aActive && bActive) return 1;
                     return aStart - bStart;
@@ -196,7 +192,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 if (userJoinedIds.size > 0) {
                     const joinedRes = await challengesApi.getJoinedChallenges();
                     if (joinedRes.status === 'success') {
-                        const joined = joinedRes.data || [];
+                        const joined = joinedRes.data?.challenges ?? joinedRes.data ?? [];
                         const joinedChallenges = Array.isArray(joined)
                             ? joined.map((item: any) => item.challenge || item)
                             : [];

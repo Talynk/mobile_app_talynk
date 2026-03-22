@@ -72,3 +72,16 @@ export async function setCachedJoinedChallenges<T>(userId: string, challenges: T
 
   await writeCache(joinedChallengesKey(userId), challenges);
 }
+
+export async function upsertCachedJoinedChallenge<T extends { id?: string | number }>(
+  userId: string,
+  challenge: T,
+) {
+  if (!userId || !challenge?.id) {
+    return;
+  }
+
+  const existing = (await getCachedJoinedChallenges<T[]>(userId)) ?? [];
+  const filtered = existing.filter((item) => String(item?.id) !== String(challenge.id));
+  await writeCache(joinedChallengesKey(userId), [challenge, ...filtered]);
+}
