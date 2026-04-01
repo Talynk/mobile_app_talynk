@@ -1,7 +1,7 @@
 import { challengesApi } from '@/lib/api';
 import { Post } from '@/types';
 import { normalizePost } from '@/lib/utils/normalize-post';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { prepareRenderableChallengePosts } from '@/lib/utils/challenge-post-visibility';
 
 const PARTICIPANT_LIMIT = 100;
 const USER_POST_LIMIT = 100;
@@ -146,7 +146,7 @@ export async function loadFallbackChallengePosts(
     }
 
     const rawItems = Array.isArray(result.value.data?.rawItems) ? result.value.data.rawItems : [];
-    const posts = filterHlsReady(Array.isArray(result.value.data?.posts) ? result.value.data.posts : []);
+    const posts = Array.isArray(result.value.data?.posts) ? result.value.data.posts : [];
     const rawItemsByPostId = new Map<string, any>();
 
     rawItems.forEach((rawItem: any) => {
@@ -219,7 +219,9 @@ export async function loadFallbackChallengePosts(
 
   return {
     posts: sortChallengePostsByLikes(
-      filterHlsReady(Array.from(challengePosts.values())),
+      await prepareRenderableChallengePosts(Array.from(challengePosts.values()), {
+        preserveUnavailableVideos: true,
+      }),
       likesMap,
       true,
     ),

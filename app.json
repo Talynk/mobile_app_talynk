@@ -16,7 +16,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ihirwe.talentix"
+      "bundleIdentifier": "com.ihirwe.talentix",
+      "associatedDomains": [
+        "applinks:links.talentix.net"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -30,6 +33,23 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "links.talentix.net",
+              "pathPrefix": "/post"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {
@@ -78,6 +98,18 @@
           "ios": {
             "deploymentTarget": "15.1"
           }
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Talentix to save photos and videos to your library.",
+          "savePhotosPermission": "Allow Talentix to save photos and videos to your library.",
+          "isAccessMediaLocationEnabled": true,
+          "granularPermissions": [
+            "photo",
+            "video"
+          ]
         }
       ],
       "react-native-compressor"

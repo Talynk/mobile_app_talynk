@@ -37,6 +37,8 @@ import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { networkStatus } from '@/lib/network-status';
+import { downloadPostToLibrary } from '@/lib/post-download';
+import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibility';
 
 const VIDEO_BUFFER_OPTIONS = Platform.select({
   ios: {
@@ -377,6 +379,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [retryCount, setRetryCount] = useState(0);
   const [showUnfollowModal, setShowUnfollowModal] = useState(false);
   const [showAppealModal, setShowAppealModal] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const isSuspendedPost = (item as any).status === 'suspended' || (item as any).is_suspended;
   const isDraftPost = (item as any).status === 'draft' || (item as any).status === 'Draft';
   const isOwnPost = Boolean(user?.id && (user.id === item.user?.id || user.id === (item as any).user_id || user.id === (item as any).userId));
@@ -409,6 +413,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       ? thumbnailOrPlaceholderUrl
       : null;
   const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
+  const competitionVideoStatusLabel =
+    isCompetitionPost && isVideo && !hlsReady ? getChallengeVideoStatusLabel(item) || 'Video' : null;
 
   const clearPlaybackStall = useCallback((options?: { resume?: boolean }) => {
     const stalledAt = stalledAtRef.current;
@@ -781,6 +787,33 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (onComment && item.id) onComment(item.id);
   }, [onComment, item.id]);
 
+  const handleDownload = useCallback(async () => {
+    if (isDownloading) {
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadProgress(0);
+    try {
+      await downloadPostToLibrary(item, {
+        onProgress: ({ progress }) => {
+          if (!isMountedRef.current) {
+            return;
+          }
+          setDownloadProgress(progress);
+        },
+      });
+      Alert.alert('Download complete', 'The post was saved to your device.');
+    } catch (error: any) {
+      Alert.alert('Download failed', error?.message || 'Unable to save this post right now.');
+    } finally {
+      if (isMountedRef.current) {
+        setIsDownloading(false);
+        setDownloadProgress(0);
+      }
+    }
+  }, [isDownloading, item]);
+
   const handleProgressBarSeek = useCallback((locationX: number) => {
     const controller = videoControllerRef.current;
     if (!controller || !playerValidRef.current) return;
@@ -873,6 +906,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 </View>
               )}
 
+              {!videoError && competitionVideoStatusLabel && !thumbnailOrPlaceholderUrl && !shouldLoadVideo && (
+                <View style={styles.unavailableCompetitionOverlay}>
+                  <Feather name="video-off" size={34} color="#fff" />
+                  <Text style={styles.unavailableCompetitionTitle}>
+                    {competitionVideoStatusLabel}
+                  </Text>
+                  <Text style={styles.unavailableCompetitionText}>
+                    Competition submission saved. Playback is not ready yet.
+                  </Text>
+                </View>
+              )}
+
               <Animated.View style={[styles.muteIndicatorOverlay, { opacity: pauseIndicatorOpacity }]} pointerEvents="none">
                 <View style={styles.muteIndicatorBadge}>
                   <Feather name="play" size={48} color="rgba(255,255,255,0.95)" />
@@ -956,6 +1001,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
           <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
             <Feather name="share-2" size={24} color="#fff" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionButton} onPress={handleDownload} disabled={isDownloading}>
+            <Feather name={isDownloading ? 'loader' : 'download'} size={24} color="#fff" />
+            <Text style={styles.actionCount}>
+              {isDownloading ? `${Math.round(downloadProgress * 100)}%` : 'Save'}
+            </Text>
           </TouchableOpacity>
 
           {!isAd && showReportButton && (
@@ -1211,6 +1263,29 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  unavailableCompetitionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    zIndex: 4,
+  },
+  unavailableCompetitionTitle: {
+    marginTop: 12,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  unavailableCompetitionText: {
+    marginTop: 8,
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   muteIndicatorOverlay: {
     position: 'absolute',

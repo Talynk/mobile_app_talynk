@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Post } from '@/types';
 import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
+import { sharePost } from '@/lib/post-share';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
@@ -174,8 +175,7 @@ export default function CategoryScreen() {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const url = getPostMediaUrl(post) || (post as any).fullUrl || '';
-        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talentix', url: url || undefined });
+        await sharePost(post);
       } catch {}
     }
   }, [posts]);

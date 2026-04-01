@@ -52,11 +52,13 @@ import {
   getCachedJoinedChallenges,
   setCachedCreateCategories,
   setCachedJoinedChallenges,
+  upsertCachedJoinedChallenge,
 } from '@/lib/create-screen-cache';
 import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
 import websocketService from '@/lib/websocket-service';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ANDROID_13_API_LEVEL = 33;
 
 const COLORS = {
   dark: {
@@ -245,6 +247,10 @@ export default function CreatePostScreen() {
     typeof params.challengeName === 'string' && params.challengeName.trim().length > 0
       ? params.challengeName
       : null;
+  const preferredDestination =
+    typeof params.preferredDestination === 'string' && params.preferredDestination.trim().length > 0
+      ? params.preferredDestination
+      : null;
   const isChallengeOnlyFlow = params.fromChallenge === '1' && !!forcedChallengeId;
   const { isAuthenticated, loading: authLoading, user, token } = useAuth();
   const [title, setTitle] = useState('');
@@ -299,8 +305,12 @@ export default function CreatePostScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastOpacity = useRef(new Animated.Value(0)).current;
   const [joinedChallenges, setJoinedChallenges] = useState<any[]>([]);
+  const [availableChallenges, setAvailableChallenges] = useState<any[]>([]);
   const [selectedChallengeId, setSelectedChallengeId] = useState<string | null>(null);
   const [loadingChallenges, setLoadingChallenges] = useState(false);
+  const [loadingAvailableChallenges, setLoadingAvailableChallenges] = useState(false);
+  const [joinCompetitionModalVisible, setJoinCompetitionModalVisible] = useState(false);
+  const [joiningCompetitionId, setJoiningCompetitionId] = useState<string | null>(null);
   const [challengePostCounts, setChallengePostCounts] = useState<Record<string, { count: number; max: number }>>({});
   const [categoriesFetchFailed, setCategoriesFetchFailed] = useState(false);
   const [challengesFetchFailed, setChallengesFetchFailed] = useState(false);
@@ -311,6 +321,10 @@ export default function CreatePostScreen() {
   const loadingChallengeCountsRef = useRef<Set<string>>(new Set());
   const joinedChallengesRequestIdRef = useRef(0);
   const joinedChallengesRef = useRef<any[]>([]);
+  const launchSystemCameraCaptureRef = useRef<(mode: 'video' | 'picture') => Promise<boolean>>(async () => false);
+  const handlePickFromGalleryRef = useRef<() => void>(() => {});
+  const shouldPreferSystemVideoCamera =
+    Platform.OS === 'android' && Number(Platform.Version) === ANDROID_13_API_LEVEL;
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -362,6 +376,21 @@ export default function CreatePostScreen() {
       );
     }
   }, [isAuthenticated, authLoading]);
+
+  useEffect(() => {
+    if (!preferredDestination) {
+      return;
+    }
+
+    if (preferredDestination === 'draft') {
+      showToast('Competition limit reached. Use Save Draft below when you finish this post.');
+      return;
+    }
+
+    if (preferredDestination === 'main_feed') {
+      showToast('Competition limit reached. Publish this post to the main feed instead.');
+    }
+  }, [preferredDestination]);
 
 
   // --- CONFIGURE AUDIO MODE ---
@@ -671,6 +700,56 @@ export default function CreatePostScreen() {
     };
   }, [loadJoinedChallenges, user?.id]);
 
+  const loadJoinableChallenges = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
+
+    setLoadingAvailableChallenges(true);
+    try {
+      const response = await fetchWithRetry(() => challengesApi.getAll('active'), {
+        maxAttempts: 3,
+        initialDelayMs: 400,
+      });
+
+      if (response.status !== 'success') {
+        throw new Error(response.message || 'Failed to load competitions');
+      }
+
+      const rawChallenges =
+        (response.data as any)?.challenges ||
+        response.data ||
+        [];
+
+      const now = new Date();
+      const joinedIds = new Set(joinedChallengesRef.current.map((challenge: any) => String(challenge.id)));
+      const joinableChallenges = (Array.isArray(rawChallenges) ? rawChallenges : [])
+        .map((item: any) => item?.challenge || item)
+        .filter((challenge: any) => challenge?.id)
+        .filter((challenge: any) => !joinedIds.has(String(challenge.id)))
+        .filter((challenge: any) => challenge.organizer_id !== user.id && challenge.organizer?.id !== user.id)
+        .filter((challenge: any) => isChallengeParticipationOpen(challenge, now))
+        .sort((a: any, b: any) => {
+          const aStart = new Date(a.start_date || 0).getTime();
+          const bStart = new Date(b.start_date || 0).getTime();
+          return aStart - bStart;
+        });
+
+      setAvailableChallenges(joinableChallenges);
+    } catch (error: any) {
+      console.warn('[Create] Error loading joinable competitions:', error?.message);
+      showToast('Unable to load competitions right now');
+      setAvailableChallenges([]);
+    } finally {
+      setLoadingAvailableChallenges(false);
+    }
+  }, [user?.id]);
+
+  const openJoinCompetitionModal = useCallback(() => {
+    setJoinCompetitionModalVisible(true);
+    void loadJoinableChallenges();
+  }, [loadJoinableChallenges]);
+
   const ensureChallengePostCount = useCallback(async (challenge: any) => {
     if (!challenge?.id || !user?.id || loadingChallengeCountsRef.current.has(challenge.id)) {
       return;
@@ -727,6 +806,40 @@ export default function CreatePostScreen() {
       clearTimeout(timeoutId);
     };
   }, [ensureChallengePostCount, joinedChallenges, user?.id]);
+
+  const handleJoinCompetitionFromCreate = useCallback(async (challenge: any) => {
+    if (!user?.id || !challenge?.id || joiningCompetitionId) {
+      return;
+    }
+
+    setJoiningCompetitionId(String(challenge.id));
+    try {
+      const response = await challengesApi.join(String(challenge.id));
+      if (response?.status !== 'success') {
+        throw new Error(response?.message || 'Failed to join competition');
+      }
+
+      await upsertCachedJoinedChallenge(user.id, {
+        ...challenge,
+        is_participant: true,
+      });
+      await applyJoinedChallenges(
+        [...joinedChallengesRef.current, { ...challenge, is_participant: true }],
+        { persist: true },
+      );
+
+      setAvailableChallenges((prev) => prev.filter((item: any) => String(item.id) !== String(challenge.id)));
+      setSelectedChallengeId(String(challenge.id));
+      setJoinCompetitionModalVisible(false);
+      showToast(`Joined ${challenge.name || 'competition'}`);
+      void ensureChallengePostCount(challenge);
+    } catch (error: any) {
+      const message = error?.message || 'Failed to join competition';
+      Alert.alert('Unable to Join Competition', message);
+    } finally {
+      setJoiningCompetitionId(null);
+    }
+  }, [applyJoinedChallenges, ensureChallengePostCount, joiningCompetitionId, user?.id]);
 
   const isMaxPostsReached = (() => {
     if (!effectiveSelectedChallengeId) return false;
@@ -856,15 +969,18 @@ export default function CreatePostScreen() {
           'The camera could not start on this device. This can happen on older or low-memory devices.\n\nTry:\n• Closing all other apps\n• Restarting your phone\n• Using the gallery to pick existing media instead',
           [
             { text: 'Try Again', onPress: () => { cameraRetryCountRef.current = 0; remountCamera(cameraMode); } },
-            { text: 'Pick from Gallery', onPress: () => { cancelCamera(); handlePickFromGallery(); } },
+            ...(cameraMode === 'video'
+              ? [{ text: 'Use Device Camera', onPress: () => { cancelCamera(); void launchSystemCameraCaptureRef.current('video'); } }]
+              : []),
+            { text: 'Pick from Gallery', onPress: () => { cancelCamera(); handlePickFromGalleryRef.current(); } },
             { text: 'Close Camera', style: 'cancel', onPress: cancelCamera },
           ],
         );
       }
-    }, 14000);
+    }, shouldPreferSystemVideoCamera && cameraMode === 'video' ? 9000 : 14000);
 
     return () => { clearTimeout(autoRetry); clearTimeout(finalWatchdog); };
-  }, [showCamera, isCameraReady, remountCamera, cameraMode]);
+  }, [showCamera, isCameraReady, remountCamera, cameraMode, shouldPreferSystemVideoCamera]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = useCallback(async () => {
@@ -893,6 +1009,10 @@ export default function CreatePostScreen() {
   const proceedToRecord = async () => {
     setShowPreRecordInfoModal(false);
     cameraRetryCountRef.current = 0;
+    if (shouldPreferSystemVideoCamera) {
+      await launchSystemCameraCapture('video');
+      return;
+    }
     await ensureCameraPermissions('video');
   };
 
@@ -901,6 +1021,7 @@ export default function CreatePostScreen() {
     if (authLoading) return;
     if (!isAuthenticated) return;
     if (hasOpenedCameraOnMount) return;
+    if (shouldPreferSystemVideoCamera) return;
 
     setHasOpenedCameraOnMount(true);
 
@@ -911,7 +1032,7 @@ export default function CreatePostScreen() {
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo]);
+  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo, shouldPreferSystemVideoCamera]);
 
   // --- CATEGORY HELPERS ---
   const getCategoriesForGroup = () => {
@@ -981,6 +1102,63 @@ export default function CreatePostScreen() {
     }
   };
 
+  const handlePickedVideoAsset = useCallback(async (videoUri: string) => {
+    setCapturedImageUri(null);
+    setEditedVideoUri(null);
+    setRecordedVideoUri(videoUri);
+    setShowCamera(false);
+    setIsCameraReady(false);
+
+    const pickedThumbnail = await generateThumbnail(videoUri).catch(() => null);
+    if (pickedThumbnail) {
+      setThumbnailUri(pickedThumbnail);
+    }
+
+    showToast('Video selected successfully!');
+  }, []);
+
+  const launchSystemCameraCapture = useCallback(async (mode: 'video' | 'picture') => {
+    try {
+      const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cameraPermission.granted) {
+        Alert.alert('Permission Required', 'Camera permission is required to continue.');
+        return false;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: mode === 'video' ? ['videos'] : ['images'],
+        allowsEditing: false,
+        quality: 1,
+        videoMaxDuration: mode === 'video' ? 120 : undefined,
+        cameraType:
+          cameraFacing === 'front'
+            ? ImagePicker.CameraType.front
+            : ImagePicker.CameraType.back,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return false;
+      }
+
+      const asset = result.assets[0];
+      if (!asset?.uri) {
+        throw new Error('The camera did not return any media.');
+      }
+
+      if (mode === 'video') {
+        await handlePickedVideoAsset(asset.uri);
+      } else {
+        await processCapturedImage(asset.uri);
+      }
+
+      return true;
+    } catch (error: any) {
+      Alert.alert('Camera Error', error?.message || 'Failed to open the device camera.');
+      return false;
+    }
+  }, [cameraFacing, handlePickedVideoAsset, processCapturedImage]);
+  launchSystemCameraCaptureRef.current = launchSystemCameraCapture;
+
   const handlePickFromGallery = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1010,18 +1188,7 @@ export default function CreatePostScreen() {
       }
 
       if (asset.type === 'video') {
-        setCapturedImageUri(null);
-        setEditedVideoUri(null);
-        setRecordedVideoUri(asset.uri);
-        setShowCamera(false);
-        setIsCameraReady(false);
-
-        const pickedThumbnail = await generateThumbnail(asset.uri).catch(() => null);
-        if (pickedThumbnail) {
-          setThumbnailUri(pickedThumbnail);
-        }
-
-        showToast('Video selected successfully!');
+        await handlePickedVideoAsset(asset.uri);
         return;
       }
 
@@ -1030,7 +1197,10 @@ export default function CreatePostScreen() {
       console.error('[Gallery] Failed to pick media:', error);
       Alert.alert('Error', error?.message || 'Failed to pick media from gallery.');
     }
-  }, [processCapturedImage]);
+  }, [handlePickedVideoAsset, processCapturedImage]);
+  handlePickFromGalleryRef.current = () => {
+    void handlePickFromGallery();
+  };
 
   // --- IMAGE CAPTURE ---
   const takePicture = async () => {
@@ -1141,7 +1311,7 @@ export default function CreatePostScreen() {
     }
   };
 
-  const startRecording = async () => {
+  const startRecording = useCallback(async () => {
     if (!cameraRef.current || isRecording) return;
 
     try {
@@ -1291,7 +1461,18 @@ export default function CreatePostScreen() {
             recordingSafetyTimeoutRef.current = null;
           }
           if (error?.message && !error.message.includes('cancel')) {
-            Alert.alert('Error', 'Failed to record video. Please try again.');
+            Alert.alert(
+              'Recording failed',
+              shouldPreferSystemVideoCamera
+                ? 'In-app recording failed on this device. Use the device camera to continue recording safely.'
+                : 'Failed to record video. Please try again.',
+              shouldPreferSystemVideoCamera
+                ? [
+                    { text: 'Use Device Camera', onPress: () => void launchSystemCameraCapture('video') },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]
+                : [{ text: 'OK' }],
+            );
           }
           if (isMountedRef.current) {
             setShowCamera(false);
@@ -1301,7 +1482,18 @@ export default function CreatePostScreen() {
       });
     } catch (error: any) {
       console.error('Recording error:', error);
-      Alert.alert('Error', 'Failed to start recording. Please try again.');
+      Alert.alert(
+        'Recording error',
+        shouldPreferSystemVideoCamera
+          ? 'In-app recording could not start on this device. Use the device camera instead.'
+          : 'Failed to start recording. Please try again.',
+        shouldPreferSystemVideoCamera
+          ? [
+              { text: 'Use Device Camera', onPress: () => void launchSystemCameraCapture('video') },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          : [{ text: 'OK' }],
+      );
       setIsRecording(false);
       if (recordingTimerRef.current) {
         clearInterval(recordingTimerRef.current);
@@ -1312,7 +1504,7 @@ export default function CreatePostScreen() {
         recordingSafetyTimeoutRef.current = null;
       }
     }
-  };
+  }, [isRecording, isCameraReady, recordingDuration, shouldPreferSystemVideoCamera, launchSystemCameraCapture]);
 
   const stopRecording = () => {
     if (!cameraRef.current || !isRecording) return;
@@ -2227,7 +2419,9 @@ export default function CreatePostScreen() {
           <View style={styles.studioBody}>
             <MaterialIcons name="videocam" size={72} color={C.primary} />
             <Text style={[styles.studioHint, { color: C.textSecondary }]}>
-              Camera opens automatically
+              {shouldPreferSystemVideoCamera
+                ? 'Using the device camera for more reliable Android 13 video capture'
+                : 'Camera opens automatically'}
             </Text>
 
             <TouchableOpacity
@@ -2772,6 +2966,27 @@ export default function CreatePostScreen() {
                         <Text style={[styles.subLabel, { color: C.textSecondary }]}>
                           No Competitions joined yet. Join a Competition to post in it.
                         </Text>
+                        <TouchableOpacity
+                          style={{
+                            marginTop: 12,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            backgroundColor: C.primary,
+                            borderRadius: 12,
+                            paddingVertical: 12,
+                            paddingHorizontal: 16,
+                            alignSelf: 'flex-start',
+                          }}
+                          onPress={openJoinCompetitionModal}
+                          accessibilityRole="button"
+                          accessibilityLabel="Join competition"
+                        >
+                          <Feather name="plus-circle" size={18} color="#fff" />
+                          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 8 }}>
+                            Join Competition
+                          </Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </View>
@@ -3016,6 +3231,92 @@ export default function CreatePostScreen() {
           </KeyboardAvoidingView>
         </View>
       )}
+
+      <Modal visible={joinCompetitionModalVisible} transparent animationType="slide">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#18181b', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: Math.max(insets.bottom + 20, 28), maxHeight: '72%' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
+                <Text style={{ color: '#fff', fontSize: 20, fontWeight: '800' }}>Join Competition</Text>
+                <Text style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>
+                  Join here and continue uploading this same content without losing it.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setJoinCompetitionModalVisible(false)}
+                style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#27272a' }}
+              >
+                <Feather name="x" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {loadingAvailableChallenges ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                <ActivityIndicator color={C.primary} />
+                <Text style={{ color: '#9ca3af', marginTop: 12 }}>Loading competitions...</Text>
+              </View>
+            ) : availableChallenges.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                <MaterialIcons name="emoji-events" size={36} color="#6b7280" />
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700', marginTop: 12 }}>No joinable competitions right now</Text>
+                <Text style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 19 }}>
+                  New competitions will appear here as soon as they are open for participation.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {availableChallenges.map((challenge: any) => (
+                  <View
+                    key={challenge.id}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: '#27272a',
+                      backgroundColor: '#111827',
+                      borderRadius: 16,
+                      padding: 14,
+                      marginBottom: 12,
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }} numberOfLines={1}>
+                      {challenge.name}
+                    </Text>
+                    {!!challenge.description && (
+                      <Text style={{ color: '#9ca3af', fontSize: 12, lineHeight: 18, marginTop: 6 }} numberOfLines={2}>
+                        {challenge.description}
+                      </Text>
+                    )}
+                    <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 8 }}>
+                      Up to {Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5} posts
+                    </Text>
+                    <TouchableOpacity
+                      style={{
+                        marginTop: 12,
+                        backgroundColor: joiningCompetitionId === String(challenge.id) ? '#1d4ed8' : C.primary,
+                        borderRadius: 12,
+                        paddingVertical: 11,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'row',
+                      }}
+                      onPress={() => void handleJoinCompetitionFromCreate(challenge)}
+                      disabled={joiningCompetitionId === String(challenge.id)}
+                    >
+                      {joiningCompetitionId === String(challenge.id) ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <>
+                          <Feather name="plus-circle" size={16} color="#fff" />
+                          <Text style={{ color: '#fff', fontWeight: '700', marginLeft: 8 }}>Join and Continue</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Post Action Modal: shown when max competition posts reached */}
       <Modal visible={showPostActionModal} transparent animationType="fade">

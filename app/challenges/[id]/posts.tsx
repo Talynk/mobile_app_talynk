@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Post } from '@/types';
 import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
@@ -34,6 +34,10 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { loadFallbackChallengePosts } from '@/lib/utils/challenge-post-fallback';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import {
+  getChallengeVideoStatusLabel,
+  prepareRenderableChallengePosts,
+} from '@/lib/utils/challenge-post-visibility';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -85,7 +89,7 @@ const sortChallengePosts = (posts: Post[], likesDuringChallengeMap: Record<strin
   });
 
 export default function ChallengePostsScreen() {
-  const { id, open, openIndex, winnerUserId, winnerUsername, participantUserId, participantUsername } =
+  const { id, open, openIndex, winnerUserId, winnerUsername, participantUserId, participantUsername, expectedPosts } =
     useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
@@ -116,6 +120,7 @@ export default function ChallengePostsScreen() {
   const { user } = useAuth();
   const { followedUsers, updateFollowedUsers } = useCache();
   const likesManager = useLikesManager();
+  const expectedPostsCount = Number(expectedPosts ?? 0) || 0;
 
   const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
     if (!viewableItems || viewableItems.length === 0) return;
@@ -132,6 +137,24 @@ export default function ChallengePostsScreen() {
   }).current;
 
   useRefetchOnReconnect(() => loadPosts(1, true));
+
+  const filterFallbackPosts = useCallback((allPosts: Post[]) => {
+    if (isWinnerDetailView) {
+      return allPosts.filter((post: any) => {
+        const fallbackUserId = post?.user?.id || post?.user_id;
+        return fallbackUserId === String(winnerUserId);
+      });
+    }
+
+    if (isParticipantDetailView) {
+      return allPosts.filter((post: any) => {
+        const fallbackUserId = post?.user?.id || post?.user_id;
+        return fallbackUserId === String(participantUserId);
+      });
+    }
+
+    return allPosts;
+  }, [isParticipantDetailView, isWinnerDetailView, participantUserId, winnerUserId]);
 
   const loadPosts = async (page = 1, refresh = false) => {
     if (!id) return;
@@ -180,35 +203,41 @@ export default function ChallengePostsScreen() {
           if (postId) map[postId] = likes;
         });
 
-        const list = filterHlsReady(response.data?.posts || []) as Post[];
+        const list = await prepareRenderableChallengePosts(response.data?.posts || [], {
+          preserveUnavailableVideos: true,
+        });
         const postsList = sortChallengePosts(list, map, ended);
+        const missingExpectedPosts =
+          page === 1 && expectedPostsCount > 0 && postsList.length < expectedPostsCount;
         const shouldUseFallback =
-          postsList.length === 0 &&
-          !isParticipantDetailView &&
-          response.data?.winners_visible === false &&
-          (isWinnerDetailView ||
-            response.data?.challenge_status === 'ended' ||
-            response.data?.challenge_status === 'stopped');
+          missingExpectedPosts ||
+          (
+            postsList.length === 0 &&
+            !isParticipantDetailView &&
+            response.data?.winners_visible === false &&
+            (isWinnerDetailView ||
+              response.data?.challenge_status === 'ended' ||
+              response.data?.challenge_status === 'stopped')
+          );
 
         if (shouldUseFallback) {
           const fallbackData = await loadFallbackChallengePosts(String(id));
-          const filteredFallbackPosts = isWinnerDetailView
-            ? fallbackData.posts.filter((post: any) => {
-                const fallbackUserId = post?.user?.id || post?.user_id;
-                return fallbackUserId === String(winnerUserId);
-              })
-            : fallbackData.posts;
+          const filteredFallbackPosts = filterFallbackPosts(fallbackData.posts);
           const sortedFallbackPosts = sortChallengePosts(
             filteredFallbackPosts as Post[],
             fallbackData.likesMap,
             filteredFallbackPosts.length > 0,
           );
+          const postsToUse =
+            sortedFallbackPosts.length >= postsList.length ? sortedFallbackPosts : postsList;
+          const likesMapToUse =
+            postsToUse === sortedFallbackPosts ? fallbackData.likesMap : map;
 
           setHasMore(false);
-          primePostDetailsCache(sortedFallbackPosts);
-          setPosts(sortedFallbackPosts);
-          setLikesDuringChallengeMap(fallbackData.likesMap);
-          setIsChallengeEnded(filteredFallbackPosts.length > 0);
+          primePostDetailsCache(postsToUse);
+          setPosts(postsToUse);
+          setLikesDuringChallengeMap(likesMapToUse);
+          setIsChallengeEnded(postsToUse.length > 0);
           setEmptyMessage(
             isWinnerDetailView
               ? 'No winner posts available yet'
@@ -237,12 +266,7 @@ export default function ChallengePostsScreen() {
         const fallbackData = page === 1 ? await loadFallbackChallengePosts(String(id)) : null;
 
         if (fallbackData) {
-          const filteredFallbackPosts = isWinnerDetailView
-            ? fallbackData.posts.filter((post: any) => {
-                const fallbackUserId = post?.user?.id || post?.user_id;
-                return fallbackUserId === String(winnerUserId);
-              })
-            : fallbackData.posts;
+          const filteredFallbackPosts = filterFallbackPosts(fallbackData.posts);
           const sortedFallbackPosts = sortChallengePosts(
             filteredFallbackPosts as Post[],
             fallbackData.likesMap,
@@ -279,17 +303,7 @@ export default function ChallengePostsScreen() {
       const fallbackData = page === 1 ? await loadFallbackChallengePosts(String(id)) : null;
 
       if (fallbackData) {
-        const filteredFallbackPosts = isWinnerDetailView
-          ? fallbackData.posts.filter((post: any) => {
-              const fallbackUserId = post?.user?.id || post?.user_id;
-              return fallbackUserId === String(winnerUserId);
-            })
-          : isParticipantDetailView
-            ? fallbackData.posts.filter((post: any) => {
-                const fallbackUserId = post?.user?.id || post?.user_id;
-                return fallbackUserId === String(participantUserId);
-              })
-          : fallbackData.posts;
+        const filteredFallbackPosts = filterFallbackPosts(fallbackData.posts);
         const sortedFallbackPosts = sortChallengePosts(
           filteredFallbackPosts as Post[],
           fallbackData.likesMap,
@@ -326,7 +340,7 @@ export default function ChallengePostsScreen() {
 
   useEffect(() => {
     loadPosts(1);
-  }, [id, winnerUserId, participantUserId]);
+  }, [expectedPostsCount, filterFallbackPosts, id, participantUserId, winnerUserId]);
 
   // If coming from challenge detail tile tap, auto-open fullscreen at index
   useEffect(() => {
@@ -384,8 +398,7 @@ export default function ChallengePostsScreen() {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const url = getPostMediaUrl(post) || (post as any).fullUrl || '';
-        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talentix', url: url || undefined });
+        await sharePost(post);
       } catch (_) {}
     }
   };
@@ -461,6 +474,11 @@ export default function ChallengePostsScreen() {
         ) : (
           <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
             <MaterialIcons name={isVideo ? "video-library" : "image"} size={28} color="#444" />
+            {isVideo ? (
+              <Text style={styles.missingMediaLabel}>
+                {getChallengeVideoStatusLabel(item) || 'Video'}
+              </Text>
+            ) : null}
           </View>
         )}
 
@@ -749,6 +767,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1a1a1a',
+  },
+  missingMediaLabel: {
+    marginTop: 8,
+    color: '#d1d5db',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   teaserVideo: {
     position: 'absolute',

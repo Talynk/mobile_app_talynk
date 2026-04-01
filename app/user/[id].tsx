@@ -40,6 +40,8 @@ import { getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getPostVideoAssetsCached } from '@/lib/post-video-assets-cache';
 import { setProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import { sharePost } from '@/lib/post-share';
+import { downloadPostToLibrary } from '@/lib/post-download';
 import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
@@ -815,12 +817,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     if (!selectedPost) return;
 
     try {
-      const mediaUrl = selectedPost.video_url || selectedPost.image;
-      await Share.share({
-        message: mediaUrl || 'Check out this post!',
-        title: 'Share Post',
-        url: mediaUrl,
-      });
+      await sharePost(selectedPost);
     } catch (error) {
       Alert.alert('Error', 'Failed to share post');
     }
@@ -830,15 +827,8 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     if (!selectedPost) return;
 
     try {
-      const mediaUrl = selectedPost.video_url || selectedPost.image;
-      if (mediaUrl) {
-        // For now, just share the URL
-        await Share.share({
-          message: mediaUrl,
-          title: 'Download Post',
-          url: mediaUrl,
-        });
-      }
+      await downloadPostToLibrary(selectedPost);
+      Alert.alert('Download complete', 'The post was saved to your device.');
     } catch (error) {
       Alert.alert('Error', 'Failed to download post');
     }

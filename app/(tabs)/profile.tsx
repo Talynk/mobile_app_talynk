@@ -31,6 +31,7 @@ import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getFileUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { sharePost } from '@/lib/post-share';
 import { Avatar } from '@/components/Avatar';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
@@ -1898,13 +1899,7 @@ export default function ProfileScreen() {
                 setPostOptionsModalVisible(false);
                 if (selectedPost) {
                   try {
-                    const mediaUrl = getThumbnailUrl(selectedPost) || getFileUrl((selectedPost as any).video_url || (selectedPost as any).image || (selectedPost as any).fullUrl || '') || '';
-                    const caption = selectedPost.caption || selectedPost.description || selectedPost.title || '';
-                    await Share.share({
-                      title: 'Check out this post on Talentix',
-                      message: caption ? `${caption}\n\n${mediaUrl || 'View in Talentix app'}` : (mediaUrl || 'Check out this post on Talentix!'),
-                      url: mediaUrl || undefined,
-                    });
+                    await sharePost(selectedPost);
                   } catch (_) {}
                 }
               }}

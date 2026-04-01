@@ -31,6 +31,7 @@ import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
 
 import { getPostMediaUrl } from '@/lib/utils/file-url';
+import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
@@ -233,12 +234,7 @@ export default function FeedScreen() {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const mediaUrl = getPostMediaUrl(post);
-        await Share.share({
-          message: mediaUrl || post.caption || 'Check out this post on Talentix!',
-          title: 'Check out this post on Talentix!',
-          url: mediaUrl || undefined,
-        });
+        await sharePost(post);
       } catch {}
     }
   }, [posts]);

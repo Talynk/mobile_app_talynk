@@ -222,6 +222,15 @@ function RootLayoutNav() {
         if (response.ok) {
           networkStatus.reportOnline({ source: 'offline-probe' });
         }
+      } catch (error: any) {
+        const message = String(error?.message || '');
+        if (/AbortError|aborted/i.test(message)) {
+          return;
+        }
+        if (/Network request failed|Failed to fetch/i.test(message)) {
+          networkStatus.reportOffline({ source: 'offline-probe' });
+          return;
+        }
       } finally {
         clearTimeout(timeoutId);
         inFlight = false;
@@ -306,7 +315,9 @@ function RootLayoutNav() {
                   <Stack.Screen name="profile-feed/[userId]" options={{ headerShown: false }} />
                   <Stack.Screen name="search" options={{ headerShown: false }} />
                   <Stack.Screen name="category/[name]" options={{ headerShown: false }} />
-                  <Stack.Screen name="settings" options={{ headerShown: false }} />
+                  <Stack.Screen name="challenges/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="challenges/[id]/posts" options={{ headerShown: false }} />
+                  <Stack.Screen name="settings/index" options={{ headerShown: false }} />
                   <Stack.Screen name="settings/change-password" options={{ headerShown: false }} />
                   <Stack.Screen name="settings/delete-account" options={{ headerShown: false }} />
                   <Stack.Screen name="settings/sessions" options={{ headerShown: false }} />

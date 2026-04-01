@@ -41,6 +41,7 @@ import { filterHlsReady } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
+import { sharePost } from '@/lib/post-share';
 import { getExplorePostsCache } from '@/lib/explore-posts-cache';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
@@ -660,12 +661,7 @@ function ProfileFeedContent({
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        const mediaUrl = getPostMediaUrl(post);
-        await Share.share({
-          message: mediaUrl || post.caption || 'Check out this post on Talentix!',
-          title: 'Check out this post on Talentix!',
-          url: mediaUrl || undefined,
-        });
+        await sharePost(post);
       } catch (error) {
         // Silently handle share errors
       }

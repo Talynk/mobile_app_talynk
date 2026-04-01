@@ -22,6 +22,8 @@ import {
 import { useLocalSearchParams, router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { sharePost } from '@/lib/post-share';
+import { downloadPostToLibrary } from '@/lib/post-download';
 import { postsApi, followsApi, likesApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
@@ -235,13 +237,18 @@ export default function PostDetailScreen() {
 
   const handleShare = async () => {
     try {
-      await Share.share({
-        message: post?.caption || '',
-        url: getPostMediaUrl(post) || '',
-        title: 'Check out this post on Talynk!'
-      });
+      await sharePost(post);
     } catch (error) {
       console.error('Share error:', error);
+    }
+  };
+
+  const handleDownload = async () => {
+    try {
+      await downloadPostToLibrary(post);
+      Alert.alert('Download complete', 'The post was saved to your device.');
+    } catch (error: any) {
+      Alert.alert('Download failed', error?.message || 'Unable to save this post right now.');
     }
   };
 
@@ -551,6 +558,10 @@ export default function PostDetailScreen() {
         <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
           <Feather name="share-2" size={24} color="#fff" />
         </TouchableOpacity>
+
+        <TouchableOpacity style={styles.actionButton} onPress={handleDownload}>
+          <Feather name="download" size={24} color="#fff" />
+        </TouchableOpacity>
       </View >
 
       {/* Post Info and Comments - Scrollable */}
@@ -666,6 +677,17 @@ export default function PostDetailScreen() {
             >
               <Feather name="share-2" size={20} color="#fff" />
               <Text style={styles.menuItemText}>Share</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                handleDownload();
+              }}
+            >
+              <Feather name="download" size={20} color="#fff" />
+              <Text style={styles.menuItemText}>Download</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

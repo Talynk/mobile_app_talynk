@@ -24,7 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
@@ -49,6 +49,10 @@ import {
   loadFallbackChallengePosts,
   sortChallengePostsByLikes,
 } from '@/lib/utils/challenge-post-fallback';
+import {
+  getChallengeVideoStatusLabel,
+  prepareRenderableChallengePosts,
+} from '@/lib/utils/challenge-post-visibility';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -285,25 +289,40 @@ export default function ChallengeDetailScreen() {
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
-        const normalizedPosts = filterHlsReady(Array.isArray(postsList) ? postsList : []);
+        const normalizedPosts = await prepareRenderableChallengePosts(
+          Array.isArray(postsList) ? postsList : [],
+          { preserveUnavailableVideos: true },
+        );
         const likesMapFromResponse = buildLikesMapFromRawItems(Array.isArray(rawItems) ? rawItems : []);
         const challengeStatus = response.data?.challenge_status;
+        const declaredPostCount = Number(
+          challenge?._count?.posts ?? challenge?.posts_count ?? rawItems?.length ?? 0,
+        );
+        const shouldBackfillFromFallback =
+          declaredPostCount > 0 && normalizedPosts.length > 0 && normalizedPosts.length < declaredPostCount;
         const shouldUseFallback =
-          normalizedPosts.length === 0 &&
-          Array.isArray(rawItems) &&
-          rawItems.length === 0 &&
-          response.data?.winners_visible === false &&
-          (challengeStatus === 'ended' || challengeStatus === 'stopped');
+          shouldBackfillFromFallback ||
+          (
+            normalizedPosts.length === 0 &&
+            Array.isArray(rawItems) &&
+            rawItems.length === 0 &&
+            response.data?.winners_visible === false &&
+            (challengeStatus === 'ended' || challengeStatus === 'stopped')
+          );
 
         if (shouldUseFallback) {
           const fallbackData = await getFallbackChallengeData(options);
+          const fallbackPostsToUse =
+            fallbackData.posts.length >= normalizedPosts.length ? fallbackData.posts : normalizedPosts;
+          const likesMapToUse =
+            fallbackPostsToUse === fallbackData.posts ? fallbackData.likesMap : likesMapFromResponse;
 
-          primePostDetailsCache(fallbackData.posts);
-          setPosts(fallbackData.posts);
+          primePostDetailsCache(fallbackPostsToUse);
+          setPosts(fallbackPostsToUse);
           setRawChallengePosts([]);
-          setChallengeLikesMap(fallbackData.likesMap);
-          setUseChallengeSnapshotLikes(fallbackData.posts.length > 0);
-          setPostsWindowMessage(fallbackData.posts.length > 0 ? null : 'No posts yet');
+          setChallengeLikesMap(likesMapToUse);
+          setUseChallengeSnapshotLikes(Object.keys(likesMapToUse).length > 0);
+          setPostsWindowMessage(fallbackPostsToUse.length > 0 ? null : 'No posts yet');
           setPostsFetched(true);
           return;
         }
@@ -479,6 +498,25 @@ export default function ChallengeDetailScreen() {
 
     fetchWinners();
   }, [challenge?.id, challengeEnded, winnersFetched]);
+
+  useEffect(() => {
+    if (!id || activeTab !== 'posts' || postsLoading || !postsFetched) {
+      return;
+    }
+
+    const declaredPostCount = Number(challenge?._count?.posts ?? challenge?.posts_count ?? 0);
+    if (declaredPostCount > 0 && posts.length < declaredPostCount) {
+      fetchPosts({ forceRefresh: true });
+    }
+  }, [
+    activeTab,
+    challenge?._count?.posts,
+    challenge?.posts_count,
+    id,
+    posts.length,
+    postsFetched,
+    postsLoading,
+  ]);
 
   // Refresh challenge + posts when screen regains focus (not on every tab change).
   useFocusEffect(
@@ -666,7 +704,26 @@ export default function ChallengeDetailScreen() {
           if (currentCount >= maxContentPerParticipant) {
             Alert.alert(
               'Maximum reached',
-              `You have reached the maximum number of posts allowed for this competition (${maxContentPerParticipant}).`
+              `You have reached the maximum number of posts allowed for this competition (${maxContentPerParticipant}). You can still continue from the creator by posting to the main feed or saving as a draft.`,
+              [
+                {
+                  text: 'Post to Main Feed',
+                  onPress: () =>
+                    router.push({
+                      pathname: '/(tabs)/create',
+                      params: { preferredDestination: 'main_feed' },
+                    }),
+                },
+                {
+                  text: 'Save as Draft',
+                  onPress: () =>
+                    router.push({
+                      pathname: '/(tabs)/create',
+                      params: { preferredDestination: 'draft' },
+                    }),
+                },
+                { text: 'Cancel', style: 'cancel' },
+              ],
             );
             return;
           }
@@ -821,8 +878,7 @@ export default function ChallengeDetailScreen() {
     const post = posts.find((p: any) => p.id === postId);
     if (post) {
       try {
-        const url = getPostMediaUrl(post) || (post as any).fullUrl || '';
-        await Share.share({ message: url || post.caption || 'Check this out!', title: 'Talentix', url: url || undefined });
+        await sharePost(post);
       } catch (_) {}
     }
   };
@@ -872,6 +928,7 @@ export default function ChallengeDetailScreen() {
     targetUserId: string | null | undefined,
     targetUsername: string | null | undefined,
     mode: 'participant' | 'winner',
+    expectedPosts?: number,
   ) => {
     if (!targetUserId || !challenge?.id) {
       return;
@@ -885,11 +942,13 @@ export default function ChallengeDetailScreen() {
               id: String(challenge.id),
               winnerUserId: String(targetUserId),
               winnerUsername: String(targetUsername || ''),
+              expectedPosts: expectedPosts != null ? String(expectedPosts) : undefined,
             }
           : {
               id: String(challenge.id),
               participantUserId: String(targetUserId),
               participantUsername: String(targetUsername || ''),
+              expectedPosts: expectedPosts != null ? String(expectedPosts) : undefined,
             },
     });
   }, [challenge?.id]);
@@ -955,6 +1014,11 @@ export default function ChallengeDetailScreen() {
               size={28}
               color={C.textSecondary}
             />
+            {isVideo ? (
+              <Text style={styles.gridMissingMediaLabel}>
+                {getChallengeVideoStatusLabel(item) || 'Video'}
+              </Text>
+            ) : null}
           </View>
         )}
 
@@ -1373,6 +1437,7 @@ export default function ChallengeDetailScreen() {
               winnerUser.id || item.user_id,
               winnerUser.username,
               'winner',
+              winnerPostsCount,
             )
           }
         >
@@ -1443,6 +1508,7 @@ export default function ChallengeDetailScreen() {
             participantUser.id || item.user_id,
             participantUser.username,
             'participant',
+            postCount,
           )
         }
       >
@@ -2478,6 +2544,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#1a1a1a',
+  },
+  gridMissingMediaLabel: {
+    marginTop: 8,
+    color: '#d1d5db',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   gridCardMeta: {
     position: 'absolute',

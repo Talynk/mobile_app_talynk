@@ -16,6 +16,7 @@ import { router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { Avatar } from './Avatar';
 import { useNetworkStatus, useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
+import { upsertCachedJoinedChallenge } from '@/lib/create-screen-cache';
 import {
     formatChallengeDateTime,
     getChallengeDateInfo,
@@ -68,6 +69,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
     const [refreshing, setRefreshing] = useState(false);
     const [internalTab, setInternalTab] = useState<ChallengesTab>('live_upcoming');
     const [joinedIds, setJoinedIds] = useState<Set<string>>(new Set());
+    const [joiningChallengeId, setJoiningChallengeId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const { user } = useAuth();
     const { isOffline } = useNetworkStatus();
@@ -282,6 +284,50 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
         fetchChallenges(internalTab, { force: true });
     });
 
+    const handleJoinChallenge = async (challenge: any) => {
+        if (!challenge?.id || joiningChallengeId) {
+            return;
+        }
+
+        if (!user?.id) {
+            Alert.alert(
+                'Join Competition',
+                'Log in or create an account to join this competition.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Sign Up', onPress: () => router.push('/auth/register') },
+                    { text: 'Log In', onPress: () => router.push('/auth/login') },
+                ],
+            );
+            return;
+        }
+
+        setJoiningChallengeId(String(challenge.id));
+        try {
+            const response = await challengesApi.join(String(challenge.id));
+            if (response?.status !== 'success') {
+                throw new Error(response?.message || 'Failed to join competition');
+            }
+
+            setJoinedIds((prev) => {
+                const next = new Set(prev);
+                next.add(String(challenge.id));
+                return next;
+            });
+
+            await upsertCachedJoinedChallenge(user.id, {
+                ...challenge,
+                is_participant: true,
+            });
+
+            Alert.alert('Joined Competition', response.message || 'You joined the competition successfully.');
+        } catch (error: any) {
+            Alert.alert('Unable to Join Competition', error?.message || 'Failed to join competition');
+        } finally {
+            setJoiningChallengeId(null);
+        }
+    };
+
     useEffect(() => {
         if (defaultTab === 'active' || defaultTab === 'upcoming') setInternalTab('live_upcoming');
         else if (defaultTab === 'ended') setInternalTab('ended');
@@ -352,6 +398,12 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
         const isEnded = internalTab === 'ended' || status.label === 'Ended';
         const isOrganizer = !!user && (item.organizer_id === user.id || (item as any).organizer?.id === user.id);
         const blockNonOrganizerPending = item.status === 'pending' && !isOrganizer;
+        const canJoinDirectly =
+            !isJoined &&
+            !isEnded &&
+            !isOrganizer &&
+            !blockNonOrganizerPending &&
+            isChallengeParticipationOpen(item);
 
         return (
             <TouchableOpacity
@@ -459,8 +511,32 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 ) : null}
 
                 <View style={styles.tapForDetailsRow}>
-                    <Text style={styles.tapForDetailsText}>Click here for more details</Text>
-                    <Feather name="chevron-right" size={14} color="#60a5fa" />
+                    {canJoinDirectly ? (
+                        <TouchableOpacity
+                            style={styles.joinInlineButton}
+                            onPress={(event) => {
+                                event.stopPropagation();
+                                void handleJoinChallenge(item);
+                            }}
+                            activeOpacity={0.85}
+                            disabled={joiningChallengeId === item.id}
+                        >
+                            {joiningChallengeId === item.id ? (
+                                <ActivityIndicator size="small" color="#031525" />
+                            ) : (
+                                <>
+                                    <Feather name="plus-circle" size={14} color="#031525" />
+                                    <Text style={styles.joinInlineButtonText}>Join Competition</Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    ) : (
+                        <Text style={styles.tapForDetailsText}>Click here for more details</Text>
+                    )}
+                    <View style={styles.detailsHintWrap}>
+                        <Text style={styles.tapForDetailsText}>{canJoinDirectly ? 'View details' : ''}</Text>
+                        <Feather name="chevron-right" size={14} color="#60a5fa" />
+                    </View>
                 </View>
             </TouchableOpacity>
         );
@@ -869,16 +945,35 @@ const styles = StyleSheet.create({
     tapForDetailsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 4,
+        justifyContent: 'space-between',
         marginTop: 10,
         paddingTop: 10,
         borderTopWidth: 1,
         borderTopColor: '#2a2a2a',
     },
+    detailsHintWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
     tapForDetailsText: {
         color: '#60a5fa',
         fontSize: 13,
         fontWeight: '600',
+    },
+    joinInlineButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#93c5fd',
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+    },
+    joinInlineButtonText: {
+        color: '#031525',
+        fontSize: 12,
+        fontWeight: '800',
     },
     emptyContainer: {
         alignItems: 'center',
