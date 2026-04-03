@@ -155,6 +155,7 @@ export default function ChallengeDetailScreen() {
   const [postsFetched, setPostsFetched] = useState(false);
   const [participantsFetched, setParticipantsFetched] = useState(false);
   const [showUpcomingJoinModal, setShowUpcomingJoinModal] = useState(false);
+  const [yourPostCount, setYourPostCount] = useState(0);
   const fallbackChallengeDataRef = useRef<any>(null);
   const hasHandledInitialFocusRef = useRef(false);
 
@@ -212,6 +213,21 @@ export default function ChallengeDetailScreen() {
 
     return map;
   }, []);
+
+  const fetchYourPostCount = useCallback(async () => {
+    if (!id || !user?.id || !challenge?.is_participant) {
+      setYourPostCount(0);
+      return;
+    }
+
+    try {
+      const response = await challengesApi.getParticipantPosts(String(id), user.id, 1, 200);
+      const count = Array.isArray(response.data?.posts) ? response.data.posts.length : 0;
+      setYourPostCount(count);
+    } catch {
+      setYourPostCount(0);
+    }
+  }, [challenge?.is_participant, id, user?.id]);
 
   const getFallbackChallengeData = useCallback(async (options?: { forceRefresh?: boolean }) => {
     if (!id) {
@@ -500,6 +516,10 @@ export default function ChallengeDetailScreen() {
   }, [challenge?.id, challengeEnded, winnersFetched]);
 
   useEffect(() => {
+    void fetchYourPostCount();
+  }, [fetchYourPostCount]);
+
+  useEffect(() => {
     if (!id || activeTab !== 'posts' || postsLoading || !postsFetched) {
       return;
     }
@@ -527,6 +547,7 @@ export default function ChallengeDetailScreen() {
       }
 
       fetchChallenge({ showLoader: false });
+      void fetchYourPostCount();
       if (activeTab === 'participants') {
         fetchParticipants();
       } else if (activeTab === 'winners') {
@@ -534,7 +555,7 @@ export default function ChallengeDetailScreen() {
       } else {
         fetchPosts();
       }
-    }, [id, activeTab])
+    }, [activeTab, fetchYourPostCount, id])
   );
 
   useEffect(() => {
@@ -548,6 +569,7 @@ export default function ChallengeDetailScreen() {
       }
 
       fetchChallenge({ showLoader: false });
+      void fetchYourPostCount();
       if (activeTab === 'participants') {
         fetchParticipants();
       } else if (activeTab === 'winners') {
@@ -561,7 +583,7 @@ export default function ChallengeDetailScreen() {
     return () => {
       websocketService.off('challengeUpdated', handleChallengeUpdated);
     };
-  }, [activeTab, id]);
+  }, [activeTab, fetchYourPostCount, id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -572,6 +594,7 @@ export default function ChallengeDetailScreen() {
     } else {
       await Promise.all([fetchChallenge({ showLoader: false }), fetchPosts({ forceRefresh: true })]);
     }
+    await fetchYourPostCount();
     setRefreshing(false);
   };
 
@@ -1076,6 +1099,12 @@ export default function ChallengeDetailScreen() {
                 <Text style={styles.statValue}>{postCount}</Text>
                 <Text style={styles.statLabel}>Posts</Text>
               </View>
+              {user ? (
+                <View style={styles.statItem}>
+                  <Text style={styles.statValue}>{yourPostCount}</Text>
+                  <Text style={styles.statLabel}>Your Posts</Text>
+                </View>
+              ) : null}
             </View>
           )}
         </LinearGradient>

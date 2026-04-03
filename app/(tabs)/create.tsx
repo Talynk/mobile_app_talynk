@@ -750,13 +750,16 @@ export default function CreatePostScreen() {
     void loadJoinableChallenges();
   }, [loadJoinableChallenges]);
 
-  const ensureChallengePostCount = useCallback(async (challenge: any) => {
+  const ensureChallengePostCount = useCallback(async (
+    challenge: any,
+    options?: { force?: boolean },
+  ) => {
     if (!challenge?.id || !user?.id || loadingChallengeCountsRef.current.has(challenge.id)) {
-      return;
+      return null;
     }
 
-    if (challengePostCounts[challenge.id]) {
-      return;
+    if (!options?.force && challengePostCounts[challenge.id]) {
+      return challengePostCounts[challenge.id];
     }
 
     loadingChallengeCountsRef.current.add(challenge.id);
@@ -765,23 +768,30 @@ export default function CreatePostScreen() {
       const response = await challengesApi.getParticipantPosts(challenge.id, user.id, 1, 100);
       const count = Array.isArray(response.data?.posts) ? response.data.posts.length : 0;
       const max = Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5;
+      const nextInfo = { count, max };
 
       if (!isMountedRef.current) return;
 
       setChallengePostCounts((prev) => ({
         ...prev,
-        [challenge.id]: { count, max },
+        [challenge.id]: nextInfo,
       }));
+
+      return nextInfo;
     } catch {
       if (!isMountedRef.current) return;
 
+      const nextInfo = {
+        count: challengePostCounts[challenge.id]?.count ?? 0,
+        max: Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5,
+      };
+
       setChallengePostCounts((prev) => ({
         ...prev,
-        [challenge.id]: {
-          count: prev[challenge.id]?.count ?? 0,
-          max: Number(challenge.max_content_per_account ?? challenge.min_content_per_account) || 5,
-        },
+        [challenge.id]: nextInfo,
       }));
+
+      return nextInfo;
     } finally {
       loadingChallengeCountsRef.current.delete(challenge.id);
     }
@@ -796,7 +806,7 @@ export default function CreatePostScreen() {
       void (async () => {
         for (const challenge of joinedChallenges.slice(0, 6)) {
           if (cancelled) return;
-          await ensureChallengePostCount(challenge);
+          await ensureChallengePostCount(challenge, { force: true });
         }
       })();
     }, 800);
@@ -847,6 +857,28 @@ export default function CreatePostScreen() {
     if (!info) return false;
     return info.count >= info.max;
   })();
+
+  const incrementChallengePostCount = useCallback((challengeId: string | null | undefined) => {
+    if (!challengeId) {
+      return;
+    }
+
+    const challenge = joinedChallengesRef.current.find((item: any) => String(item.id) === String(challengeId));
+    const fallbackMax = Number(challenge?.max_content_per_account ?? challenge?.min_content_per_account) || 5;
+
+    setChallengePostCounts((prev) => {
+      const current = prev[challengeId];
+      const max = current?.max ?? fallbackMax;
+
+      return {
+        ...prev,
+        [challengeId]: {
+          count: Math.min((current?.count ?? 0) + 1, max),
+          max,
+        },
+      };
+    });
+  }, []);
 
   // Re-fetch categories and joined challenges automatically when connectivity returns
   useRefetchOnReconnect(() => {
@@ -1865,6 +1897,10 @@ export default function CreatePostScreen() {
               // For videos, backend will continue HLS processing and send a notification when ready.
               await uploadNotificationService.showUploadComplete(fileName);
 
+              if (challengeIdToOpen) {
+                incrementChallengePostCount(challengeIdToOpen);
+              }
+
               setRecordedVideoUri(null);
               setEditedVideoUri(null);
               setThumbnailUri(null);
@@ -2016,6 +2052,10 @@ export default function CreatePostScreen() {
           status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
           selectedChallengeName
         );
+
+        if (effectiveSelectedChallengeId && !challengeLinkFailed) {
+          incrementChallengePostCount(effectiveSelectedChallengeId);
+        }
 
         if (
           challengeLinkFailed &&
@@ -2923,16 +2963,20 @@ export default function CreatePostScreen() {
                                     isSelected && !isFull && { borderColor: C.primary, backgroundColor: `${C.primary}20` },
                                     isFull && { borderColor: C.warning, backgroundColor: `${C.warning}18` },
                                   ]}
-                                  onPress={() => {
-                                    if (isFull) {
+                                  onPress={async () => {
+                                    const latestInfo = await ensureChallengePostCount(challenge, { force: true });
+                                    const resolvedInfo = latestInfo ?? challengePostCounts[challenge.id] ?? info;
+                                    const resolvedIsFull = resolvedInfo ? resolvedInfo.count >= resolvedInfo.max : false;
+
+                                    if (resolvedIsFull) {
                                       setMaxReachedContext({
                                         challengeName: challenge.name || 'this competition',
-                                        max: info?.max ?? 5,
+                                        max: resolvedInfo?.max ?? 5,
                                       });
                                       setShowPostActionModal(true);
                                       return;
                                     }
-                                    void ensureChallengePostCount(challenge);
+
                                     setSelectedChallengeId(challenge.id);
                                   }}
                                 >
@@ -4295,7 +4339,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
     marginBottom: 8,
-    marginTop: -80,
+    marginTop: -50,
   },
   warningBannerHeader: {
     flexDirection: 'row',
