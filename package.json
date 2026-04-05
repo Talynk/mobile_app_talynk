@@ -31,6 +31,7 @@
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.10.0",
     "date-fns": "^2.30.0",
+    "eas": "^0.1.0",
     "expo": "~54.0.31",
     "expo-av": "~16.0.8",
     "expo-build-properties": "^1.0.10",
