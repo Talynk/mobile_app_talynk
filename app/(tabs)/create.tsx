@@ -2656,7 +2656,7 @@ export default function CreatePostScreen() {
                 ]}>
                   <TextInput
                     style={[styles.captionInput, { color: C.inputText }]}
-                    placeholder="Share your story... 🎬 What makes this special? Add #hashtags"
+                    placeholder="Describe your content... 🎬 What makes this special? Add #hashtags"
                     placeholderTextColor={C.placeholder}
                     value={caption}
                     onChangeText={setCaption}
