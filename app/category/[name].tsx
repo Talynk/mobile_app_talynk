@@ -42,6 +42,7 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { getCategoryDisplayName } from '@/lib/utils/category-display';
 
 const POSTS_PER_PAGE = 20;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -62,6 +63,7 @@ const COLORS = {
 export default function CategoryScreen() {
   const { name } = useLocalSearchParams();
   const categoryName = Array.isArray(name) ? name[0] : (name as string);
+  const categoryDisplayName = getCategoryDisplayName(categoryName);
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -259,7 +261,7 @@ export default function CategoryScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>#{categoryName}</Text>
+          <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.loadingContainer}>
@@ -277,7 +279,7 @@ export default function CategoryScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>#{categoryName}</Text>
+          <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.errorContainer}>
@@ -296,7 +298,7 @@ export default function CategoryScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>#{categoryName}</Text>
+        <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
         <View style={{ width: 40 }} />
       </View>
 

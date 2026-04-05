@@ -32,6 +32,12 @@ import { API_BASE_URL } from '@/lib/config';
 import * as FileSystem from 'expo-file-system/legacy';
 import { generateThumbnail } from '@/lib/utils/thumbnail';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import {
+  Camera as VisionCamera,
+  useCameraDevice,
+  useCameraPermission as useVisionCameraPermission,
+  useMicrophonePermission as useVisionMicrophonePermission,
+} from 'react-native-vision-camera';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
@@ -55,6 +61,7 @@ import {
   upsertCachedJoinedChallenge,
 } from '@/lib/create-screen-cache';
 import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
+import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import websocketService from '@/lib/websocket-service';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -275,14 +282,24 @@ export default function CreatePostScreen() {
   const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
+  const {
+    hasPermission: hasVisionCameraPermission,
+    requestPermission: requestVisionCameraPermission,
+  } = useVisionCameraPermission();
+  const {
+    hasPermission: hasVisionMicrophonePermission,
+    requestPermission: requestVisionMicrophonePermission,
+  } = useVisionMicrophonePermission();
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [showPostActionModal, setShowPostActionModal] = useState(false);
   const [maxReachedContext, setMaxReachedContext] = useState<{ challengeName: string; max: number } | null>(null);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<CameraView>(null);
+  const visionCameraRef = useRef<React.ElementRef<typeof VisionCamera> | null>(null);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingSafetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingDurationRef = useRef(0);
   const stoppedDueToMaxDurationRef = useRef(false);
   const [showPreRecordInfoModal, setShowPreRecordInfoModal] = useState(false);
   const [showMaxDurationReachedModal, setShowMaxDurationReachedModal] = useState(false);
@@ -323,8 +340,10 @@ export default function CreatePostScreen() {
   const joinedChallengesRef = useRef<any[]>([]);
   const launchSystemCameraCaptureRef = useRef<(mode: 'video' | 'picture') => Promise<boolean>>(async () => false);
   const handlePickFromGalleryRef = useRef<() => void>(() => {});
-  const shouldPreferSystemVideoCamera =
+  const shouldUseVisionCameraVideo =
     Platform.OS === 'android' && Number(Platform.Version) === ANDROID_13_API_LEVEL;
+  const isUsingVisionCameraVideo = shouldUseVisionCameraVideo && cameraMode === 'video';
+  const visionCameraDevice = useCameraDevice(cameraFacing);
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -340,6 +359,7 @@ export default function CreatePostScreen() {
         clearTimeout(recordingSafetyTimeoutRef.current);
         recordingSafetyTimeoutRef.current = null;
       }
+      recordingDurationRef.current = 0;
     };
   }, []);
 
@@ -897,6 +917,7 @@ export default function CreatePostScreen() {
 
     stoppedDueToMaxDurationRef.current = false;
     setRecordingDuration(0);
+    recordingDurationRef.current = 0;
 
     if (showCamera) {
       setShowCamera(false);
@@ -909,6 +930,41 @@ export default function CreatePostScreen() {
 
   const ensureCameraPermissions = useCallback(
     async (mode: 'video' | 'picture') => {
+      if (shouldUseVisionCameraVideo && mode === 'video') {
+        const hasCameraAccess = hasVisionCameraPermission || await requestVisionCameraPermission();
+        if (!hasCameraAccess) {
+          Alert.alert(
+            'Camera Permission Denied',
+            'Camera access is required to record a video. Please enable it in Settings to continue.',
+            [
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+          return false;
+        }
+
+        const hasMicAccess = hasVisionMicrophonePermission || await requestVisionMicrophonePermission();
+        if (!hasMicAccess) {
+          Alert.alert(
+            'Microphone Access',
+            'Microphone permission was denied. You can continue and record silently, or enable microphone access for video with audio.',
+            [
+              {
+                text: 'Continue Silent',
+                onPress: () => remountCamera(mode),
+              },
+              { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              { text: 'Cancel', style: 'cancel' },
+            ],
+          );
+          return false;
+        }
+
+        remountCamera(mode);
+        return true;
+      }
+
       const camPerm = cameraPermission?.granted ? cameraPermission : await requestCameraPermission();
       if (!camPerm?.granted) {
         if (!(camPerm as any)?.canAskAgain) {
@@ -956,10 +1012,15 @@ export default function CreatePostScreen() {
     },
     [
       cameraPermission,
+      hasVisionCameraPermission,
+      hasVisionMicrophonePermission,
       microphonePermission,
       remountCamera,
       requestCameraPermission,
       requestMicrophonePermission,
+      requestVisionCameraPermission,
+      requestVisionMicrophonePermission,
+      shouldUseVisionCameraVideo,
     ],
   );
 
@@ -1009,10 +1070,10 @@ export default function CreatePostScreen() {
           ],
         );
       }
-    }, shouldPreferSystemVideoCamera && cameraMode === 'video' ? 9000 : 14000);
+    }, isUsingVisionCameraVideo ? 14000 : 14000);
 
     return () => { clearTimeout(autoRetry); clearTimeout(finalWatchdog); };
-  }, [showCamera, isCameraReady, remountCamera, cameraMode, shouldPreferSystemVideoCamera]);
+  }, [showCamera, isCameraReady, remountCamera, cameraMode, isUsingVisionCameraVideo]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = useCallback(async () => {
@@ -1041,10 +1102,6 @@ export default function CreatePostScreen() {
   const proceedToRecord = async () => {
     setShowPreRecordInfoModal(false);
     cameraRetryCountRef.current = 0;
-    if (shouldPreferSystemVideoCamera) {
-      await launchSystemCameraCapture('video');
-      return;
-    }
     await ensureCameraPermissions('video');
   };
 
@@ -1053,7 +1110,6 @@ export default function CreatePostScreen() {
     if (authLoading) return;
     if (!isAuthenticated) return;
     if (hasOpenedCameraOnMount) return;
-    if (shouldPreferSystemVideoCamera) return;
 
     setHasOpenedCameraOnMount(true);
 
@@ -1064,7 +1120,7 @@ export default function CreatePostScreen() {
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo, shouldPreferSystemVideoCamera]);
+  }, [authLoading, isAuthenticated, hasOpenedCameraOnMount, handleRecordVideo]);
 
   // --- CATEGORY HELPERS ---
   const getCategoriesForGroup = () => {
@@ -1084,6 +1140,10 @@ export default function CreatePostScreen() {
     if (foundFromLoaded) return foundFromLoaded.name;
 
     return '';
+  };
+
+  const getSelectedCategoryDisplayName = () => {
+    return getCategoryDisplayName(getSelectedCategoryName());
   };
 
   const getSelectedCategoryId = () => {
@@ -1344,7 +1404,7 @@ export default function CreatePostScreen() {
   };
 
   const startRecording = useCallback(async () => {
-    if (!cameraRef.current || isRecording) return;
+    if (isRecording) return;
 
     try {
       if (!isCameraReady) {
@@ -1352,13 +1412,155 @@ export default function CreatePostScreen() {
         return;
       }
 
+      if (isUsingVisionCameraVideo) {
+        if (!visionCameraRef.current || !visionCameraDevice) {
+          Alert.alert('Camera Error', 'The video camera is not ready yet. Please wait a moment and try again.');
+          return;
+        }
+
+        const MAX_RECORDING_SECONDS = 120;
+        setIsRecording(true);
+        setRecordingDuration(0);
+        recordingDurationRef.current = 0;
+
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingDuration((prev) => {
+            const newDuration = prev + 1;
+            recordingDurationRef.current = newDuration;
+            if (newDuration >= MAX_RECORDING_SECONDS) {
+              stoppedDueToMaxDurationRef.current = true;
+              void visionCameraRef.current?.stopRecording().catch((error) => {
+                console.error('[VisionCamera] Failed to stop after max duration:', error);
+              });
+              return MAX_RECORDING_SECONDS;
+            }
+            return newDuration;
+          });
+        }, 1000);
+        recordingSafetyTimeoutRef.current = setTimeout(() => {
+          void visionCameraRef.current?.stopRecording().catch((error) => {
+            console.error('[VisionCamera] Safety timeout stop failed:', error);
+          });
+        }, (MAX_RECORDING_SECONDS + 1) * 1000);
+
+        visionCameraRef.current.startRecording({
+          fileType: 'mp4',
+          videoCodec: 'h264',
+          onRecordingFinished: (video) => {
+            setTimeout(async () => {
+              if (!isMountedRef.current) {
+                return;
+              }
+
+              setIsRecording(false);
+              if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
+                recordingTimerRef.current = null;
+              }
+              if (recordingSafetyTimeoutRef.current) {
+                clearTimeout(recordingSafetyTimeoutRef.current);
+                recordingSafetyTimeoutRef.current = null;
+              }
+
+              const videoUri = video.path.startsWith('file://') ? video.path : `file://${video.path}`;
+
+              try {
+                const fileInfo = await FileSystem.getInfoAsync(videoUri);
+                if (!fileInfo.exists || Number((fileInfo as any).size || 0) < 1024) {
+                  throw new Error('Recorded video file was not saved correctly.');
+                }
+              } catch (error) {
+                console.error('[VisionCamera] Video file validation failed:', error);
+                if (isMountedRef.current) {
+                  Alert.alert('Recording failed', 'Failed to save video. Please try again.');
+                  setShowCamera(false);
+                  setRecordingDuration(0);
+                  recordingDurationRef.current = 0;
+                }
+                return;
+              }
+
+              if (recordingDurationRef.current > 120) {
+                Alert.alert(
+                  'Video Too Long',
+                  'Your recording is longer than 2 minutes. Please record a shorter video.'
+                );
+                if (isMountedRef.current) {
+                  setShowCamera(false);
+                  setRecordingDuration(0);
+                  recordingDurationRef.current = 0;
+                }
+                return;
+              }
+
+              setRecordedVideoUri(videoUri);
+              setEditedVideoUri(null);
+              setCapturedImageUri(null);
+              setShowCamera(false);
+              setRecordingDuration(0);
+              recordingDurationRef.current = 0;
+
+              if (stoppedDueToMaxDurationRef.current) {
+                stoppedDueToMaxDurationRef.current = false;
+                setShowMaxDurationReachedModal(true);
+              }
+
+              generateThumbnail(videoUri)
+                .then((thumbnail) => {
+                  if (isMountedRef.current && thumbnail) {
+                    setThumbnailUri(thumbnail);
+                  }
+                })
+                .catch((thumbError) => {
+                  console.error('[VisionCamera] Thumbnail generation error (non-critical):', thumbError);
+                });
+            }, 100);
+          },
+          onRecordingError: (error) => {
+            console.error('[VisionCamera] Recording error:', error);
+            setTimeout(() => {
+              if (!isMountedRef.current) return;
+
+              setIsRecording(false);
+              if (recordingTimerRef.current) {
+                clearInterval(recordingTimerRef.current);
+                recordingTimerRef.current = null;
+              }
+              if (recordingSafetyTimeoutRef.current) {
+                clearTimeout(recordingSafetyTimeoutRef.current);
+                recordingSafetyTimeoutRef.current = null;
+              }
+              recordingDurationRef.current = 0;
+
+              if (error?.message && !String(error.message).includes('cancel')) {
+                Alert.alert(
+                  'Recording failed',
+                  'Failed to record video. Please try again.',
+                  [{ text: 'OK' }],
+                );
+              }
+              setShowCamera(false);
+              setRecordingDuration(0);
+            }, 100);
+          },
+        });
+
+        return;
+      }
+
+      if (!cameraRef.current) {
+        return;
+      }
+
       setIsRecording(true);
       setRecordingDuration(0);
+      recordingDurationRef.current = 0;
 
       const MAX_RECORDING_SECONDS = 120;
       recordingTimerRef.current = setInterval(() => {
         setRecordingDuration((prev) => {
           const newDuration = prev + 1;
+          recordingDurationRef.current = newDuration;
           if (newDuration >= MAX_RECORDING_SECONDS) {
             stoppedDueToMaxDurationRef.current = true;
             stopRecording();
@@ -1430,7 +1632,7 @@ export default function CreatePostScreen() {
               // Continue anyway - file might still be valid
             }
 
-            if (recordingDuration > 120) {
+            if (recordingDurationRef.current > 120) {
               Alert.alert(
                 'Video Too Long',
                 'Your recording is longer than 2 minutes. Please record a shorter video.'
@@ -1438,6 +1640,7 @@ export default function CreatePostScreen() {
               if (isMountedRef.current) {
                 setShowCamera(false);
                 setRecordingDuration(0);
+                recordingDurationRef.current = 0;
               }
               return;
             }
@@ -1450,6 +1653,7 @@ export default function CreatePostScreen() {
               setCapturedImageUri(null);
               setShowCamera(false);
               setRecordingDuration(0);
+              recordingDurationRef.current = 0;
 
               if (stoppedDueToMaxDurationRef.current) {
                 stoppedDueToMaxDurationRef.current = false;
@@ -1495,10 +1699,10 @@ export default function CreatePostScreen() {
           if (error?.message && !error.message.includes('cancel')) {
             Alert.alert(
               'Recording failed',
-              shouldPreferSystemVideoCamera
+              shouldUseVisionCameraVideo
                 ? 'In-app recording failed on this device. Use the device camera to continue recording safely.'
                 : 'Failed to record video. Please try again.',
-              shouldPreferSystemVideoCamera
+              shouldUseVisionCameraVideo
                 ? [
                     { text: 'Use Device Camera', onPress: () => void launchSystemCameraCapture('video') },
                     { text: 'Cancel', style: 'cancel' },
@@ -1509,6 +1713,7 @@ export default function CreatePostScreen() {
           if (isMountedRef.current) {
             setShowCamera(false);
             setRecordingDuration(0);
+            recordingDurationRef.current = 0;
           }
         }, 100);
       });
@@ -1516,10 +1721,10 @@ export default function CreatePostScreen() {
       console.error('Recording error:', error);
       Alert.alert(
         'Recording error',
-        shouldPreferSystemVideoCamera
+        shouldUseVisionCameraVideo
           ? 'In-app recording could not start on this device. Use the device camera instead.'
           : 'Failed to start recording. Please try again.',
-        shouldPreferSystemVideoCamera
+        shouldUseVisionCameraVideo
           ? [
               { text: 'Use Device Camera', onPress: () => void launchSystemCameraCapture('video') },
               { text: 'Cancel', style: 'cancel' },
@@ -1535,11 +1740,12 @@ export default function CreatePostScreen() {
         clearTimeout(recordingSafetyTimeoutRef.current);
         recordingSafetyTimeoutRef.current = null;
       }
+      recordingDurationRef.current = 0;
     }
-  }, [isRecording, isCameraReady, recordingDuration, shouldPreferSystemVideoCamera, launchSystemCameraCapture]);
+  }, [isRecording, isCameraReady, isUsingVisionCameraVideo, launchSystemCameraCapture, shouldUseVisionCameraVideo, visionCameraDevice]);
 
   const stopRecording = () => {
-    if (!cameraRef.current || !isRecording) return;
+    if (!isRecording) return;
 
     setIsRecording(false);
     if (recordingTimerRef.current) {
@@ -1550,8 +1756,16 @@ export default function CreatePostScreen() {
       clearTimeout(recordingSafetyTimeoutRef.current);
       recordingSafetyTimeoutRef.current = null;
     }
+    recordingDurationRef.current = 0;
 
-    cameraRef.current.stopRecording();
+    if (isUsingVisionCameraVideo) {
+      void visionCameraRef.current?.stopRecording().catch((error) => {
+        console.error('[VisionCamera] Failed to stop recording:', error);
+      });
+      return;
+    }
+
+    cameraRef.current?.stopRecording();
   };
 
   const cancelCamera = () => {
@@ -2302,34 +2516,70 @@ export default function CreatePostScreen() {
         <View
           style={[styles.cameraContainer, { paddingTop: insets.top }]}
         >
-          <CameraView
-            key={`camera-${cameraSessionKey}-${cameraMode}-${cameraFacing}`}
-            ref={cameraRef}
-            style={styles.camera}
-            facing={cameraFacing}
-            mode={cameraMode}
-            zoom={0}
-            mirror={cameraFacing === 'front'}
-            mute={cameraMode === 'video' && !microphonePermission?.granted}
-            enableTorch={false}
-            flash="off"
-            onCameraReady={() => {
-              console.log('[Camera] Camera is ready');
-              setIsCameraReady(true);
-            }}
-            onMountError={(error: any) => {
-              console.error('[Camera] Mount error:', error);
-              try {
-                const Sentry = require('@sentry/react-native');
-                Sentry.captureException(new Error(`Camera mount error: ${error?.message || JSON.stringify(error)}`));
-              } catch {}
-              Alert.alert(
-                'Camera Error',
-                'The camera could not start on this device. Please try closing other apps or restart the app.',
-                [{ text: 'Close Camera', onPress: cancelCamera }],
-              );
-            }}
-          />
+          {isUsingVisionCameraVideo && visionCameraDevice ? (
+            <VisionCamera
+              key={`vision-camera-${cameraSessionKey}-${cameraFacing}`}
+              ref={visionCameraRef}
+              style={styles.camera}
+              device={visionCameraDevice}
+              isActive={showCamera && isAppActive}
+              preview
+              video
+              audio={hasVisionMicrophonePermission}
+              androidPreviewViewType="texture-view"
+              outputOrientation="device"
+              torch="off"
+              zoom={1}
+              onInitialized={() => {
+                console.log('[VisionCamera] Session initialized');
+              }}
+              onPreviewStarted={() => {
+                console.log('[VisionCamera] Preview started');
+                setIsCameraReady(true);
+              }}
+              onError={(error: any) => {
+                console.error('[VisionCamera] Mount/runtime error:', error);
+                try {
+                  const Sentry = require('@sentry/react-native');
+                  Sentry.captureException(new Error(`VisionCamera error: ${error?.message || JSON.stringify(error)}`));
+                } catch {}
+                Alert.alert(
+                  'Camera Error',
+                  'The camera could not start on this device. Please try closing other apps or restart the app.',
+                  [{ text: 'Close Camera', onPress: cancelCamera }],
+                );
+              }}
+            />
+          ) : (
+            <CameraView
+              key={`camera-${cameraSessionKey}-${cameraMode}-${cameraFacing}`}
+              ref={cameraRef}
+              style={styles.camera}
+              facing={cameraFacing}
+              mode={cameraMode}
+              zoom={0}
+              mirror={cameraFacing === 'front'}
+              mute={cameraMode === 'video' && !microphonePermission?.granted}
+              enableTorch={false}
+              flash="off"
+              onCameraReady={() => {
+                console.log('[Camera] Camera is ready');
+                setIsCameraReady(true);
+              }}
+              onMountError={(error: any) => {
+                console.error('[Camera] Mount error:', error);
+                try {
+                  const Sentry = require('@sentry/react-native');
+                  Sentry.captureException(new Error(`Camera mount error: ${error?.message || JSON.stringify(error)}`));
+                } catch {}
+                Alert.alert(
+                  'Camera Error',
+                  'The camera could not start on this device. Please try closing other apps or restart the app.',
+                  [{ text: 'Close Camera', onPress: cancelCamera }],
+                );
+              }}
+            />
+          )}
 
           {!isCameraReady && (
             <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#000', justifyContent: 'center', alignItems: 'center', zIndex: 50 }}>
@@ -2458,11 +2708,11 @@ export default function CreatePostScreen() {
 
           <View style={styles.studioBody}>
             <MaterialIcons name="videocam" size={72} color={C.primary} />
-            <Text style={[styles.studioHint, { color: C.textSecondary }]}>
-              {shouldPreferSystemVideoCamera
-                ? 'Using the device camera for more reliable Android 13 video capture'
+              <Text style={[styles.studioHint, { color: C.textSecondary }]}>
+              {shouldUseVisionCameraVideo
+                ? 'Using the in-app Android 13 video camera with native recording'
                 : 'Camera opens automatically'}
-            </Text>
+              </Text>
 
             <TouchableOpacity
               style={[
@@ -2689,7 +2939,7 @@ export default function CreatePostScreen() {
                   {selectedGroup && selectedCategoryId && (
                     <View style={[styles.selectedBadge, { backgroundColor: C.primary + '20' }]}>
                       <Text style={[styles.selectedBadgeText, { color: C.primary }]}>
-                        {getSelectedCategoryName()}
+                        {getSelectedCategoryDisplayName()}
                       </Text>
                     </View>
                   )}
@@ -2802,7 +3052,7 @@ export default function CreatePostScreen() {
                                   { color: selectedCategoryId === String(cat.id) ? C.primary : C.text },
                                 ]}
                               >
-                                {cat.name}
+                                {getCategoryDisplayName(cat.name)}
                               </Text>
                             </TouchableOpacity>
                           )

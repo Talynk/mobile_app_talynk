@@ -32,6 +32,7 @@ import { timeAgo } from '@/lib/utils/time-ago';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-cache';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { getCategoryDisplayName } from '@/lib/utils/category-display';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EXPLORE_PAGE_LIMIT = 24;
@@ -189,15 +190,6 @@ export default function ExploreScreen() {
     };
     loadCountries();
   }, []);
-
-  // Category display name mapping for frontend
-  const getCategoryDisplayName = (name: string): string => {
-    const displayMap: { [key: string]: string } = {
-      'Women Beauty': 'Ladies Beauty',
-      'Men': 'Gentlemen Beauty',
-    };
-    return displayMap[name] || name;
-  };
 
   // Apply client-side filters to the full explore dataset
   useEffect(() => {
@@ -752,7 +744,7 @@ export default function ExploreScreen() {
                               selectedSubCategoryId === sub.id && styles.subCategoryPillTextActive,
                             ]}
                           >
-                            {sub.name}
+                            {getCategoryDisplayName(sub.name)}
                           </Text>
                         </TouchableOpacity>
                       ))}

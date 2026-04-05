@@ -37,8 +37,8 @@ import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { networkStatus } from '@/lib/network-status';
-import { downloadPostToLibrary } from '@/lib/post-download';
 import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibility';
+import { getCategoryDisplayName } from '@/lib/utils/category-display';
 
 const VIDEO_BUFFER_OPTIONS = Platform.select({
   ios: {
@@ -379,8 +379,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [retryCount, setRetryCount] = useState(0);
   const [showUnfollowModal, setShowUnfollowModal] = useState(false);
   const [showAppealModal, setShowAppealModal] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const isSuspendedPost = (item as any).status === 'suspended' || (item as any).is_suspended;
   const isDraftPost = (item as any).status === 'draft' || (item as any).status === 'Draft';
   const isOwnPost = Boolean(user?.id && (user.id === item.user?.id || user.id === (item as any).user_id || user.id === (item as any).userId));
@@ -787,33 +785,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (onComment && item.id) onComment(item.id);
   }, [onComment, item.id]);
 
-  const handleDownload = useCallback(async () => {
-    if (isDownloading) {
-      return;
-    }
-
-    setIsDownloading(true);
-    setDownloadProgress(0);
-    try {
-      await downloadPostToLibrary(item, {
-        onProgress: ({ progress }) => {
-          if (!isMountedRef.current) {
-            return;
-          }
-          setDownloadProgress(progress);
-        },
-      });
-      Alert.alert('Download complete', 'The post was saved to your device.');
-    } catch (error: any) {
-      Alert.alert('Download failed', error?.message || 'Unable to save this post right now.');
-    } finally {
-      if (isMountedRef.current) {
-        setIsDownloading(false);
-        setDownloadProgress(0);
-      }
-    }
-  }, [isDownloading, item]);
-
   const handleProgressBarSeek = useCallback((locationX: number) => {
     const controller = videoControllerRef.current;
     if (!controller || !playerValidRef.current) return;
@@ -1003,13 +974,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             <Feather name="share-2" size={24} color="#fff" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleDownload} disabled={isDownloading}>
-            <Feather name={isDownloading ? 'loader' : 'download'} size={24} color="#fff" />
-            <Text style={styles.actionCount}>
-              {isDownloading ? `${Math.round(downloadProgress * 100)}%` : 'Save'}
-            </Text>
-          </TouchableOpacity>
-
           {!isAd && showReportButton && (
             <TouchableOpacity style={styles.actionButton} onPress={() => onReport(item.id)}>
               <Feather name="flag" size={22} color="#fff" />
@@ -1057,7 +1021,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
           {!isAd && item.category && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-              <Text style={styles.categoryText}>#{typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name}</Text>
+              <Text style={styles.categoryText}>#{getCategoryDisplayName(typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name)}</Text>
             </TouchableOpacity>
           )}
           {!isAd && user && user.id !== item.user?.id && (
@@ -1323,6 +1287,7 @@ const styles = StyleSheet.create({
     zIndex: 999,
     elevation: 10,
     maxHeight: '50%',
+    marginBottom: -50,
   },
   avatarContainer: {
     position: 'relative',
@@ -1438,12 +1403,13 @@ const styles = StyleSheet.create({
     right: 84,
     zIndex: 21,
     elevation: 5,
+    marginBottom: -34,
   },
   bottomInfoContent: {
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
     borderRadius: 8,
     padding: 10,
-    marginBottom: 8,
+    marginBottom: 0,
   },
   sponsoredMetaRow: {
     flexDirection: 'row',
@@ -1593,9 +1559,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 4,
+    height: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     zIndex: 100,
+    marginBottom: -34,
   },
   videoProgressBarFill: {
     height: '100%',

@@ -36,6 +36,7 @@ import { Avatar } from '@/components/Avatar';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
+import { getCategoryDisplayName } from '@/lib/utils/category-display';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -585,7 +586,7 @@ export default function PostDetailScreen() {
                 })}
               >
                 <Text style={styles.categoryText}>
-                  #{typeof post.category === 'string' ? post.category : post.category.name}
+                  #{getCategoryDisplayName(typeof post.category === 'string' ? post.category : post.category.name)}
                 </Text>
               </TouchableOpacity>
             )

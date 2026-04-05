@@ -2901,6 +2901,7 @@ const styles = StyleSheet.create({
     height: 4,
     paddingHorizontal: 0,
     justifyContent: 'center',
+    marginBottom: -40,
   },
   progressBarTrack: {
     height: 4,
