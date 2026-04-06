@@ -1,4 +1,6 @@
 import { Post } from '@/types';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
 
 const PROFILE_FEED_LAUNCH_CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -15,9 +17,13 @@ function buildKey(userId: string, status?: string) {
 }
 
 export function setProfileFeedLaunchCache(userId: string, status: string | undefined, posts: Post[]) {
+  const normalizedPosts = Array.isArray(posts) ? posts : [];
+  primePostDetailsCache(normalizedPosts);
+  warmFeedWindow(normalizedPosts, 0);
+
   profileFeedLaunchEntry = {
     key: buildKey(userId, status),
-    posts: Array.isArray(posts) ? posts : [],
+    posts: normalizedPosts,
     timestamp: Date.now(),
   };
 }

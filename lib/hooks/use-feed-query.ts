@@ -1,10 +1,11 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { postsApi } from '@/lib/api';
+import { followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
 import { filterHlsReady } from '@/lib/utils/post-filter';
 import { useMemo } from 'react';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { normalizePost } from '@/lib/utils/normalize-post';
 
 type FeedTab = 'foryou' | 'following';
 
@@ -19,6 +20,77 @@ function extractPosts(raw: any): Post[] {
   if (Array.isArray(raw?.posts)) return raw.posts;
   if (Array.isArray(raw?.data)) return raw.data;
   return [];
+}
+
+function extractFollowingUsers(raw: any): string[] {
+  const following = raw?.data?.following;
+  if (!Array.isArray(following)) {
+    return [];
+  }
+
+  return following
+    .map((item: any) => item?.following?.id || item?.id || null)
+    .filter((id: string | null): id is string => !!id);
+}
+
+function extractApprovedPosts(raw: any): Post[] {
+  if (Array.isArray(raw?.data?.posts)) return raw.data.posts;
+  if (Array.isArray(raw?.data)) return raw.data;
+  if (Array.isArray(raw?.posts)) return raw.posts;
+  return [];
+}
+
+function sortFollowingFallbackPosts(posts: Post[]) {
+  return [...posts].sort((a, b) => {
+    const aLikes = Number((a as any).likes ?? (a as any).like_count ?? 0);
+    const bLikes = Number((b as any).likes ?? (b as any).like_count ?? 0);
+    if (bLikes !== aLikes) {
+      return bLikes - aLikes;
+    }
+
+    const aTime = new Date(a.createdAt || (a as any).created_at || 0).getTime();
+    const bTime = new Date(b.createdAt || (b as any).created_at || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+async function loadFallbackFollowingFeed(viewerUserId: string, page: number, limit: number): Promise<FeedPage> {
+  const followingResponse = await followsApi.getFollowingUsers(viewerUserId, 1, 200);
+  const followingUserIds = extractFollowingUsers(followingResponse);
+
+  if (followingUserIds.length === 0) {
+    return { posts: [], nextCursor: null };
+  }
+
+  const approvedResponses = await Promise.all(
+    followingUserIds.map((followedUserId) => userApi.getUserApprovedPosts(followedUserId, 1, 50)),
+  );
+
+  const merged = new Map<string, Post>();
+
+  approvedResponses.forEach((response) => {
+    const approvedPosts = extractApprovedPosts(response)
+      .map((post: any) => normalizePost({ ...post, is_following_author: true }))
+      .map((post: any) => ({ ...post, is_following_author: true }));
+
+    filterHlsReady(approvedPosts).forEach((post) => {
+      if (post?.id && !merged.has(post.id)) {
+        merged.set(post.id, post);
+      }
+    });
+  });
+
+  const sortedPosts = sortFollowingFallbackPosts(Array.from(merged.values()));
+  primePostDetailsCache(sortedPosts);
+
+  const start = (page - 1) * limit;
+  const pagePosts = sortedPosts.slice(start, start + limit);
+  const hasNext = start + limit < sortedPosts.length;
+
+  return {
+    posts: pagePosts,
+    nextCursor: hasNext ? String(page + 1) : null,
+  };
 }
 
 export function useFeedQuery(tab: FeedTab) {
@@ -39,11 +111,21 @@ export function useFeedQuery(tab: FeedTab) {
         if (!isAuthenticated) return { posts: [], nextCursor: null };
         const page = pageParam ? Number(pageParam) : 1;
         const raw = await postsApi.getFollowing(page, 20);
-        const allPosts = extractPosts(raw);
+        const allPosts = extractPosts(raw).map((post) => ({
+          ...post,
+          is_following_author: true,
+        }));
         primePostDetailsCache(allPosts);
         const hlsPosts = filterHlsReady(allPosts);
         if (__DEV__) {
           console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
+        }
+        if (hlsPosts.length === 0) {
+          const fallbackFeed = await loadFallbackFollowingFeed(user!.id, page, 20);
+          if (__DEV__) {
+            console.log(`🔵 [FEED v2-clean] following fallback: posts=${fallbackFeed.posts.length}, next=${fallbackFeed.nextCursor}`);
+          }
+          return fallbackFeed;
         }
         const pagination = raw?.data?.pagination;
         const hasNext = pagination?.hasNext ?? (allPosts.length >= 20);

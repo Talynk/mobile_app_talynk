@@ -42,13 +42,13 @@ import { getCategoryDisplayName } from '@/lib/utils/category-display';
 
 const VIDEO_BUFFER_OPTIONS = Platform.select({
   ios: {
-    preferredForwardBufferDuration: 2,
+    preferredForwardBufferDuration: 4,
     waitsToMinimizeStalling: true,
   },
   android: {
-    preferredForwardBufferDuration: 2,
-    minBufferForPlayback: 0.5,
-    maxBufferBytes: 1 * 1024 * 1024,
+    preferredForwardBufferDuration: 4,
+    minBufferForPlayback: 1,
+    maxBufferBytes: 3 * 1024 * 1024,
     prioritizeTimeOverSizeThreshold: true,
   },
   default: {},
@@ -305,6 +305,7 @@ export interface FullscreenFeedPostItemProps {
   isLiked: boolean;
   isFollowing: boolean;
   isActive: boolean;
+  suspendPlayback?: boolean;
   shouldPreload: boolean;
   availableHeight: number;
   /** When false, Report button is hidden (e.g. on your own profile feed). Default true. */
@@ -329,6 +330,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   isLiked,
   isFollowing,
   isActive,
+  suspendPlayback = false,
   shouldPreload,
   availableHeight,
   showReportButton = true,
@@ -601,7 +603,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const controller = videoControllerRef.current;
     if (!controller || !playerValidRef.current) return;
     try {
-      if (isActive && isAppActive && !decoderErrorDetected && !pausedByUser) {
+      if (isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser) {
         controller.setMuted(isMuted);
         controller.play();
       } else {
@@ -615,7 +617,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     } catch (e) {
       playerValidRef.current = false;
     }
-  }, [isActive, isAppActive, isMuted, decoderErrorDetected, index, pausedByUser, isPlayerValid, canMountVideoPlayer]);
+  }, [isActive, suspendPlayback, isAppActive, isMuted, decoderErrorDetected, index, pausedByUser, isPlayerValid, canMountVideoPlayer]);
 
   // Fade out thumbnail when video is playing and ready
   useEffect(() => {
@@ -853,7 +855,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       source={videoPlayerSource}
                       contentFit={mediaContentFit}
                       isMuted={isMuted}
-                      shouldPlay={isActive && isAppActive && !decoderErrorDetected && !pausedByUser}
+                      shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}
                       onFirstFrameRender={() => setVideoReady(true)}
                       onStatusChange={handleNativeStatusChange}
                       onPlayingChange={handleNativePlayingChange}
@@ -1130,6 +1132,7 @@ function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPo
     prev.shouldPreload === next.shouldPreload &&
     prev.isLiked === next.isLiked &&
     prev.isFollowing === next.isFollowing &&
+    (prev.suspendPlayback ?? false) === (next.suspendPlayback ?? false) &&
     prev.availableHeight === next.availableHeight &&
     (prev.showReportButton ?? true) === (next.showReportButton ?? true) &&
     (prev.likesDuringChallenge ?? -1) === (next.likesDuringChallenge ?? -1) &&

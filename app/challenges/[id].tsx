@@ -53,6 +53,7 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -61,6 +62,7 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -133,7 +135,7 @@ export default function ChallengeDetailScreen() {
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
   const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const likesManager = useLikesManager();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const { onChallengeLikesUpdated } = useRealtime();
@@ -156,8 +158,27 @@ export default function ChallengeDetailScreen() {
   const [participantsFetched, setParticipantsFetched] = useState(false);
   const [showUpcomingJoinModal, setShowUpcomingJoinModal] = useState(false);
   const [yourPostCount, setYourPostCount] = useState(0);
+  const [isFullscreenTransitioning, setIsFullscreenTransitioning] = useState(false);
   const fallbackChallengeDataRef = useRef<any>(null);
   const hasHandledInitialFocusRef = useRef(false);
+  const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
+    if (!viewableItems || viewableItems.length === 0) {
+      return;
+    }
+
+    const mostVisible = viewableItems.reduce((best: any, item: any) =>
+      item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best,
+    null as any);
+    const idx = mostVisible?.index ?? viewableItems[0]?.index;
+    if (idx !== undefined && idx !== null) {
+      setIsFullscreenTransitioning(false);
+      setFullscreenIndex(idx);
+    }
+  }).current;
+  const fullscreenViewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 100,
+  }).current;
 
   useRefetchOnReconnect(() => {
     fetchChallenge({ showLoader: false });
@@ -291,6 +312,7 @@ export default function ChallengeDetailScreen() {
     setActiveTab('posts');
     setShowFullscreen(false);
     setFullscreenIndex(0);
+    setIsFullscreenTransitioning(false);
   }, [id]);
 
   const fetchPosts = async (options?: { forceRefresh?: boolean }) => {
@@ -917,6 +939,7 @@ export default function ChallengeDetailScreen() {
 
   const handleFollow = async (targetUserId: string) => {
     if (!user) return;
+    seedFollowingFeedCache(user.id, targetUserId, posts);
     updateFollowedUsers(targetUserId, true);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
     try {
@@ -924,15 +947,21 @@ export default function ChallengeDetailScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, false);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+        removeUserFromFollowingFeedCache(user.id, targetUserId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
       }
     } catch {
       updateFollowedUsers(targetUserId, false);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      removeUserFromFollowingFeedCache(user.id, targetUserId);
     }
   };
 
   const handleUnfollow = async (targetUserId: string) => {
     if (!user) return;
+    removeUserFromFollowingFeedCache(user.id, targetUserId);
     updateFollowedUsers(targetUserId, false);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
     try {
@@ -940,10 +969,14 @@ export default function ChallengeDetailScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, true);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+        seedFollowingFeedCache(user.id, targetUserId, posts);
+      } else {
+        void syncFollowedUsersFromServer();
       }
     } catch {
       updateFollowedUsers(targetUserId, true);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      seedFollowingFeedCache(user.id, targetUserId, posts);
     }
   };
 
@@ -989,6 +1022,14 @@ export default function ChallengeDetailScreen() {
     return rows;
   }, [sortedPosts]);
 
+  useEffect(() => {
+    if (!showFullscreen || sortedPosts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(sortedPosts, Math.max(0, fullscreenIndex));
+  }, [fullscreenIndex, showFullscreen, sortedPosts]);
+
   const GridPostCard = ({ item, index }: { item: any; index: number }) => {
     const mediaUrl = getPostMediaUrl(item) || '';
     const isHls = mediaUrl.endsWith('.m3u8');
@@ -1017,6 +1058,7 @@ export default function ChallengeDetailScreen() {
         style={styles.gridPostCard}
         activeOpacity={0.9}
         onPress={() => {
+          warmFeedWindow(sortedPosts, index);
           setFullscreenIndex(index);
           setShowFullscreen(true);
           setTimeout(() => {
@@ -1739,8 +1781,9 @@ export default function ChallengeDetailScreen() {
                   onFollow={handleFollow}
                   onUnfollow={handleUnfollow}
                   isLiked={likedPosts.includes(item.id)}
-                  isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
+                  suspendPlayback={isFullscreenTransitioning}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
@@ -1760,9 +1803,14 @@ export default function ChallengeDetailScreen() {
             initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
             maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
+            onViewableItemsChanged={fullscreenViewableHandler}
+            viewabilityConfig={fullscreenViewabilityConfig}
+            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
+            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
               setFullscreenIndex(Math.max(0, Math.min(index, sortedPosts.length - 1)));
+              setIsFullscreenTransitioning(false);
             }}
             initialScrollIndex={fullscreenIndex}
             getItemLayout={(_, index) => ({

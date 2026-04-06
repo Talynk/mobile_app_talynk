@@ -47,6 +47,8 @@ import { normalizePost } from '@/lib/utils/normalize-post';
 import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
@@ -166,6 +168,7 @@ function ProfileFeedContent({
   const [currentPage, setCurrentPage] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
   const [initialScrollDone, setInitialScrollDone] = useState(false);
   const lastActiveIndexRef = useRef(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
@@ -177,7 +180,7 @@ function ProfileFeedContent({
   const [username, setUsername] = useState<string>('');
   const flatListRef = useRef<FlatList>(null);
   const { user } = useAuth();
-  const { syncLikedPostsFromServer, followedUsers, updateFollowedUsers } = useCache();
+  const { syncLikedPostsFromServer, followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const { isCreateFocused } = useCreateFocus();
@@ -615,6 +618,14 @@ function ProfileFeedContent({
     }, []) // Empty dependency array - only run on focus/blur
   );
 
+  useEffect(() => {
+    if (posts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(posts, Math.max(0, currentIndex));
+  }, [currentIndex, posts]);
+
   const onRefresh = () => {
     setCurrentPage(1);
     setHasMore(true);
@@ -679,6 +690,7 @@ function ProfileFeedContent({
 
   const handleFollow = async (targetUserId: string) => {
     if (!user) return;
+    seedFollowingFeedCache(user.id, targetUserId, posts);
     updateFollowedUsers(targetUserId, true);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
     try {
@@ -686,15 +698,21 @@ function ProfileFeedContent({
       if (response.status !== 'success') {
         updateFollowedUsers(targetUserId, false);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+        removeUserFromFollowingFeedCache(user.id, targetUserId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
       }
     } catch {
       updateFollowedUsers(targetUserId, false);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      removeUserFromFollowingFeedCache(user.id, targetUserId);
     }
   };
 
   const handleUnfollow = async (targetUserId: string) => {
     if (!user) return;
+    removeUserFromFollowingFeedCache(user.id, targetUserId);
     updateFollowedUsers(targetUserId, false);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
     try {
@@ -702,10 +720,14 @@ function ProfileFeedContent({
       if (response.status !== 'success') {
         updateFollowedUsers(targetUserId, true);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+        seedFollowingFeedCache(user.id, targetUserId, posts);
+      } else {
+        void syncFollowedUsersFromServer();
       }
     } catch {
       updateFollowedUsers(targetUserId, true);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      seedFollowingFeedCache(user.id, targetUserId, posts);
     }
   };
 
@@ -754,9 +776,11 @@ function ProfileFeedContent({
         likesManager.onPostVisible(postId);
       }
 
+      setIsFeedTransitioning(false);
       setCurrentIndex(newIndex);
       lastActiveIndexRef.current = newIndex;
     } else {
+      setIsFeedTransitioning(false);
       setCurrentIndex(-1);
     }
   }).current;
@@ -818,6 +842,7 @@ function ProfileFeedContent({
                 isLiked={likedPosts.includes(item.id)}
                 isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                 isActive={isActive}
+                suspendPlayback={isFeedTransitioning}
                 shouldPreload={shouldPreload}
                 availableHeight={availableHeight}
                 showReportButton={!isOwnProfile}
@@ -852,6 +877,14 @@ function ProfileFeedContent({
               progressViewOffset={20}
             />
           }
+          onScrollBeginDrag={() => setIsFeedTransitioning(true)}
+          onMomentumScrollBegin={() => setIsFeedTransitioning(true)}
+          onMomentumScrollEnd={(event) => {
+            const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
+            setCurrentIndex(nextIndex);
+            lastActiveIndexRef.current = nextIndex;
+            setIsFeedTransitioning(false);
+          }}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           onEndReached={loadMorePosts}

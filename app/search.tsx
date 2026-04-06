@@ -46,7 +46,7 @@ export default function SearchScreen() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -128,6 +128,7 @@ export default function SearchScreen() {
     updateFollowedUsers(userId, true);
     try {
       await followsApi.follow(userId);
+      void syncFollowedUsersFromServer();
     } catch (error) {
       updateFollowedUsers(userId, false);
     }
@@ -138,6 +139,7 @@ export default function SearchScreen() {
     updateFollowedUsers(userId, false);
     try {
       await followsApi.unfollow(userId);
+      void syncFollowedUsersFromServer();
     } catch (error) {
       updateFollowedUsers(userId, true);
     }

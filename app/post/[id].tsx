@@ -37,6 +37,7 @@ import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -62,7 +63,7 @@ const timeAgo = (dateString?: string | null) => {
 export default function PostDetailScreen() {
   const { id, postData } = useLocalSearchParams();
   const { user } = useAuth();
-  const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers } = useCache();
+  const { likedPosts, followedUsers, updateLikedPosts, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const { isMuted, toggleMute } = useVideoMute();
   const isAppActive = useAppActive();
   const insets = useSafeAreaInsets();
@@ -194,6 +195,11 @@ export default function PostDetailScreen() {
 
     const isCurrentlyFollowing = followedUsers.has(post.user?.id || '');
     setFollowLoading(true);
+    if (!isCurrentlyFollowing) {
+      seedFollowingFeedCache(user.id, post.user.id, [post]);
+    } else {
+      removeUserFromFollowingFeedCache(user.id, post.user.id);
+    }
 
     try {
       const response = isCurrentlyFollowing
@@ -202,9 +208,24 @@ export default function PostDetailScreen() {
 
       if (response.status === 'success') {
         updateFollowedUsers(post.user.id, !isCurrentlyFollowing);
+        if (!isCurrentlyFollowing) {
+          void syncFollowedUsersFromServer();
+          void prefetchFollowingFeed(user.id);
+        } else {
+          void syncFollowedUsersFromServer();
+        }
+      } else if (!isCurrentlyFollowing) {
+        removeUserFromFollowingFeedCache(user.id, post.user.id);
+      } else {
+        seedFollowingFeedCache(user.id, post.user.id, [post]);
       }
     } catch (error) {
       console.error('Follow error:', error);
+      if (!isCurrentlyFollowing) {
+        removeUserFromFollowingFeedCache(user.id, post.user.id);
+      } else {
+        seedFollowingFeedCache(user.id, post.user.id, [post]);
+      }
     } finally {
       setFollowLoading(false);
     }

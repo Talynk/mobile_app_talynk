@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { syncFollowingFeedAfterFollowChange } from "@/lib/following-feed-cache";
 
 interface UserPreferences {
   theme: "light" | "dark";
@@ -25,6 +26,7 @@ interface CacheContextType {
   updateFollowedUsers: (userId: string, isFollowing: boolean) => void;
   updatePostLikeCount: (postId: string, count: number) => void;
   syncLikedPostsFromServer: (postIds: string[]) => Promise<void>;
+  syncFollowedUsersFromServer: () => Promise<void>;
   clearCache: () => Promise<void>;
 }
 
@@ -54,6 +56,52 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
   const [postLikeCounts, setPostLikeCounts] = useState<Map<string, number>>(
     new Map()
   );
+
+  const persistFollowedUsers = async (next: Set<string>) => {
+    await AsyncStorage.setItem("followed_users", JSON.stringify(Array.from(next)));
+  };
+
+  const syncFollowedUsersFromServer = async () => {
+    try {
+      const rawViewer = await AsyncStorage.getItem('talynk_user');
+      const viewer = rawViewer ? JSON.parse(rawViewer) : null;
+      const viewerUserId = viewer?.id;
+
+      if (!viewerUserId) {
+        setFollowedUsers(new Set());
+        await AsyncStorage.removeItem("followed_users");
+        return;
+      }
+
+      const { followsApi } = await import("./api");
+      const next = new Set<string>();
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore && page <= 25) {
+        const response = await followsApi.getFollowingUsers(viewerUserId, page, 200);
+        if (response.status !== 'success') {
+          break;
+        }
+
+        const following = response.data?.following || [];
+        following.forEach((item: any) => {
+          const followedId = item?.following?.id || item?.id;
+          if (followedId) {
+            next.add(followedId);
+          }
+        });
+
+        hasMore = !!response.data?.hasMore;
+        page += 1;
+      }
+
+      setFollowedUsers(next);
+      await persistFollowedUsers(next);
+    } catch (error) {
+      console.warn("Error syncing followed users:", error);
+    }
+  };
 
   // -------------------------------------------------------
   // LOAD FROM STORAGE
@@ -94,6 +142,8 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
           const obj = JSON.parse(likeCountsData);
           setPostLikeCounts(new Map(Object.entries(obj)));
         }
+
+        await syncFollowedUsersFromServer();
       } catch (e) {
         console.error("Error loading cache:", e);
       }
@@ -173,6 +223,22 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
           "followed_users",
           JSON.stringify(Array.from(updated))
         );
+
+        try {
+          const rawViewer = await AsyncStorage.getItem('talynk_user');
+          const viewer = rawViewer ? JSON.parse(rawViewer) : null;
+          const viewerUserId = viewer?.id;
+
+          if (viewerUserId) {
+            await syncFollowingFeedAfterFollowChange({
+              viewerUserId,
+              targetUserId: userId,
+              isFollowing,
+            });
+          }
+        } catch (error) {
+          console.warn('Following feed sync failed:', error);
+        }
       })();
 
       return updated;
@@ -261,6 +327,7 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
         updateFollowedUsers,
         updatePostLikeCount,
         syncLikedPostsFromServer,
+        syncFollowedUsersFromServer,
         clearCache,
       }}
     >

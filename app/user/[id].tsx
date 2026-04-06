@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   ActivityIndicator,
   useColorScheme,
   FlatList,
@@ -12,9 +11,10 @@ import {
   Share,
   Alert,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, followsApi, postsApi } from '@/lib/api';
@@ -42,10 +42,23 @@ import { getPostVideoAssetsCached } from '@/lib/post-video-assets-cache';
 import { setProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
 import { sharePost } from '@/lib/post-share';
 import { downloadPostToLibrary } from '@/lib/post-download';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
 } from '@/lib/utils/post-detail-enrichment';
+
+const EXTERNAL_PROFILE_PAGE_LIMIT = 24;
+const { width: screenWidth } = Dimensions.get('window');
+const EXTERNAL_PROFILE_POST_ITEM_SIZE = (screenWidth - 6) / 3;
+
+const externalProfileCache: Record<string, {
+  profile: User | null;
+  posts: Post[];
+  hasMore: boolean;
+  nextPage: number;
+  totalCount: number;
+}> = {};
 
 
 function normalizeUserProfilePost(post: any, fallbackProfile?: any): Post {
@@ -77,52 +90,100 @@ const getExternalPostTimestamp = (post: Post) =>
 const sortExternalProfilePostsNewestFirst = (items: Post[]) =>
   [...items].sort((a, b) => getExternalPostTimestamp(b) - getExternalPostTimestamp(a));
 
-const hasRenderableExternalProfileMedia = (post: any) => {
-  const isVideo =
-    post.type === 'video' ||
-    post.mediaType === 'video' ||
-    !!(post.video_url || post.videoUrl);
+const isExternalProfileVideoPost = (post: any) =>
+  post.type === 'video' ||
+  post.mediaType === 'video' ||
+  !!(post.video_url || post.videoUrl);
 
-  const hasImage =
-    !!getThumbnailUrl(post) ||
-    !!getFileUrl(post.image || post.imageUrl || '');
+const getExternalProfileThumbnailCandidate = (post: any) => {
+  const directThumbnail =
+    getThumbnailUrl(post) ||
+    getFileUrl(post.image || post.imageUrl || (post as any).thumbnail || '');
 
-  if (!isVideo) {
-    return hasImage;
+  if (directThumbnail) {
+    return directThumbnail;
   }
 
-  const hasHls = filterHlsReady([post]).length > 0;
-  return hasHls || hasImage;
+  const fullUrl: string | undefined = (post as any).fullUrl;
+  if (!fullUrl || typeof fullUrl !== 'string' || !fullUrl.includes('.m3u8')) {
+    return null;
+  }
+
+  try {
+    const normalized = fullUrl.split('?')[0];
+    const match = normalized.match(/^(https?:\/\/[^/]+)\/hls\/([^/]+)\/[^/]+\.m3u8$/i);
+    if (!match) {
+      return null;
+    }
+
+    const [, origin, videoId] = match;
+    return `${origin}/thumbnails/${videoId}_thumbnail.jpg`;
+  } catch {
+    return null;
+  }
+};
+
+const getExternalProfilePostCardMeta = (post: any) => {
+  const isVideo = isExternalProfileVideoPost(post);
+  const thumbnailUrl = getExternalProfileThumbnailCandidate(post);
+  const hasThumbnail = !!thumbnailUrl;
+  const hasHls =
+    filterHlsReady([post]).length > 0 ||
+    !!((post as any).fullUrl && String((post as any).fullUrl).includes('.m3u8'));
+  const processingStatus = String(post.processing_status ?? post.processingStatus ?? '').toLowerCase();
+
+  if (!isVideo) {
+    return {
+      isVideo: false,
+      canOpen: hasThumbnail,
+      statusLabel: hasThumbnail ? null : 'Unavailable',
+      thumbnailUrl,
+    };
+  }
+
+  if (hasHls) {
+    return {
+      isVideo: true,
+      canOpen: true,
+      statusLabel: null,
+      thumbnailUrl,
+    };
+  }
+
+  if (
+    processingStatus.includes('pending') ||
+    processingStatus.includes('processing') ||
+    processingStatus.includes('upload') ||
+    processingStatus.includes('transcod')
+  ) {
+    return {
+      isVideo: true,
+      canOpen: false,
+      statusLabel: 'Processing',
+      thumbnailUrl,
+    };
+  }
+
+  return {
+    isVideo: true,
+    canOpen: false,
+    statusLabel: 'Unavailable',
+    thumbnailUrl,
+  };
 };
 
 
-// Video thumbnail with teaser playback
 interface VideoThumbnailCardProps {
   post: Post;
-  isActive: boolean;
   onPress: () => void;
-  cardColor: string;
-  textColor: string;
-  secondaryColor: string;
 }
 
-const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, secondaryColor }: VideoThumbnailCardProps) => {
+const VideoThumbnailCard = React.memo(function VideoThumbnailCard({ post, onPress }: VideoThumbnailCardProps) {
   const [imageError, setImageError] = useState(false);
-  const isVideo = post.type === 'video' || !!(post.video_url || post.videoUrl);
+  const cardMeta = getExternalProfilePostCardMeta(post);
+  const isVideo = cardMeta.isVideo;
   const challengeMeta = getChallengePostMeta(post);
-
-  // THUMBNAIL PRIORITY: server thumbnail_url > post image > placeholder
-  const serverThumbnail = getThumbnailUrl(post);
-  // IMPORTANT: never treat HLS (.m3u8) playback URLs as images here.
-  // For videos, thumbnails must come from thumbnail_url (or enriched assets),
-  // not from fullUrl/playback_url.
-  const fallbackImageUrl = getFileUrl(
-    post.image ||
-    post.imageUrl ||
-    (post as any).thumbnail ||
-    ''
-  );
-  const thumbnailUrl = serverThumbnail || (isVideo ? null : fallbackImageUrl);
+  const thumbnailUrl = cardMeta.thumbnailUrl;
   const [resolvedThumbnailUrl, setResolvedThumbnailUrl] = useState<string | null>(thumbnailUrl);
 
   useEffect(() => {
@@ -161,82 +222,262 @@ const VideoThumbnailCard = ({ post, isActive, onPress, cardColor, textColor, sec
   return (
     <TouchableOpacity
       onPress={onPress}
-      style={[styles.postCard, { backgroundColor: cardColor }]}
+      style={styles.postCard}
       activeOpacity={0.9}
     >
-      {/* Static thumbnail only — NO video player */}
-      <View style={styles.videoThumbnail}>
-        {resolvedThumbnailUrl && !imageError ? (
-          <ExpoImage
-            source={{ uri: resolvedThumbnailUrl }}
-            style={styles.postImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={0}
-            onError={() => setImageError(true)}
-            recyclingKey={post.id}
-          />
-        ) : (
-          <View style={[styles.postImage, styles.noMediaPlaceholder]}>
-            <MaterialIcons name={isVideo ? "video-library" : "image"} size={32} color="#444" />
-          </View>
-        )}
+      {resolvedThumbnailUrl && !imageError ? (
+        <ExpoImage
+          source={{ uri: resolvedThumbnailUrl }}
+          style={styles.postImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={0}
+          onError={() => setImageError(true)}
+          recyclingKey={post.id}
+        />
+      ) : (
+        <View style={[styles.postImage, styles.noMediaPlaceholder]}>
+          <MaterialIcons name={isVideo ? 'video-library' : 'image'} size={28} color="#666" />
+        </View>
+      )}
 
-        {/* Play indicator */}
-        {isVideo && (
-          <View style={styles.playIconOverlay}>
-            <MaterialIcons name="play-circle-outline" size={40} color="#fff" />
-          </View>
-        )}
+      <View style={styles.postOverlay}>
+        <View style={styles.postStats}>
+          <Feather name="heart" size={12} color="#fff" />
+          <Text style={styles.postStatText}>{post.likes || 0}</Text>
+        </View>
 
-        {challengeMeta.isChallengePost && (
-          <LinearGradient
-            colors={['rgba(14, 116, 144, 0.95)', 'rgba(37, 99, 235, 0.95)']}
-            style={styles.challengeBadge}
-          >
-            <Feather name="award" size={11} color="#fff" />
-            <View style={styles.challengeBadgeTextWrap}>
-              <Text style={styles.challengeBadgeLabel}>Competition</Text>
-              <Text style={styles.challengeBadgeName} numberOfLines={1}>
-                {challengeMeta.challengeName || 'Challenge post'}
-              </Text>
-            </View>
-          </LinearGradient>
-        )}
-      </View>
-
-      {/* Caption and Stats */}
-      <View style={styles.postFooter}>
-        <Text style={[styles.postCaption, { color: '#fff' }]} numberOfLines={2}>
-          {post.title || post.description || ''}
-        </Text>
-        {(post.createdAt || post.uploadDate || (post as any).created_at) && (
-          <Text style={[styles.postTimestamp, { color: '#999' }]}>
-            {timeAgo(post.createdAt || post.uploadDate || (post as any).created_at)}
-          </Text>
-        )}
-        <View style={styles.postFooterActions}>
-          <View style={styles.postAction}>
-            <Feather
-              name="heart"
-              size={14}
-              color={(post.likes || 0) > 0 ? "#ff2d55" : "#999"}
-            />
-            <Text style={[styles.postActionText, { color: secondaryColor }]}>
-              {post.likes || 0}
-            </Text>
-          </View>
-          <View style={styles.postAction}>
-            <Feather name="message-circle" size={14} color="#999" />
-            <Text style={[styles.postActionText, { color: secondaryColor }]}>
-              {post.comments_count || 0}
-            </Text>
-          </View>
+        <View style={styles.postStats}>
+          <Feather name="message-circle" size={12} color="#fff" />
+          <Text style={styles.postStatText}>{post.comments_count || 0}</Text>
         </View>
       </View>
+
+      {isVideo && (
+        <View style={styles.videoPlayIndicator}>
+          <Feather name="play" size={14} color="#fff" />
+        </View>
+      )}
+
+      {cardMeta.statusLabel ? (
+        <View style={styles.postStatusBadge}>
+          <Text style={styles.postStatusBadgeText}>{cardMeta.statusLabel}</Text>
+        </View>
+      ) : null}
+
+      {challengeMeta.isChallengePost && (
+        <LinearGradient
+          colors={['rgba(14, 116, 144, 0.95)', 'rgba(37, 99, 235, 0.95)']}
+          style={styles.challengeBadge}
+        >
+          <Feather name="award" size={11} color="#fff" />
+          <View style={styles.challengeBadgeTextWrap}>
+            <Text style={styles.challengeBadgeLabel}>Competition</Text>
+            <Text style={styles.challengeBadgeName} numberOfLines={1}>
+              {challengeMeta.challengeName || 'Challenge post'}
+            </Text>
+          </View>
+        </LinearGradient>
+      )}
     </TouchableOpacity>
   );
+});
+
+const mergeApprovedPostsNewestFirst = (currentPosts: Post[], incomingPosts: Post[]) => {
+  const currentById = new Map<string, Post>();
+
+  currentPosts.forEach((post) => {
+    if (post?.id) {
+      currentById.set(post.id, post);
+    }
+  });
+
+  incomingPosts.forEach((post) => {
+    if (!post?.id) {
+      return;
+    }
+
+    const existing = currentById.get(post.id);
+    if (!existing) {
+      currentById.set(post.id, post);
+      return;
+    }
+
+    const hasMeaningfulChange =
+      existing.fullUrl !== post.fullUrl ||
+      existing.hls_url !== post.hls_url ||
+      existing.video_url !== post.video_url ||
+      existing.image !== post.image ||
+      existing.thumbnail !== post.thumbnail ||
+      (existing as any).thumbnail_url !== (post as any).thumbnail_url ||
+      (existing as any).processing_status !== (post as any).processing_status ||
+      existing.likes !== post.likes ||
+      existing.comments_count !== post.comments_count;
+
+    currentById.set(post.id, hasMeaningfulChange ? { ...existing, ...post } : existing);
+  });
+
+  return sortExternalProfilePostsNewestFirst(Array.from(currentById.values()));
 };
+
+const buildProfileFromApi = (userData: any, fallbackId: string, fallbackPostsCount = 0) => {
+  const rawFollowers =
+    (userData as any).followersCount ??
+    userData.followers_count ??
+    (userData as any).follower_count ??
+    (userData as any).followers?.count ??
+    0;
+  const rawFollowing =
+    (userData as any).followingCount ??
+    userData.following_count ??
+    (userData as any).subscribers ??
+    (userData as any).following?.count ??
+    0;
+  const rawPostsValue =
+    userData.posts_count ??
+    (userData as any).postsCount ??
+    (userData as any).posts?.count ??
+    fallbackPostsCount;
+  const rawPosts = Math.max(0, Number(rawPostsValue) || 0, fallbackPostsCount);
+
+  return {
+    ...userData,
+    name: userData.name || (userData as any).fullName || userData.username || 'User',
+    username: userData.username || '',
+    profile_picture: userData.profile_picture || (userData as any).profilePicture || '',
+    bio: userData.bio || '',
+    email: (userData as any).email || '',
+    phone1: (userData as any).phone1 || '',
+    phone2: (userData as any).phone2 || '',
+    followers_count: rawFollowers,
+    following_count: rawFollowing,
+    posts_count: rawPosts,
+    id: userData.id || fallbackId,
+  } as User;
+};
+
+const extractApprovedPostsTotal = (responseData: any): number | null => {
+  const pagination = responseData?.pagination || {};
+  const totalValue =
+    pagination.totalPosts ??
+    pagination.total_posts ??
+    pagination.total ??
+    pagination.count ??
+    responseData?.totalPosts ??
+    responseData?.total_posts ??
+    responseData?.total ??
+    responseData?.count;
+
+  if (totalValue === undefined || totalValue === null || totalValue === '') {
+    return null;
+  }
+
+  const numericTotal = Number(totalValue);
+  return Number.isFinite(numericTotal) ? Math.max(0, numericTotal) : null;
+};
+
+const getApprovedPostsTotal = (responseData: any, fallbackCount: number) => {
+  const extractedTotal = extractApprovedPostsTotal(responseData);
+  if (extractedTotal !== null) {
+    return extractedTotal;
+  }
+
+  return Math.max(0, fallbackCount);
+};
+
+async function resolveExactApprovedPostsTotal(userId: string): Promise<number> {
+  const limit = 100;
+  let page = 1;
+  let total = 0;
+
+  while (page <= 100) {
+    const response = await userApi.getUserApprovedPosts(userId, page, limit);
+    if (response.status !== 'success' || !response.data) {
+      return total;
+    }
+
+    const paginationTotal = extractApprovedPostsTotal(response.data);
+    if (paginationTotal !== null) {
+      return paginationTotal;
+    }
+
+    const pagePosts = Array.isArray(response.data)
+      ? response.data
+      : (response.data as any)?.posts || [];
+
+    total += pagePosts.length;
+
+    if (pagePosts.length < limit) {
+      return total;
+    }
+
+    page += 1;
+  }
+
+  return total;
+}
+
+async function enrichApprovedPostsPage(items: any[], fallbackProfile?: User | null) {
+  const normalized = items.map((post: any) => normalizeUserProfilePost(post, fallbackProfile ?? undefined));
+  const needsEnrichment = normalized.filter((p: any) => {
+    const isVideo = p.type === 'video' || !!(p.video_url || p.videoUrl);
+    const processingStatus = p.processing_status ?? p.processingStatus ?? '';
+    const hasThumbnail =
+      !!p.thumbnail_url || !!p.thumbnailUrl || !!p.thumbnail;
+
+    const missingThumbnailForVideo = isVideo && !hasThumbnail;
+    const needsPlaybackData =
+      isVideo &&
+      p.hlsReady &&
+      !p.hls_url &&
+      !p.fullUrl?.includes('.m3u8');
+    const staleProcessingState =
+      isVideo &&
+      !!processingStatus &&
+      processingStatus !== 'completed' &&
+      processingStatus !== 'failed';
+
+    return (
+      missingThumbnailForVideo ||
+      needsPlaybackData ||
+      staleProcessingState ||
+      needsRenderableMediaEnrichment(p) ||
+      needsChallengeMetaEnrichment(p)
+    );
+  });
+
+  if (needsEnrichment.length === 0) {
+    return normalized;
+  }
+
+  const videoAssetMap = await getPostVideoAssetsBatchCached(
+    needsEnrichment
+      .filter((p: any) => p.type === 'video')
+      .map((p: any) => p.id),
+  );
+  const enrichMap = await getPostDetailsCached(
+    needsEnrichment.map((p: any) => p.id),
+    { requireNetwork: true },
+  );
+
+  return normalized.map((post: any) => {
+    const videoAssets = videoAssetMap.get(post.id);
+    const enriched = enrichMap.get(post.id);
+    if (!videoAssets && !enriched) {
+      return post;
+    }
+
+    return normalizeUserProfilePost(
+      {
+        ...post,
+        ...videoAssets,
+        ...enriched,
+        user: enriched?.user || post.user,
+      },
+      fallbackProfile ?? undefined,
+    );
+  });
+}
 
 const COLORS = {
   light: {
@@ -260,39 +501,6 @@ const COLORS = {
     buttonText: '#18181b',
   },
 };
-
-async function fetchAllApprovedPosts(userId: string) {
-  const limit = 100;
-  let page = 1;
-  const allPosts: any[] = [];
-
-  while (page <= 10) {
-    const response = await userApi.getUserApprovedPosts(userId, page, limit);
-    if (response.status !== 'success' || !response.data) {
-      return response;
-    }
-
-    const pagePosts = Array.isArray(response.data)
-      ? response.data
-      : (response.data as any)?.posts || [];
-
-    allPosts.push(...pagePosts);
-
-    if (pagePosts.length < limit) {
-      return {
-        ...response,
-        data: allPosts,
-      };
-    }
-
-    page += 1;
-  }
-
-  return {
-    status: 'success',
-    data: allPosts,
-  } as any;
-}
 
 export default function ExternalUserProfileScreen() {
   const { id } = useLocalSearchParams();
@@ -345,26 +553,65 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [postModalVisible, setPostModalVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [nextPostsPage, setNextPostsPage] = useState(2);
+  const [initialPostCountResolved, setInitialPostCountResolved] = useState(false);
   const { sendFollowAction, isConnected } = useRealtime();
-  const { updateFollowedUsers } = useCache();
+  const { updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const C = COLORS.dark; // Force dark mode
   const navigation = useNavigation();
 
-  // Video teaser playback state
-  const [activeTeaserIndex, setActiveTeaserIndex] = useState(0);
-  const [isScreenFocused, setIsScreenFocused] = useState(true);
-  const teaserIntervalRef = useRef<any>(null);
-  const approvedPostsCountRef = useRef(0);
   const profileSnapshotRef = useRef<User | null>(null);
+  const approvedPostsRef = useRef<Post[]>([]);
   const postsRequestIdRef = useRef(0);
+  const postsListRef = useRef<FlatList>(null);
 
   useEffect(() => {
     profileSnapshotRef.current = profile;
   }, [profile]);
 
+  useEffect(() => {
+    approvedPostsRef.current = approvedPosts;
+  }, [approvedPosts]);
+
+  useEffect(() => {
+    if (!id || Array.isArray(id)) {
+      return;
+    }
+
+    const cached = externalProfileCache[id];
+    if (!cached) {
+      return;
+    }
+
+    if (cached.profile) {
+      const hydratedProfile = {
+        ...cached.profile,
+        posts_count: Math.max(cached.profile.posts_count || 0, cached.totalCount || 0),
+      };
+      profileSnapshotRef.current = hydratedProfile;
+      setProfile(hydratedProfile);
+      setLoadingProfile(false);
+      setProfileError(null);
+      if ((cached.totalCount || 0) > 0) {
+        setInitialPostCountResolved(true);
+      }
+    }
+
+    if (cached.posts.length > 0) {
+      approvedPostsRef.current = cached.posts;
+      setApprovedPosts(cached.posts);
+      setHasMorePosts(cached.hasMore);
+      setNextPostsPage(cached.nextPage);
+      setLoadingPosts(false);
+      setPostsError(null);
+    }
+  }, [id]);
+
   const prefetchRenderableThumbnails = useCallback((items: Post[]) => {
     const urls = items
-      .map((post: any) => getThumbnailUrl(post) || null)
+      .map((post: any) => getExternalProfileThumbnailCandidate(post))
       .filter((url): url is string => !!url);
 
     if (urls.length === 0) {
@@ -387,59 +634,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           return;
         }
 
-        if (!hasRenderableExternalProfileMedia(post)) {
-          return;
-        }
-
         byId.set(post.id, post);
       });
 
     return Array.from(byId.values());
   }, []);
 
-  // Error and loading states
   const [error, setError] = useState<{ type: 'network' | 'server' | 'unknown'; message: string } | null>(null);
-
-  // Cycle through video teasers
-  useEffect(() => {
-    if (isScreenFocused && approvedPosts.length > 0) {
-      const videoPosts = approvedPosts.filter(p => !!p.video_url);
-
-      if (videoPosts.length > 0) {
-        if (teaserIntervalRef.current) {
-          clearInterval(teaserIntervalRef.current);
-        }
-
-        teaserIntervalRef.current = setInterval(() => {
-          setActiveTeaserIndex(prev => {
-            const videoIndices = approvedPosts
-              .map((p, i) => p.video_url ? i : -1)
-              .filter(i => i !== -1);
-
-            if (videoIndices.length === 0) return 0;
-
-            const currentPos = videoIndices.indexOf(prev);
-            const nextPos = (currentPos + 1) % videoIndices.length;
-            return videoIndices[nextPos] ?? 0;
-          });
-        }, 4000);
-      }
-    }
-
-    return () => {
-      if (teaserIntervalRef.current) {
-        clearInterval(teaserIntervalRef.current);
-      }
-    };
-  }, [isScreenFocused, approvedPosts]);
-
-  // Handle screen focus
-  useFocusEffect(
-    useCallback(() => {
-      setIsScreenFocused(true);
-      return () => setIsScreenFocused(false);
-    }, [])
-  );
 
   useRefetchOnReconnect(() => onRefresh());
 
@@ -450,47 +651,43 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       setProfileError(null);
       setError(null);
       try {
-        const response = await userApi.getUserById(id as string);
+        const cachedTotal = !Array.isArray(id) && id ? externalProfileCache[id]?.totalCount || 0 : 0;
+        const [response, exactTotal] = await Promise.all([
+          userApi.getUserById(id as string),
+          cachedTotal > 0 ? Promise.resolve(cachedTotal) : resolveExactApprovedPostsTotal(id as string),
+        ]);
         if (response.status === 'success' && response.data) {
-          const userData = response.data;
-          // Normalize user data structure
-          const rawFollowers =
-            (userData as any).followersCount ??
-            userData.followers_count ??
-            (userData as any).follower_count ??
-            (userData as any).followers?.count ??
-            0;
-          const rawFollowing =
-            (userData as any).followingCount ??
-            userData.following_count ??
-            (userData as any).subscribers ??
-            (userData as any).following?.count ??
-            0;
-          const rawPosts =
-            approvedPostsCountRef.current ||
-            userData.posts_count ||
-            (userData as any).postsCount ||
-            (userData as any).posts?.count ||
-            0;
-
-          setProfile({
-            ...userData,
-            name: userData.name || (userData as any).fullName || userData.username || 'User',
-            username: userData.username || '',
-            profile_picture: userData.profile_picture || (userData as any).profilePicture || '',
-            bio: userData.bio || '',
-            email: (userData as any).email || '',
-            phone1: (userData as any).phone1 || '',
-            phone2: (userData as any).phone2 || '',
-            followers_count: rawFollowers,
-            following_count: rawFollowing,
-            posts_count: rawPosts,
-            id: userData.id || id as string,
-          } as any);
+          const nextProfile = buildProfileFromApi(
+            response.data,
+            id as string,
+            Math.max(approvedPostsRef.current.length, cachedTotal, exactTotal, profileSnapshotRef.current?.posts_count || 0),
+          );
+          const stableTotalCount = Math.max(
+            cachedTotal,
+            exactTotal,
+            nextProfile.posts_count || 0,
+            approvedPostsRef.current.length,
+            profileSnapshotRef.current?.posts_count || 0,
+          );
+          const stableProfile = {
+            ...nextProfile,
+            posts_count: stableTotalCount,
+          };
+          profileSnapshotRef.current = stableProfile;
+          setProfile(stableProfile);
+          externalProfileCache[id as string] = {
+            profile: stableProfile,
+            posts: approvedPostsRef.current,
+            hasMore: hasMorePosts,
+            nextPage: nextPostsPage,
+            totalCount: stableTotalCount,
+          };
+          setInitialPostCountResolved(true);
         } else {
           const errorMsg = response.message || 'Failed to fetch user profile';
           setProfileError(errorMsg);
           setError({ type: 'server', message: errorMsg });
+          setInitialPostCountResolved(true);
         }
       } catch (err: any) {
         const isNetworkError = err?.message?.includes('Network') || err?.code === 'NETWORK_ERROR' || !err?.response;
@@ -502,6 +699,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             ? 'No internet connection. Please check your network and try again.'
             : errorMsg
         });
+        setInitialPostCountResolved(true);
       } finally {
         setLoadingProfile(false);
       }
@@ -539,116 +737,101 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     checkFollow();
   }, [id, currentUser]);
 
-  // Fetch approved posts
-  const fetchApprovedPosts = useCallback(async (options?: { background?: boolean }) => {
+  const fetchApprovedPosts = useCallback(async (options?: { background?: boolean; page?: number; reset?: boolean }) => {
     if (!id) return;
 
-    const requestId = postsRequestIdRef.current + 1;
-    postsRequestIdRef.current = requestId;
+    const page = options?.page ?? 1;
+    const isReset = options?.reset !== false && page === 1;
+    const requestId = isReset ? postsRequestIdRef.current + 1 : postsRequestIdRef.current;
+    if (isReset) {
+      postsRequestIdRef.current = requestId;
+    }
     const fallbackProfile = profileSnapshotRef.current;
 
-    if (!options?.background || approvedPostsCountRef.current === 0) {
+    if (isReset && (!options?.background || approvedPostsRef.current.length === 0)) {
       setLoadingPosts(true);
+    } else if (page > 1) {
+      setLoadingMorePosts(true);
     }
-    setPostsError(null);
+    if (isReset) {
+      setPostsError(null);
+    }
 
     try {
-      const response = await fetchAllApprovedPosts(id as string);
+      const response = await userApi.getUserApprovedPosts(id as string, page, EXTERNAL_PROFILE_PAGE_LIMIT);
       if (requestId !== postsRequestIdRef.current) {
         return;
       }
 
       if (response.status === 'success' && response.data) {
-        // Handle both array and object with posts property
         const rawPosts = Array.isArray(response.data)
           ? response.data
           : (response.data as any)?.posts || [];
-        // Normalize backend shapes so UI always has `user`, `fullUrl`, and consistent fields
-        const normalized = (rawPosts as any[]).map((p: any) => {
-          return normalizeUserProfilePost(p, fallbackProfile ?? undefined);
-        });
-        primePostDetailsCache(normalized);
+        const cachedTotal = !Array.isArray(id) && id ? externalProfileCache[id]?.totalCount || 0 : 0;
+        const currentKnownTotal = Math.max(
+          profileSnapshotRef.current?.posts_count ?? 0,
+          approvedPostsRef.current.length,
+          cachedTotal,
+        );
+        const totalApprovedPosts = getApprovedPostsTotal(response.data, currentKnownTotal);
+        const normalizedPage = (rawPosts as any[]).map((post: any) =>
+          normalizeUserProfilePost(post, fallbackProfile ?? undefined),
+        );
+        primePostDetailsCache(normalizedPage);
 
-        const initialVisiblePosts = buildRenderableApprovedPosts(normalized, fallbackProfile);
-        prefetchRenderableThumbnails(initialVisiblePosts);
-        setApprovedPosts(initialVisiblePosts);
-        approvedPostsCountRef.current = initialVisiblePosts.length;
-        setProfile((prev) => (prev ? { ...prev, posts_count: initialVisiblePosts.length } : null));
+        const visiblePagePosts = buildRenderableApprovedPosts(normalizedPage, fallbackProfile);
+        prefetchRenderableThumbnails(visiblePagePosts);
+
+        let nextVisiblePosts: Post[] = [];
+        setApprovedPosts((prev) => {
+          nextVisiblePosts = isReset
+            ? ((options?.background || approvedPostsRef.current.length > 0)
+                ? mergeApprovedPostsNewestFirst(prev, visiblePagePosts)
+                : visiblePagePosts)
+            : mergeApprovedPostsNewestFirst(prev, visiblePagePosts);
+          return nextVisiblePosts;
+        });
+        setHasMorePosts(rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT);
+        setNextPostsPage(page + 1);
+        setProfile((prev) => prev ? { ...prev, posts_count: totalApprovedPosts } : prev);
+        externalProfileCache[id as string] = {
+          profile: profileSnapshotRef.current
+            ? { ...profileSnapshotRef.current, posts_count: totalApprovedPosts }
+            : null,
+          posts: nextVisiblePosts,
+          hasMore: rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT,
+          nextPage: page + 1,
+          totalCount: totalApprovedPosts,
+        };
         setLoadingPosts(false);
 
-        // CRITICAL ENRICHMENT: Backend user-post endpoints return hlsReady:true
-        // but OMIT hls_url and thumbnail_url. Fetch from individual post endpoint.
-        const needsEnrichment = normalized.filter((p: any) => {
-          const isVideo = p.type === 'video' || !!(p.video_url || p.videoUrl);
-          const processingStatus = p.processing_status ?? p.processingStatus ?? '';
-          const hasThumbnail =
-            !!p.thumbnail_url || !!p.thumbnailUrl || !!p.thumbnail;
-
-          // Videos without a real thumbnail should always be enriched so we can
-          // repair thumbnails for the profile grid and avoid grey placeholders.
-          const missingThumbnailForVideo = isVideo && !hasThumbnail;
-
-          const needsPlaybackData =
-            isVideo &&
-            p.hlsReady &&
-            !p.hls_url &&
-            !p.fullUrl?.includes('.m3u8');
-
-          const staleProcessingState =
-            isVideo &&
-            !!processingStatus &&
-            processingStatus !== 'completed' &&
-            processingStatus !== 'failed';
-
-          return (
-            missingThumbnailForVideo ||
-            needsPlaybackData ||
-            staleProcessingState ||
-            needsRenderableMediaEnrichment(p) ||
-            needsChallengeMetaEnrichment(p)
-          );
-        });
-
-        if (needsEnrichment.length > 0) {
-          const videoAssetMap = await getPostVideoAssetsBatchCached(
-            needsEnrichment
-              .filter((p: any) => p.type === 'video')
-              .map((p: any) => p.id),
-          );
-          const enrichMap = await getPostDetailsCached(
-            needsEnrichment.map((p: any) => p.id),
-            { requireNetwork: true },
-          );
-
-          // Merge enriched data
-          for (let i = 0; i < normalized.length; i++) {
-            const videoAssets = videoAssetMap.get(normalized[i].id);
-            const enriched = enrichMap.get(normalized[i].id);
-            if (enriched || videoAssets) {
-              normalized[i] = {
-                ...normalizeUserProfilePost(
-                  {
-                    ...normalized[i],
-                    ...videoAssets,
-                    ...enriched,
-                    user: enriched?.user || normalized[i].user,
-                  },
-                  fallbackProfile ?? undefined,
-                ),
-              };
-            }
-          }
-        }
-
+        const enrichedPage = await enrichApprovedPostsPage(rawPosts as any[], fallbackProfile);
         if (requestId !== postsRequestIdRef.current) {
           return;
         }
 
-        const visiblePosts = buildRenderableApprovedPosts(normalized, fallbackProfile);
-        prefetchRenderableThumbnails(visiblePosts);
-        setApprovedPosts(visiblePosts);
-        approvedPostsCountRef.current = visiblePosts.length;
-        setProfile((prev) => (prev ? { ...prev, posts_count: visiblePosts.length } : null));
+        const enrichedVisiblePagePosts = buildRenderableApprovedPosts(enrichedPage, fallbackProfile);
+        prefetchRenderableThumbnails(enrichedVisiblePagePosts);
+
+        let nextEnrichedPosts: Post[] = [];
+        setApprovedPosts((prev) => {
+          nextEnrichedPosts = isReset
+            ? ((options?.background || approvedPostsRef.current.length > 0)
+                ? mergeApprovedPostsNewestFirst(prev, enrichedVisiblePagePosts)
+                : enrichedVisiblePagePosts)
+            : mergeApprovedPostsNewestFirst(prev, enrichedVisiblePagePosts);
+          return nextEnrichedPosts;
+        });
+        setProfile((prev) => prev ? { ...prev, posts_count: totalApprovedPosts } : prev);
+        externalProfileCache[id as string] = {
+          profile: profileSnapshotRef.current
+            ? { ...profileSnapshotRef.current, posts_count: totalApprovedPosts }
+            : null,
+          posts: nextEnrichedPosts,
+          hasMore: rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT,
+          nextPage: page + 1,
+          totalCount: totalApprovedPosts,
+        };
       } else {
         setPostsError(response.message || 'Failed to fetch posts');
       }
@@ -658,63 +841,16 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         ? 'Network error. Please check your connection.'
         : err?.message || 'Failed to fetch posts');
     } finally {
-      if (requestId === postsRequestIdRef.current) {
+      if (requestId === postsRequestIdRef.current && isReset) {
         setLoadingPosts(false);
       }
+      setLoadingMorePosts(false);
     }
-  }, [approvedPostsCountRef, buildRenderableApprovedPosts, id, prefetchRenderableThumbnails]);
+  }, [buildRenderableApprovedPosts, id, prefetchRenderableThumbnails]);
 
   useEffect(() => {
-    fetchApprovedPosts();
+    void fetchApprovedPosts({ reset: true, page: 1, background: approvedPostsRef.current.length > 0 });
   }, [fetchApprovedPosts]);
-
-  // Real-time updates for profile stats
-  useEffect(() => {
-    if (!isConnected || !id) return;
-
-    const handleNewPost = (data: any) => {
-      if (data.userId === id) {
-        console.log('New post detected for user:', id);
-        void fetchApprovedPosts({ background: true });
-        setProfile(prev => prev ? { ...prev, posts_count: (prev.posts_count || 0) + 1 } : null);
-      }
-    };
-
-    const handleFollowAction = (data: any) => {
-      if (data.targetUserId === id) {
-        console.log('Follow action detected for user:', id);
-        setProfile(prev => {
-          if (!prev) return prev;
-          const newFollowersCount = data.action === 'follow'
-            ? (prev.followers_count || 0) + 1
-            : Math.max(0, (prev.followers_count || 0) - 1);
-          return { ...prev, followers_count: newFollowersCount };
-        });
-      }
-    };
-
-    const handlePostStatusChange = (data: any) => {
-      if (data.userId === id) {
-        console.log('Post status change detected for user:', id);
-        void fetchApprovedPosts({ background: true });
-        setProfile(prev => {
-          if (!prev) return prev;
-          const newPostsCount = data.action === 'approve'
-            ? (prev.posts_count || 0) + 1
-            : Math.max(0, (prev.posts_count || 0) - 1);
-          return { ...prev, posts_count: newPostsCount };
-        });
-      }
-    };
-
-    const pollInterval = setInterval(() => {
-      void fetchApprovedPosts({ background: true });
-    }, 30000);
-
-    return () => {
-      clearInterval(pollInterval);
-    };
-  }, [fetchApprovedPosts, id, isConnected]);
 
   // Refresh function
   const onRefresh = () => {
@@ -725,9 +861,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         if (id) {
           const profileResponse = await userApi.getUserById(id as string);
           if (profileResponse.status === 'success' && profileResponse.data) {
-            setProfile(profileResponse.data);
+            setProfile(buildProfileFromApi(profileResponse.data, id as string, approvedPostsRef.current.length));
           }
-          await fetchApprovedPosts();
+          await fetchApprovedPosts({ reset: true, page: 1, background: approvedPostsRef.current.length > 0 });
         }
       } catch (err: any) {
         console.error('Error refreshing data:', err);
@@ -738,10 +874,19 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     fetchData();
   };
 
+  const handleLoadMorePosts = useCallback(() => {
+    if (loadingMorePosts || loadingPosts || !hasMorePosts) {
+      return;
+    }
+
+    void fetchApprovedPosts({ background: true, page: nextPostsPage, reset: false });
+  }, [fetchApprovedPosts, hasMorePosts, loadingMorePosts, loadingPosts, nextPostsPage]);
+
   const handleFollow = async () => {
     if (!id || !currentUser) return;
 
     setFollowLoading(true);
+    seedFollowingFeedCache(currentUser.id, id as string, approvedPosts);
     updateFollowedUsers(id as string, true);
     try {
       const response = await followsApi.follow(id as string);
@@ -751,11 +896,15 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           setProfile(prev => prev ? { ...prev, followers_count: (prev.followers_count || 0) + 1 } : null);
         }
         if (isConnected) sendFollowAction(id as string, true);
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(currentUser.id);
       } else {
         updateFollowedUsers(id as string, false);
+        removeUserFromFollowingFeedCache(currentUser.id, id as string);
       }
     } catch (error) {
       updateFollowedUsers(id as string, false);
+      removeUserFromFollowingFeedCache(currentUser.id, id as string);
       Alert.alert('Error', 'Failed to follow user');
     } finally {
       setFollowLoading(false);
@@ -767,6 +916,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     setShowUnfollowModal(false);
 
     setFollowLoading(true);
+    removeUserFromFollowingFeedCache(currentUser.id, id as string);
     updateFollowedUsers(id as string, false);
     try {
       const response = await followsApi.unfollow(id as string);
@@ -776,19 +926,37 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
           setProfile(prev => prev ? { ...prev, followers_count: Math.max(0, (prev.followers_count || 0) - 1) } : null);
         }
         if (isConnected) sendFollowAction(id as string, false);
+        void syncFollowedUsersFromServer();
       } else {
         updateFollowedUsers(id as string, true);
+        seedFollowingFeedCache(currentUser.id, id as string, approvedPosts);
       }
     } catch (error) {
       updateFollowedUsers(id as string, true);
+      seedFollowingFeedCache(currentUser.id, id as string, approvedPosts);
       Alert.alert('Error', 'Failed to unfollow user');
     } finally {
       setFollowLoading(false);
     }
   };
 
-  const handlePostPress = (post: Post) => {
-    setProfileFeedLaunchCache(id as string, 'active', approvedPosts);
+  const handlePostPress = useCallback((post: Post) => {
+    const cardMeta = getExternalProfilePostCardMeta(post);
+    if (!cardMeta.canOpen) {
+      Alert.alert(
+        cardMeta.statusLabel === 'Processing' ? 'Post processing' : 'Post unavailable',
+        cardMeta.statusLabel === 'Processing'
+          ? 'This post is still processing. It will open once playback is ready.'
+          : 'This post is not available for playback right now.',
+      );
+      return;
+    }
+
+    setProfileFeedLaunchCache(
+      id as string,
+      'active',
+      approvedPosts.filter((item) => getExternalProfilePostCardMeta(item).canOpen),
+    );
     // Navigate to full-screen profile feed with current post as initial
     router.push({
       pathname: '/profile-feed/[userId]',
@@ -799,7 +967,17 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         initialPostData: JSON.stringify(post) // CRITICAL: Pass data for instant loading
       }
     });
-  };
+  }, [approvedPosts, id]);
+
+  const renderPostCard = useCallback(
+    ({ item }: { item: Post }) => (
+      <VideoThumbnailCard
+        post={item}
+        onPress={() => handlePostPress(item)}
+      />
+    ),
+    [handlePostPress],
+  );
 
   const handleClosePostModal = () => {
     setPostModalVisible(false);
@@ -862,7 +1040,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     }
   }, [profile, navigation]);
 
-  if (loadingProfile) {
+  if (loadingProfile || !initialPostCountResolved) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={styles.loadingContainer}>
@@ -902,8 +1080,19 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView
-        style={styles.scrollView}
+      <FlatList
+        ref={postsListRef}
+        data={approvedPosts}
+        keyExtractor={(item) => item.id}
+        numColumns={3}
+        removeClippedSubviews={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={18}
+        windowSize={7}
+        updateCellsBatchingPeriod={30}
+        contentContainerStyle={styles.postsGrid}
+        onEndReached={handleLoadMorePosts}
+        onEndReachedThreshold={0.6}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -912,129 +1101,86 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
             colors={[C.primary]}
           />
         }
-      >
-        {/* Profile Info */}
-        <View style={[styles.profileSection, { backgroundColor: C.card, borderBottomColor: C.border }]}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatarShadowWrapper}>
+        renderItem={renderPostCard}
+        ListHeaderComponent={
+          <>
+            <View style={styles.profileSection}>
               <Avatar
                 user={profile}
-                size={80}
-                style={styles.avatarLarge}
+                size={100}
+                style={styles.avatar}
               />
+              {profile?.name && profile.name !== profile.username && (
+                <Text style={styles.fullName}>{profile.name}</Text>
+              )}
+              <Text style={styles.username}>@{profile?.username || 'unknown'}</Text>
+              {!!(profile as any)?.email && (
+                <Text style={styles.profileEmail}>{(profile as any).email}</Text>
+              )}
+              {profile?.bio ? (
+                <Text style={styles.bio}>{profile.bio}</Text>
+              ) : null}
+
+              <View style={styles.statsContainer}>
+                <TouchableOpacity style={styles.stat}>
+                  <Text style={styles.statValue}>{Math.max(0, profile?.posts_count ?? 0)}</Text>
+                  <Text style={styles.statLabel}>Posts</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stat}
+                  onPress={() => router.push({
+                    pathname: '/followers/[id]',
+                    params: { id: profile.id, type: 'followers' }
+                  })}
+                >
+                  <Text style={styles.statValue}>{profile?.followers_count || 0}</Text>
+                  <Text style={styles.statLabel}>Followers</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.stat}
+                  onPress={() => router.push({
+                    pathname: '/followers/[id]',
+                    params: { id: profile.id, type: 'following' }
+                  })}
+                >
+                  <Text style={styles.statValue}>{profile?.following_count || 0}</Text>
+                  <Text style={styles.statLabel}>Following</Text>
+                </TouchableOpacity>
+              </View>
+
+              {currentUser && currentUser.id !== id && (
+                <TouchableOpacity
+                  onPress={isFollowing ? () => setShowUnfollowModal(true) : handleFollow}
+                  disabled={followLoading}
+                  style={[
+                    styles.editButton,
+                    isFollowing && styles.followingButton,
+                  ]}
+                >
+                  {followLoading ? (
+                    <DotsSpinner size={6} color={isFollowing ? C.primary : '#fff'} />
+                  ) : (
+                    <Text style={[
+                      styles.editButtonText,
+                      isFollowing && styles.followingButtonText,
+                    ]}>
+                      {isFollowing ? 'Following' : (followsMeBack ? 'Follow Back' : 'Follow')}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </View>
-            <View style={styles.profileInfo}>
-              <Text style={[styles.profileName, { color: C.text }]}>
-                {profile?.name || profile?.username || 'User'}
-              </Text>
-              <Text style={[styles.profileUsername, { color: C.textSecondary }]}>
-                @{profile?.username || 'unknown'}
-              </Text>
-              {profile?.bio && (
-                <Text style={[styles.profileBio, { color: C.text }]} numberOfLines={3}>
-                  {profile.bio}
-                </Text>
-              )}
+
+            <View style={styles.tabsContainer}>
+              <View style={[styles.tab, styles.tabActive]}>
+                <MaterialIcons name="grid-on" size={16} color="#60a5fa" />
+                <Text style={[styles.tabText, styles.tabTextActive]}>Posts</Text>
+              </View>
             </View>
-          </View>
-
-          {/* Contact Info - Only show if available */}
-          {((profile as any)?.email || (profile as any)?.phone1 || (profile as any)?.phone2) && (
-            <View style={[styles.contactInfo, { borderTopColor: C.border, borderTopWidth: 1, paddingTop: 16, marginTop: 16 }]}>
-              {(profile as any)?.email && (
-                <View style={styles.contactItem}>
-                  <MaterialIcons name="email" size={18} color={C.primary} />
-                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).email}</Text>
-                </View>
-              )}
-              {(profile as any)?.phone1 && (
-                <View style={styles.contactItem}>
-                  <MaterialIcons name="phone" size={18} color={C.primary} />
-                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone1}</Text>
-                </View>
-              )}
-              {(profile as any)?.phone2 && (
-                <View style={styles.contactItem}>
-                  <MaterialIcons name="phone" size={18} color={C.primary} />
-                  <Text style={[styles.contactText, { color: C.text }]}>{(profile as any).phone2}</Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Stats */}
-          <View style={[styles.statsRow, { borderTopColor: C.border, borderTopWidth: 1, paddingTop: 20, marginTop: 20 }]}>
-            <TouchableOpacity
-              style={[styles.statItem, { backgroundColor: C.background }]}
-              onPress={() => {
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: id as string, type: 'posts' }
-                });
-              }}
-            >
-              <Text style={[styles.statValue, { color: C.text }]}>{approvedPosts.length}</Text>
-              <Text style={[styles.statLabel, { color: C.textSecondary }]}>Posts</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.statItem, { backgroundColor: C.background }]}
-              onPress={() => {
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: id as string, type: 'followers' }
-                });
-              }}
-            >
-              <Text style={[styles.statValue, { color: C.text }]}>{profile?.followers_count ?? 0}</Text>
-              <Text style={[styles.statLabel, { color: C.textSecondary }]}>Followers</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.statItem, { backgroundColor: C.background }]}
-              onPress={() => {
-                router.push({
-                  pathname: '/followers/[id]' as any,
-                  params: { id: id as string, type: 'following' }
-                });
-              }}
-            >
-              <Text style={[styles.statValue, { color: C.text }]}>{profile?.following_count ?? 0}</Text>
-              <Text style={[styles.statLabel, { color: C.textSecondary }]}>Following</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Follow Button */}
-          {currentUser && currentUser.id !== id && (
-            <TouchableOpacity
-              onPress={isFollowing ? () => setShowUnfollowModal(true) : handleFollow}
-              disabled={followLoading}
-              style={[
-                styles.followButton,
-                {
-                  backgroundColor: isFollowing ? 'transparent' : C.primary,
-                  borderColor: C.primary,
-                  borderWidth: 1,
-                  marginTop: 20
-                }
-              ]}
-            >
-              {followLoading ? (
-                <DotsSpinner size={6} color={isFollowing ? C.primary : C.buttonText} />
-              ) : (
-                <Text style={[
-                  styles.followButtonText,
-                  { color: isFollowing ? C.primary : C.buttonText }
-                ]}>
-                  {isFollowing ? 'Following' : (followsMeBack ? 'Follow Back' : 'Follow')}
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Posts Section */}
-        <View style={[styles.postsSection, { backgroundColor: C.background }]}>
-          <Text style={[styles.sectionTitle, { color: C.text }]}>Posts ({approvedPosts.length})</Text>
-          {loadingPosts && approvedPosts.length === 0 ? (
+          </>
+        }
+        ListEmptyComponent={
+          loadingPosts ? (
             <View style={styles.loadingContainer}>
               <DotsSpinner size={8} color={C.primary} />
               <Text style={[styles.loadingText, { color: C.textSecondary, marginTop: 12 }]}>Loading posts...</Text>
@@ -1044,33 +1190,21 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
               <MaterialIcons name="error-outline" size={32} color={C.textSecondary} />
               <Text style={[styles.errorText, { color: C.textSecondary }]}>{postsError}</Text>
             </View>
-          ) : approvedPosts.length === 0 ? (
+          ) : (
             <View style={styles.emptyContainer}>
               <MaterialIcons name="photo-library" size={48} color={C.textSecondary} />
               <Text style={[styles.emptyText, { color: C.textSecondary }]}>No posts yet</Text>
             </View>
-          ) : (
-            <FlatList
-              data={approvedPosts}
-              renderItem={({ item, index }) => (
-                <VideoThumbnailCard
-                  post={item}
-                  isActive={isScreenFocused && activeTeaserIndex === index}
-                  onPress={() => handlePostPress(item)}
-                  cardColor={C.card}
-                  textColor={C.text}
-                  secondaryColor={C.textSecondary}
-                />
-              )}
-              keyExtractor={item => item.id}
-              numColumns={2}
-              columnWrapperStyle={styles.postsRow}
-              scrollEnabled={false}
-              contentContainerStyle={styles.postsListContent}
-            />
-          )}
-        </View>
-      </ScrollView>
+          )
+        }
+        ListFooterComponent={
+          loadingMorePosts ? (
+            <View style={styles.listFooterLoader}>
+              <ActivityIndicator size="small" color={C.primary} />
+            </View>
+          ) : null
+        }
+      />
 
       {/* Post Modal Overlay */}
       <Modal visible={postModalVisible} animationType="slide" transparent onRequestClose={handleClosePostModal}>
@@ -1153,155 +1287,175 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  scrollView: {
-    flex: 1,
-  },
   profileSection: {
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  profileHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    padding: 24,
   },
-  avatarShadowWrapper: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    marginRight: 16,
+  avatar: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 16,
   },
-  avatarLarge: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#f0f0f0',
-  },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontSize: 20,
+  fullName: {
+    color: '#fff',
+    fontSize: 18,
     fontWeight: '600',
     marginBottom: 4,
   },
-  profileUsername: {
-    fontSize: 14,
+  username: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  profileEmail: {
+    color: '#a1a1aa',
+    fontSize: 13,
     marginBottom: 8,
   },
-  profileBio: {
+  bio: {
+    color: '#999',
     fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
     lineHeight: 20,
   },
-  contactInfo: {
+  statsContainer: {
+    flexDirection: 'row',
     marginBottom: 20,
   },
-  contactItem: {
-    flexDirection: 'row',
+  stat: {
     alignItems: 'center',
-    marginBottom: 8,
-  },
-  contactText: {
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 20,
-  },
-  statItem: {
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginHorizontal: 4,
-    minWidth: 80,
+    marginHorizontal: 20,
   },
   statValue: {
+    color: '#fff',
     fontSize: 18,
     fontWeight: '600',
   },
   statLabel: {
+    color: '#999',
     fontSize: 12,
     marginTop: 2,
   },
-  followButton: {
-    paddingVertical: 12,
+  editButton: {
+    backgroundColor: '#1a1a1a',
     paddingHorizontal: 24,
+    paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 1,
+    borderColor: '#333',
     alignItems: 'center',
   },
-  followButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  postsSection: {
-    padding: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
+  editButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
+  },
+  followingButton: {
+    backgroundColor: 'transparent',
+    borderColor: '#60a5fa',
+  },
+  followingButtonText: {
+    color: '#60a5fa',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
     marginBottom: 16,
   },
-  postsRow: {
-    justifyContent: 'space-between',
-  },
-  postsListContent: {
-    paddingBottom: 40,
-  },
-  postCard: {
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    width: '48%',
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  postHeader: {
+  tab: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 20,
+    marginHorizontal: 2,
+    backgroundColor: '#1a1a1a',
   },
-  postUserInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  tabActive: {
+    backgroundColor: 'rgba(96, 165, 250, 0.2)',
   },
-  postUserAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  postUsername: {
+  tabText: {
+    color: '#666',
     fontSize: 12,
     fontWeight: '500',
+    marginLeft: 4,
+  },
+  tabTextActive: {
+    color: '#60a5fa',
+  },
+  postsGrid: {
+    padding: 2,
+    paddingBottom: 24,
+  },
+  postCard: {
+    width: EXTERNAL_PROFILE_POST_ITEM_SIZE,
+    aspectRatio: 0.75,
+    margin: 1,
+    position: 'relative',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 2,
+    overflow: 'hidden',
   },
   postImage: {
     width: '100%',
-    height: 150,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
+    height: '100%',
+    backgroundColor: '#1a1a1a',
   },
-  playIconOverlay: {
+  postOverlay: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: [{ translateX: -24 }, { translateY: -24 }],
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  postStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  postStatText: {
+    color: '#fff',
+    fontSize: 10,
+    marginLeft: 3,
+    fontWeight: '600',
+  },
+  videoPlayIndicator: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 12,
+    padding: 4,
+    alignItems: 'center',
+  },
+  postStatusBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  postStatusBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   challengeBadge: {
     position: 'absolute',
     left: 8,
     right: 8,
-    bottom: 8,
+    bottom: 28,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 7,
@@ -1325,41 +1479,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 1,
   },
-  postFooter: {
-    padding: 12,
-  },
-  postCaption: {
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  postTimestamp: {
-    fontSize: 10,
-    marginBottom: 8,
-    opacity: 0.7,
-  },
-  postFooterActions: {
-    flexDirection: 'row',
-    marginBottom: 8,
-  },
-  postAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  postActionText: {
-    fontSize: 12,
-    marginLeft: 4,
-  },
-  categoryTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  categoryText: {
-    fontSize: 10,
-    fontWeight: '500',
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1376,20 +1495,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
   },
-  errorSubtext: {
-    textAlign: 'center',
-    fontSize: 14,
-    marginBottom: 16,
-  },
-  retryButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
   emptyContainer: {
     alignItems: 'center',
     paddingVertical: 40,
@@ -1397,6 +1502,9 @@ const styles = StyleSheet.create({
   emptyText: {
     marginTop: 12,
     fontSize: 16,
+  },
+  listFooterLoader: {
+    paddingVertical: 16,
   },
   overlayBackdrop: {
     flex: 1,
@@ -1442,61 +1550,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     borderRadius: 25,
   },
-  realtimeIndicator: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  realtimeText: {
-    fontSize: 12,
-  },
-  videoThumbnail: {
-    position: 'relative',
-    width: '100%',
-    height: 150,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    overflow: 'hidden',
-  },
-  teaserVideoOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
   noMediaPlaceholder: {
     backgroundColor: '#1a1a1a',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playIconActive: {
-    backgroundColor: 'rgba(239, 68, 68, 0.9)',
-    borderRadius: 20,
-  },
-  playingIndicator: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#fff',
-  },
-  defaultAvatar: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  defaultAvatarText: {
-    color: '#fff',
-    fontWeight: '700',
-  },
-}); 
+});

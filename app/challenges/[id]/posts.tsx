@@ -38,6 +38,7 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -45,6 +46,7 @@ import {
   VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -108,6 +110,7 @@ export default function ChallengePostsScreen() {
 
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
+  const [isFullscreenTransitioning, setIsFullscreenTransitioning] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
@@ -118,7 +121,7 @@ export default function ChallengePostsScreen() {
   const [isChallengeEnded, setIsChallengeEnded] = useState(false);
   const [emptyMessage, setEmptyMessage] = useState('No posts in this challenge yet');
   const { user } = useAuth();
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const likesManager = useLikesManager();
   const expectedPostsCount = Number(expectedPosts ?? 0) || 0;
 
@@ -128,7 +131,10 @@ export default function ChallengePostsScreen() {
       item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
     , null as any);
     const idx = mostVisible?.index ?? viewableItems[0]?.index;
-    if (idx !== undefined && idx !== null) setFullscreenIndex(idx);
+    if (idx !== undefined && idx !== null) {
+      setIsFullscreenTransitioning(false);
+      setFullscreenIndex(idx);
+    }
   }).current;
 
   const fullscreenViewabilityConfig = useRef({
@@ -342,12 +348,21 @@ export default function ChallengePostsScreen() {
     loadPosts(1);
   }, [expectedPostsCount, filterFallbackPosts, id, participantUserId, winnerUserId]);
 
+  useEffect(() => {
+    if (!showFullscreen || posts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(posts, Math.max(0, fullscreenIndex));
+  }, [fullscreenIndex, posts, showFullscreen]);
+
   // If coming from challenge detail tile tap, auto-open fullscreen at index
   useEffect(() => {
     if (open !== '1') return;
     if (!posts.length) return;
     const idx = Number(openIndex || 0);
     const safeIdx = Number.isFinite(idx) ? Math.max(0, Math.min(posts.length - 1, idx)) : 0;
+    warmFeedWindow(posts, safeIdx);
     setFullscreenIndex(safeIdx);
     setShowFullscreen(true);
     setTimeout(() => {
@@ -368,6 +383,7 @@ export default function ChallengePostsScreen() {
   };
 
   const handlePostPress = (index: number) => {
+    warmFeedWindow(posts, index);
     setFullscreenIndex(index);
     setShowFullscreen(true);
     setTimeout(() => {
@@ -414,6 +430,7 @@ export default function ChallengePostsScreen() {
 
   const handleFollow = async (targetUserId: string) => {
     if (!user) return;
+    seedFollowingFeedCache(user.id, targetUserId, posts);
     updateFollowedUsers(targetUserId, true);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
     try {
@@ -421,15 +438,21 @@ export default function ChallengePostsScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, false);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+        removeUserFromFollowingFeedCache(user.id, targetUserId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
       }
     } catch {
       updateFollowedUsers(targetUserId, false);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      removeUserFromFollowingFeedCache(user.id, targetUserId);
     }
   };
 
   const handleUnfollow = async (targetUserId: string) => {
     if (!user) return;
+    removeUserFromFollowingFeedCache(user.id, targetUserId);
     updateFollowedUsers(targetUserId, false);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
     try {
@@ -437,10 +460,14 @@ export default function ChallengePostsScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, true);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+        seedFollowingFeedCache(user.id, targetUserId, posts);
+      } else {
+        void syncFollowedUsersFromServer();
       }
     } catch {
       updateFollowedUsers(targetUserId, true);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      seedFollowingFeedCache(user.id, targetUserId, posts);
     }
   };
 
@@ -629,8 +656,9 @@ export default function ChallengePostsScreen() {
                   onFollow={handleFollow}
                   onUnfollow={handleUnfollow}
                   isLiked={item.is_liked ?? likedPosts.includes(item.id)}
-                  isFollowing={item.is_following_author ?? userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
+                  suspendPlayback={isFullscreenTransitioning}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
@@ -651,6 +679,13 @@ export default function ChallengePostsScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
+            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
+            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
+              setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
+              setIsFullscreenTransitioning(false);
+            }}
             getItemLayout={(_, index) => ({
               length: fullscreenAvailableHeight,
               offset: fullscreenAvailableHeight * index,

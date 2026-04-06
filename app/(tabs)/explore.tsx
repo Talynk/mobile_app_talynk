@@ -142,7 +142,7 @@ export default function ExploreScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { user } = useAuth();
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const insets = useSafeAreaInsets();
   const gridListRef = useRef<FlatList<Post>>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -434,6 +434,7 @@ export default function ExploreScreen() {
     updateFollowedUsers(userId, true);
     try {
       await followsApi.follow(userId);
+      void syncFollowedUsersFromServer();
     } catch (error) {
       updateFollowedUsers(userId, false);
     }

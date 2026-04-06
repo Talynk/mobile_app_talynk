@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,9 @@ import {
 } from '@/lib/utils/video-feed';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
+import { runQuerySafely } from '@/lib/utils/query-cancellation';
 
 const POSTS_PER_PAGE = 20;
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -71,6 +74,7 @@ export default function CategoryScreen() {
 
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
+  const [isFullscreenTransitioning, setIsFullscreenTransitioning] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
@@ -79,7 +83,7 @@ export default function CategoryScreen() {
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
 
   const { user } = useAuth();
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const dispatch = useAppDispatch();
   const likesManager = useLikesManager();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
@@ -92,7 +96,10 @@ export default function CategoryScreen() {
       item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
     , null as any);
     const idx = mostVisible?.index ?? viewableItems[0]?.index;
-    if (idx !== undefined && idx !== null) setFullscreenIndex(idx);
+    if (idx !== undefined && idx !== null) {
+      setIsFullscreenTransitioning(false);
+      setFullscreenIndex(idx);
+    }
   }).current;
 
   const fullscreenViewabilityConfig = useRef({
@@ -150,12 +157,21 @@ export default function CategoryScreen() {
   const loading = categoryLoading || postsLoading;
 
   const handlePostPress = useCallback((index: number) => {
+    warmFeedWindow(posts, index);
     setFullscreenIndex(index);
     setShowFullscreen(true);
     setTimeout(() => {
       fullscreenListRef.current?.scrollToIndex({ index, animated: false });
     }, 100);
-  }, []);
+  }, [posts]);
+
+  useEffect(() => {
+    if (!showFullscreen || posts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(posts, Math.max(0, fullscreenIndex));
+  }, [fullscreenIndex, posts, showFullscreen]);
 
   const handleLike = useCallback(async (postId: string) => {
     if (!user) {
@@ -190,6 +206,7 @@ export default function CategoryScreen() {
 
   const handleFollow = useCallback(async (targetUserId: string) => {
     if (!user) return;
+    seedFollowingFeedCache(user.id, targetUserId, posts);
     updateFollowedUsers(targetUserId, true);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
     try {
@@ -197,15 +214,21 @@ export default function CategoryScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, false);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+        removeUserFromFollowingFeedCache(user.id, targetUserId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
       }
     } catch {
       updateFollowedUsers(targetUserId, false);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
+      removeUserFromFollowingFeedCache(user.id, targetUserId);
     }
-  }, [user, updateFollowedUsers]);
+  }, [user, posts, syncFollowedUsersFromServer, updateFollowedUsers]);
 
   const handleUnfollow = useCallback(async (targetUserId: string) => {
     if (!user) return;
+    removeUserFromFollowingFeedCache(user.id, targetUserId);
     updateFollowedUsers(targetUserId, false);
     setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
     try {
@@ -213,12 +236,16 @@ export default function CategoryScreen() {
       if (res.status !== 'success') {
         updateFollowedUsers(targetUserId, true);
         setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+        seedFollowingFeedCache(user.id, targetUserId, posts);
+      } else {
+        void syncFollowedUsersFromServer();
       }
     } catch {
       updateFollowedUsers(targetUserId, true);
       setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
+      seedFollowingFeedCache(user.id, targetUserId, posts);
     }
-  }, [user, updateFollowedUsers]);
+  }, [user, posts, syncFollowedUsersFromServer, updateFollowedUsers]);
 
   const PostCard = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isVideo = item.type === 'video' || !!(item.video_url);
@@ -322,7 +349,9 @@ export default function CategoryScreen() {
           />
         }
         onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+          if (hasNextPage && !isFetchingNextPage) {
+            void runQuerySafely(() => fetchNextPage(), 'category grid pagination');
+          }
         }}
         onEndReachedThreshold={0.5}
         ListFooterComponent={
@@ -382,8 +411,9 @@ export default function CategoryScreen() {
                   onFollow={handleFollow}
                   onUnfollow={handleUnfollow}
                   isLiked={item.is_liked ?? likedPosts.includes(item.id)}
-                  isFollowing={item.is_following_author ?? userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
+                  isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
+                  suspendPlayback={isFullscreenTransitioning}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
                 />
@@ -402,10 +432,16 @@ export default function CategoryScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
+            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
+            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
             onMomentumScrollEnd={(event) => {
+              const idx = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
+              setFullscreenIndex(Math.max(0, Math.min(idx, posts.length - 1)));
+              setIsFullscreenTransitioning(false);
               if (hasNextPage && !isFetchingNextPage) {
-                const idx = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
-                if (posts.length - idx <= 3) fetchNextPage();
+                if (posts.length - idx <= 3) {
+                  void runQuerySafely(() => fetchNextPage(), 'category fullscreen pagination');
+                }
               }
             }}
             getItemLayout={(_, index) => ({

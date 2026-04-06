@@ -35,6 +35,9 @@ import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
+import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
+import { runQuerySafely } from '@/lib/utils/query-cancellation';
 import {
   shouldPreloadFeedVideo,
   VIDEO_FEED_INITIAL_NUM_TO_RENDER,
@@ -55,6 +58,8 @@ export default function FeedScreen() {
   const [activeTab, setActiveTab] = useState<FeedTab>('foryou');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
+  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
+  const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
   const lastActiveIndexRef = useRef(0);
   const currentIndexRef = useRef(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
@@ -68,10 +73,11 @@ export default function FeedScreen() {
   const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const flatListRef = useRef<FlatList<Post>>(null);
+  const followingAutoloadAttemptedRef = useRef(false);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
-  const { followedUsers, updateFollowedUsers } = useCache();
+  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
@@ -187,35 +193,52 @@ export default function FeedScreen() {
 
   const handleFollow = useCallback(async (userId: string) => {
     if (!user) return;
+    setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
+    seedFollowingFeedCache(user.id, userId, posts);
     updateFollowInCache(userId, true);
     updateFollowedUsers(userId, true);
     try {
       const res = await followsApi.follow(userId);
       if (res.status !== 'success') {
+        setUserFollowStatus((prev) => ({ ...prev, [userId]: false }));
         updateFollowInCache(userId, false);
         updateFollowedUsers(userId, false);
+        removeUserFromFollowingFeedCache(user.id, userId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
       }
     } catch {
+      setUserFollowStatus((prev) => ({ ...prev, [userId]: false }));
       updateFollowInCache(userId, false);
       updateFollowedUsers(userId, false);
+      removeUserFromFollowingFeedCache(user.id, userId);
     }
-  }, [user, updateFollowInCache, updateFollowedUsers]);
+  }, [user, posts, syncFollowedUsersFromServer, updateFollowInCache, updateFollowedUsers]);
 
   const handleUnfollow = useCallback(async (userId: string) => {
     if (!user) return;
+    setUserFollowStatus((prev) => ({ ...prev, [userId]: false }));
+    removeUserFromFollowingFeedCache(user.id, userId);
     updateFollowInCache(userId, false);
     updateFollowedUsers(userId, false);
     try {
       const res = await followsApi.unfollow(userId);
       if (res.status !== 'success') {
+        setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
         updateFollowInCache(userId, true);
         updateFollowedUsers(userId, true);
+        seedFollowingFeedCache(user.id, userId, posts);
+      } else {
+        void syncFollowedUsersFromServer();
       }
     } catch {
+      setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
       updateFollowInCache(userId, true);
       updateFollowedUsers(userId, true);
+      seedFollowingFeedCache(user.id, userId, posts);
     }
-  }, [user, updateFollowInCache, updateFollowedUsers]);
+  }, [user, updateFollowInCache, updateFollowedUsers, syncFollowedUsersFromServer, posts]);
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
@@ -255,9 +278,11 @@ export default function FeedScreen() {
       , null as any);
 
       const idx = mostVisible?.index ?? viewableItems[0]?.index ?? 0;
+      setIsFeedTransitioning(false);
       setCurrentIndex(idx);
       lastActiveIndexRef.current = idx;
     } else {
+      setIsFeedTransitioning(false);
       setCurrentIndex(-1);
     }
   }).current;
@@ -270,7 +295,7 @@ export default function FeedScreen() {
 
   const onEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
+      void runQuerySafely(() => fetchNextPage(), 'feed pagination');
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
@@ -290,7 +315,12 @@ export default function FeedScreen() {
     const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused || isActive });
 
     const isLiked = item.is_liked ?? likedPosts.includes(item.id);
-    const isFollowing = item.is_following_author ?? followedUsers.has(item.user?.id || '');
+    const targetUserId = item.user?.id || '';
+    const optimisticFollowStatus = targetUserId ? userFollowStatus[targetUserId] : undefined;
+    const cachedFollowStatus = targetUserId ? followedUsers.has(targetUserId) : false;
+    const isFollowing = activeTab === 'following'
+      ? true
+      : (optimisticFollowStatus ?? (cachedFollowStatus ? true : item.is_following_author === true));
 
     return (
       <FullscreenFeedPostItem
@@ -305,11 +335,58 @@ export default function FeedScreen() {
         isLiked={isLiked}
         isFollowing={isFollowing}
         isActive={isActive}
+        suspendPlayback={isFeedTransitioning}
         shouldPreload={shouldPreload}
         availableHeight={availableHeight}
       />
     );
-  }, [isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'following' || !user) {
+      followingAutoloadAttemptedRef.current = false;
+      return;
+    }
+
+    void prefetchFollowingFeed(user.id);
+  }, [activeTab, user?.id]);
+
+  React.useEffect(() => {
+    followingAutoloadAttemptedRef.current = false;
+  }, [followedUsers.size]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'following') {
+      followingAutoloadAttemptedRef.current = false;
+      return;
+    }
+
+    if (posts.length > 0) {
+      followingAutoloadAttemptedRef.current = false;
+      return;
+    }
+
+    if (
+      !user ||
+      followedUsers.size === 0 ||
+      isLoading ||
+      isRefetching ||
+      followingAutoloadAttemptedRef.current
+    ) {
+      return;
+    }
+
+    followingAutoloadAttemptedRef.current = true;
+    void refetch();
+  }, [activeTab, followedUsers.size, isLoading, isRefetching, posts.length, refetch, user]);
+
+  React.useEffect(() => {
+    if (activeTab === 'challenges' || posts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(posts, Math.max(0, currentIndex));
+  }, [activeTab, currentIndex, posts]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -397,6 +474,14 @@ export default function FeedScreen() {
                   tintColor="#60a5fa"
                 />
               }
+              onScrollBeginDrag={() => setIsFeedTransitioning(true)}
+              onMomentumScrollBegin={() => setIsFeedTransitioning(true)}
+              onMomentumScrollEnd={(event) => {
+                const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
+                setCurrentIndex(nextIndex);
+                lastActiveIndexRef.current = nextIndex;
+                setIsFeedTransitioning(false);
+              }}
               onEndReached={onEndReached}
               onEndReachedThreshold={0.5}
               ListFooterComponent={
