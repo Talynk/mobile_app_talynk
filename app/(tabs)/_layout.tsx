@@ -124,8 +124,7 @@ const styles = StyleSheet.create({
   badge: {
     position: 'absolute',
     top: 2,
-    right: '50%',
-    marginRight: -18, // Position badge to the right of center, above the icon
+    right: 12,
     backgroundColor: '#ef4444',
     borderRadius: 10,
     minWidth: 20,

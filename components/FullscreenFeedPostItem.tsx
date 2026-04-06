@@ -16,7 +16,6 @@ import {
   Platform,
   PanResponder,
   Modal,
-  InteractionManager,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { router } from 'expo-router';
@@ -36,27 +35,8 @@ import { useMute } from '@/lib/mute-context';
 import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
-import { networkStatus } from '@/lib/network-status';
 import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibility';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
-
-const VIDEO_BUFFER_OPTIONS = Platform.select({
-  ios: {
-    preferredForwardBufferDuration: 4,
-    waitsToMinimizeStalling: true,
-  },
-  android: {
-    preferredForwardBufferDuration: 4,
-    minBufferForPlayback: 1,
-    maxBufferBytes: 3 * 1024 * 1024,
-    prioritizeTimeOverSizeThreshold: true,
-  },
-  default: {},
-});
-
-const PLAYBACK_STALL_MS = 2000;
-const INITIAL_PLAYBACK_STALL_MS = 6000;
-const PLAYBACK_STALL_BUFFER_GAP = 0.35;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const formatNumber = (num: number): string => {
@@ -129,6 +109,8 @@ type NativeFeedVideoProps = {
   onFirstFrameRender: () => void;
   onStatusChange: (event: { status?: string; error?: unknown }) => void;
   onPlayingChange: (isPlaying: boolean) => void;
+  onTimeUpdate: (payload: { currentTime: number; duration: number }) => void;
+  onPlayToEnd: () => void;
   onPlayerReady: () => void;
   onPlayerInvalid: () => void;
 };
@@ -171,6 +153,8 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       onFirstFrameRender,
       onStatusChange,
       onPlayingChange,
+      onTimeUpdate,
+      onPlayToEnd,
       onPlayerReady,
       onPlayerInvalid,
     },
@@ -185,7 +169,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         instance.loop = true;
         instance.muted = shouldPlay ? isMuted : true;
         instance.staysActiveInBackground = false;
-        instance.bufferOptions = VIDEO_BUFFER_OPTIONS;
+        instance.timeUpdateEventInterval = 0.25;
       } catch (e) {
         console.warn('[FeedVideo] Error configuring player:', e);
       }
@@ -230,6 +214,37 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         return () => {};
       }
     }, [onPlayingChange, player]);
+
+    React.useEffect(() => {
+      if (!player) return;
+
+      try {
+        const sub = player.addListener('timeUpdate', (event: { currentTime?: number; duration?: number }) => {
+          onTimeUpdate({
+            currentTime: event.currentTime || 0,
+            duration: event.duration || 0,
+          });
+        });
+        return () => {
+          try { sub.remove(); } catch (_) {}
+        };
+      } catch (_) {
+        return () => {};
+      }
+    }, [onTimeUpdate, player]);
+
+    React.useEffect(() => {
+      if (!player) return;
+
+      try {
+        const sub = player.addListener('playToEnd', onPlayToEnd);
+        return () => {
+          try { sub.remove(); } catch (_) {}
+        };
+      } catch (_) {
+        return () => {};
+      }
+    }, [onPlayToEnd, player]);
 
     React.useEffect(() => {
       if (!player) return;
@@ -393,9 +408,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const thumbnailOpacity = useRef(new Animated.Value(1)).current;
   const playbackStatusRef = useRef<'idle' | 'loading' | 'readyToPlay' | 'error'>('idle');
   const lastPlaybackTimeRef = useRef(0);
-  const lastProgressAtRef = useRef(Date.now());
-  const stalledAtRef = useRef<number | null>(null);
-  const awaitingNetworkRecoveryRef = useRef(false);
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
@@ -404,7 +416,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
-  const shouldLoadVideo = isVideo && hlsReady && isAppActive && (isActive || shouldPreload) && !videoError;
+  const declaredVideoDuration =
+    Number((item as any).video_duration ?? (item as any).duration ?? (item as any).durationSeconds ?? 0) || 0;
+  const isLongFormVideo = declaredVideoDuration >= 60;
+  const shouldLoadVideo =
+    isVideo &&
+    hlsReady &&
+    isAppActive &&
+    (isActive || (shouldPreload && !isLongFormVideo)) &&
+    !videoError;
   const videoPlayerSource = shouldLoadVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
@@ -415,34 +435,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
   const competitionVideoStatusLabel =
     isCompetitionPost && isVideo && !hlsReady ? getChallengeVideoStatusLabel(item) || 'Video' : null;
-
-  const clearPlaybackStall = useCallback((options?: { resume?: boolean }) => {
-    const stalledAt = stalledAtRef.current;
-    awaitingNetworkRecoveryRef.current = false;
-    stalledAtRef.current = null;
-    lastProgressAtRef.current = Date.now();
-
-    const controller = videoControllerRef.current;
-    if (options?.resume && controller && isActive && isAppActive && !pausedByUser) {
-      try {
-        if (stalledAt != null && Math.abs((controller.getCurrentTime() || 0) - stalledAt) > 0.75) {
-          controller.seekTo(stalledAt);
-        }
-        controller.play();
-      } catch (_) {}
-    }
-  }, [isActive, isAppActive, pausedByUser]);
-
-  const markPlaybackStall = useCallback((currentTime: number) => {
-    if (awaitingNetworkRecoveryRef.current) {
-      return;
-    }
-
-    awaitingNetworkRecoveryRef.current = true;
-    stalledAtRef.current = currentTime;
-    setIsPlaying(false);
-    setVideoReady(false);
-  }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -479,9 +471,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setPausedByUser(false);
     playbackStatusRef.current = 'idle';
     lastPlaybackTimeRef.current = 0;
-    lastProgressAtRef.current = Date.now();
-    stalledAtRef.current = null;
-    awaitingNetworkRecoveryRef.current = false;
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
@@ -563,14 +552,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
     if (isMountedRef.current) {
       setIsPlaying(nextPlaying);
-      if (nextPlaying) {
-        lastProgressAtRef.current = Date.now();
-        if (awaitingNetworkRecoveryRef.current) {
-          clearPlaybackStall();
-        }
-      }
     }
-  }, [clearPlaybackStall]);
+  }, []);
 
   const handleNativeStatusChange = useCallback((event: { status?: string; error?: unknown }) => {
     if (!isMountedRef.current) {
@@ -583,21 +566,36 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
     if (event?.error) {
       setIsPlaying(false);
-      const currentTime = videoControllerRef.current?.getCurrentTime() || lastPlaybackTimeRef.current || 0;
-      if (videoReady || lastPlaybackTimeRef.current > 0.1) {
-        markPlaybackStall(currentTime);
-      }
       return;
     }
 
     if (event?.status === 'readyToPlay') {
       setVideoError(false);
       setDecoderErrorDetected(false);
-      if (awaitingNetworkRecoveryRef.current) {
-        clearPlaybackStall({ resume: true });
-      }
     }
-  }, [clearPlaybackStall, markPlaybackStall, videoReady]);
+  }, []);
+
+  const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    const currentTime = payload.currentTime || 0;
+    const duration = payload.duration || 0;
+    lastPlaybackTimeRef.current = currentTime;
+
+    if (duration > 0) {
+      setVideoProgress(currentTime / duration);
+    }
+  }, []);
+
+  const handleNativePlayToEnd = useCallback(() => {
+    if (!isMountedRef.current) {
+      return;
+    }
+    setVideoProgress(0);
+    setVideoReady(true);
+  }, []);
 
   useEffect(() => {
     const controller = videoControllerRef.current;
@@ -631,77 +629,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       thumbnailOpacity.setValue(1);
     }
   }, [isActive, isPlaying, videoReady, thumbnailOpacity]);
-
-  useEffect(() => {
-    if (!isActive || !isPlayerValid) return;
-    const interval = setInterval(() => {
-      try {
-        const controller = videoControllerRef.current;
-        if (!controller) {
-          return;
-        }
-        const ct = controller.getCurrentTime() || 0;
-        const dur = controller.getDuration() || 0;
-        const bufferedPosition = controller.getBufferedPosition();
-
-        if (dur > 0) {
-          setVideoProgress(ct / dur);
-        }
-
-        if (ct > lastPlaybackTimeRef.current + 0.05) {
-          lastPlaybackTimeRef.current = ct;
-          lastProgressAtRef.current = Date.now();
-          if (awaitingNetworkRecoveryRef.current) {
-            clearPlaybackStall();
-          }
-          return;
-        }
-
-        const bufferGap =
-          bufferedPosition >= 0 ? bufferedPosition - ct : Number.POSITIVE_INFINITY;
-        const stalledLongEnough = Date.now() - lastProgressAtRef.current >= PLAYBACK_STALL_MS;
-        const initialLoadStalled =
-          shouldLoadVideo &&
-          !videoReady &&
-          !pausedByUser &&
-          playbackStatusRef.current === 'loading' &&
-          ct < 0.05 &&
-          bufferedPosition >= 0 &&
-          bufferedPosition < 0.15 &&
-          Date.now() - lastProgressAtRef.current >= INITIAL_PLAYBACK_STALL_MS;
-        const midPlaybackStalled =
-          shouldLoadVideo &&
-          videoReady &&
-          !pausedByUser &&
-          playbackStatusRef.current === 'loading' &&
-          stalledLongEnough &&
-          (bufferedPosition < 0 || bufferGap < PLAYBACK_STALL_BUFFER_GAP);
-
-        if (initialLoadStalled || midPlaybackStalled) {
-          markPlaybackStall(ct);
-        }
-      } catch (_) {}
-    }, 250);
-    return () => clearInterval(interval);
-  }, [clearPlaybackStall, isActive, isPlayerValid, markPlaybackStall, pausedByUser, shouldLoadVideo, videoReady]);
-
-  useEffect(() => {
-    if (!isPlayerValid) {
-      return;
-    }
-
-    const unsubscribe = networkStatus.subscribe((status, meta) => {
-      if (meta?.source === 'subscribe') {
-        return;
-      }
-
-      if (status === 'online' && awaitingNetworkRecoveryRef.current) {
-        clearPlaybackStall({ resume: true });
-      }
-    });
-
-    return unsubscribe;
-  }, [clearPlaybackStall, isPlayerValid]);
 
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {
@@ -829,6 +756,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const adTitle = (item as any).title || (item as any).ad_title || '';
   const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
   const mediaContentFit = isAd ? 'contain' : 'cover';
+  const feedOverlayBottomInset = Math.max(insets.bottom + 10, 12);
+  const feedProgressBottomInset = Math.max(insets.bottom + 6, 8);
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
@@ -859,6 +788,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       onFirstFrameRender={() => setVideoReady(true)}
                       onStatusChange={handleNativeStatusChange}
                       onPlayingChange={handleNativePlayingChange}
+                      onTimeUpdate={handleNativeTimeUpdate}
+                      onPlayToEnd={handleNativePlayToEnd}
                       onPlayerReady={handleNativePlayerReady}
                       onPlayerInvalid={handleNativePlayerInvalid}
                     />
@@ -925,7 +856,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
         )}
 
-        <View style={[styles.rightActions, { bottom: insets.bottom + 36 }]}>
+        <View style={[styles.rightActions, { bottom: feedOverlayBottomInset }]}>
           {!isAd && (
             <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
               <Avatar
@@ -984,7 +915,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           )}
         </View>
 
-        <View style={[styles.bottomInfo, { bottom: 60 + insets.bottom - 40 }]}>
+        <View style={[styles.bottomInfo, { bottom: feedOverlayBottomInset }]}>
           <View style={styles.bottomInfoContent}>
             {isAd && (
               <View style={styles.sponsoredMetaRow}>
@@ -1040,7 +971,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
         {isVideo && isActive && (
           <View
-            style={[styles.videoProgressBarContainer, { bottom: insets.bottom + 11 }]}
+            style={[styles.videoProgressBarContainer, { bottom: feedProgressBottomInset }]}
             {...progressBarPan.panHandlers}
           >
             <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
@@ -1290,7 +1221,6 @@ const styles = StyleSheet.create({
     zIndex: 999,
     elevation: 10,
     maxHeight: '50%',
-    marginBottom: -50,
   },
   avatarContainer: {
     position: 'relative',
@@ -1305,8 +1235,8 @@ const styles = StyleSheet.create({
   },
   followIconButton: {
     position: 'absolute',
-    bottom: -6,
-    right: -6,
+    bottom: 0,
+    right: 0,
     width: 20,
     height: 20,
     borderRadius: 10,
@@ -1401,12 +1331,10 @@ const styles = StyleSheet.create({
   },
   bottomInfo: {
     position: 'absolute',
-    bottom: 0,
     left: 12,
     right: 84,
     zIndex: 21,
     elevation: 5,
-    marginBottom: -34,
   },
   bottomInfoContent: {
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -1559,13 +1487,11 @@ const styles = StyleSheet.create({
   },
   videoProgressBarContainer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
     height: 2,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     zIndex: 100,
-    marginBottom: -34,
   },
   videoProgressBarFill: {
     height: '100%',

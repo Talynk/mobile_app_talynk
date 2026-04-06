@@ -65,8 +65,6 @@ import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import websocketService from '@/lib/websocket-service';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const ANDROID_13_API_LEVEL = 33;
-
 const COLORS = {
   dark: {
     background: '#000000',
@@ -301,6 +299,8 @@ export default function CreatePostScreen() {
   const recordingSafetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recordingDurationRef = useRef(0);
   const stoppedDueToMaxDurationRef = useRef(false);
+  const visionRecordingActiveRef = useRef(false);
+  const visionStopRequestedRef = useRef(false);
   const [showPreRecordInfoModal, setShowPreRecordInfoModal] = useState(false);
   const [showMaxDurationReachedModal, setShowMaxDurationReachedModal] = useState(false);
   const C = COLORS.dark;
@@ -340,8 +340,7 @@ export default function CreatePostScreen() {
   const joinedChallengesRef = useRef<any[]>([]);
   const launchSystemCameraCaptureRef = useRef<(mode: 'video' | 'picture') => Promise<boolean>>(async () => false);
   const handlePickFromGalleryRef = useRef<() => void>(() => {});
-  const shouldUseVisionCameraVideo =
-    Platform.OS === 'android' && Number(Platform.Version) === ANDROID_13_API_LEVEL;
+  const shouldUseVisionCameraVideo = Platform.OS === 'android';
   const isUsingVisionCameraVideo = shouldUseVisionCameraVideo && cameraMode === 'video';
   const visionCameraDevice = useCameraDevice(cameraFacing);
 
@@ -361,6 +360,36 @@ export default function CreatePostScreen() {
       }
       recordingDurationRef.current = 0;
     };
+  }, []);
+
+  const clearRecordingTimers = useCallback(() => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    if (recordingSafetyTimeoutRef.current) {
+      clearTimeout(recordingSafetyTimeoutRef.current);
+      recordingSafetyTimeoutRef.current = null;
+    }
+  }, []);
+
+  const stopVisionRecordingOnce = useCallback((reason: 'manual' | 'max-duration' | 'safety-timeout') => {
+    if (!visionRecordingActiveRef.current || visionStopRequestedRef.current) {
+      return;
+    }
+
+    if (reason !== 'manual') {
+      stoppedDueToMaxDurationRef.current = true;
+    }
+
+    visionStopRequestedRef.current = true;
+    void visionCameraRef.current?.stopRecording().catch((error) => {
+      const message = String(error?.message || '');
+      if (message.includes('no-recording-in-progress')) {
+        return;
+      }
+      console.error(`[VisionCamera] Failed to stop recording (${reason}):`, error);
+    });
   }, []);
 
   // Signal Create tab focus so feed screens can reduce video preload (avoid OOM during record/upload)
@@ -1422,25 +1451,25 @@ export default function CreatePostScreen() {
         setIsRecording(true);
         setRecordingDuration(0);
         recordingDurationRef.current = 0;
+        stoppedDueToMaxDurationRef.current = false;
+        visionRecordingActiveRef.current = true;
+        visionStopRequestedRef.current = false;
 
         recordingTimerRef.current = setInterval(() => {
           setRecordingDuration((prev) => {
             const newDuration = prev + 1;
             recordingDurationRef.current = newDuration;
             if (newDuration >= MAX_RECORDING_SECONDS) {
-              stoppedDueToMaxDurationRef.current = true;
-              void visionCameraRef.current?.stopRecording().catch((error) => {
-                console.error('[VisionCamera] Failed to stop after max duration:', error);
-              });
+              clearRecordingTimers();
+              stopVisionRecordingOnce('max-duration');
               return MAX_RECORDING_SECONDS;
             }
             return newDuration;
           });
         }, 1000);
         recordingSafetyTimeoutRef.current = setTimeout(() => {
-          void visionCameraRef.current?.stopRecording().catch((error) => {
-            console.error('[VisionCamera] Safety timeout stop failed:', error);
-          });
+          clearRecordingTimers();
+          stopVisionRecordingOnce('safety-timeout');
         }, (MAX_RECORDING_SECONDS + 1) * 1000);
 
         visionCameraRef.current.startRecording({
@@ -1453,14 +1482,9 @@ export default function CreatePostScreen() {
               }
 
               setIsRecording(false);
-              if (recordingTimerRef.current) {
-                clearInterval(recordingTimerRef.current);
-                recordingTimerRef.current = null;
-              }
-              if (recordingSafetyTimeoutRef.current) {
-                clearTimeout(recordingSafetyTimeoutRef.current);
-                recordingSafetyTimeoutRef.current = null;
-              }
+              clearRecordingTimers();
+              visionRecordingActiveRef.current = false;
+              visionStopRequestedRef.current = false;
 
               const videoUri = video.path.startsWith('file://') ? video.path : `file://${video.path}`;
 
@@ -1480,7 +1504,7 @@ export default function CreatePostScreen() {
                 return;
               }
 
-              if (recordingDurationRef.current > 120) {
+              if (recordingDurationRef.current > 120 && !stoppedDueToMaxDurationRef.current) {
                 Alert.alert(
                   'Video Too Long',
                   'Your recording is longer than 2 minutes. Please record a shorter video.'
@@ -1522,14 +1546,9 @@ export default function CreatePostScreen() {
               if (!isMountedRef.current) return;
 
               setIsRecording(false);
-              if (recordingTimerRef.current) {
-                clearInterval(recordingTimerRef.current);
-                recordingTimerRef.current = null;
-              }
-              if (recordingSafetyTimeoutRef.current) {
-                clearTimeout(recordingSafetyTimeoutRef.current);
-                recordingSafetyTimeoutRef.current = null;
-              }
+              clearRecordingTimers();
+              visionRecordingActiveRef.current = false;
+              visionStopRequestedRef.current = false;
               recordingDurationRef.current = 0;
 
               if (error?.message && !String(error.message).includes('cancel')) {
@@ -1556,17 +1575,18 @@ export default function CreatePostScreen() {
       setRecordingDuration(0);
       recordingDurationRef.current = 0;
 
-      const MAX_RECORDING_SECONDS = 120;
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => {
-          const newDuration = prev + 1;
-          recordingDurationRef.current = newDuration;
-          if (newDuration >= MAX_RECORDING_SECONDS) {
-            stoppedDueToMaxDurationRef.current = true;
-            stopRecording();
-            return MAX_RECORDING_SECONDS;
-          }
-          return newDuration;
+        const MAX_RECORDING_SECONDS = 120;
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingDuration((prev) => {
+            const newDuration = prev + 1;
+            recordingDurationRef.current = newDuration;
+            if (newDuration >= MAX_RECORDING_SECONDS) {
+              stoppedDueToMaxDurationRef.current = true;
+              clearRecordingTimers();
+              stopRecording();
+              return MAX_RECORDING_SECONDS;
+            }
+            return newDuration;
         });
       }, 1000);
       recordingSafetyTimeoutRef.current = setTimeout(() => {
@@ -1605,14 +1625,7 @@ export default function CreatePostScreen() {
           }
 
           setIsRecording(false);
-          if (recordingTimerRef.current) {
-            clearInterval(recordingTimerRef.current);
-            recordingTimerRef.current = null;
-          }
-          if (recordingSafetyTimeoutRef.current) {
-            clearTimeout(recordingSafetyTimeoutRef.current);
-            recordingSafetyTimeoutRef.current = null;
-          }
+          clearRecordingTimers();
 
           if (video && video.uri) {
             // Verify video file exists before processing
@@ -1632,7 +1645,7 @@ export default function CreatePostScreen() {
               // Continue anyway - file might still be valid
             }
 
-            if (recordingDurationRef.current > 120) {
+            if (recordingDurationRef.current > 120 && !stoppedDueToMaxDurationRef.current) {
               Alert.alert(
                 'Video Too Long',
                 'Your recording is longer than 2 minutes. Please record a shorter video.'
@@ -1688,14 +1701,7 @@ export default function CreatePostScreen() {
           if (!isMountedRef.current) return;
 
           setIsRecording(false);
-          if (recordingTimerRef.current) {
-            clearInterval(recordingTimerRef.current);
-            recordingTimerRef.current = null;
-          }
-          if (recordingSafetyTimeoutRef.current) {
-            clearTimeout(recordingSafetyTimeoutRef.current);
-            recordingSafetyTimeoutRef.current = null;
-          }
+          clearRecordingTimers();
           if (error?.message && !error.message.includes('cancel')) {
             Alert.alert(
               'Recording failed',
@@ -1732,36 +1738,19 @@ export default function CreatePostScreen() {
           : [{ text: 'OK' }],
       );
       setIsRecording(false);
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current);
-        recordingTimerRef.current = null;
-      }
-      if (recordingSafetyTimeoutRef.current) {
-        clearTimeout(recordingSafetyTimeoutRef.current);
-        recordingSafetyTimeoutRef.current = null;
-      }
+      clearRecordingTimers();
       recordingDurationRef.current = 0;
     }
-  }, [isRecording, isCameraReady, isUsingVisionCameraVideo, launchSystemCameraCapture, shouldUseVisionCameraVideo, visionCameraDevice]);
+  }, [clearRecordingTimers, isRecording, isCameraReady, isUsingVisionCameraVideo, launchSystemCameraCapture, shouldUseVisionCameraVideo, stopVisionRecordingOnce, visionCameraDevice]);
 
   const stopRecording = () => {
     if (!isRecording) return;
 
     setIsRecording(false);
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    if (recordingSafetyTimeoutRef.current) {
-      clearTimeout(recordingSafetyTimeoutRef.current);
-      recordingSafetyTimeoutRef.current = null;
-    }
-    recordingDurationRef.current = 0;
+    clearRecordingTimers();
 
     if (isUsingVisionCameraVideo) {
-      void visionCameraRef.current?.stopRecording().catch((error) => {
-        console.error('[VisionCamera] Failed to stop recording:', error);
-      });
+      stopVisionRecordingOnce('manual');
       return;
     }
 
@@ -1776,20 +1765,28 @@ export default function CreatePostScreen() {
     setIsCameraReady(false);
     setRecordingDuration(0);
     setIsRecording(false);
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-    if (recordingSafetyTimeoutRef.current) {
-      clearTimeout(recordingSafetyTimeoutRef.current);
-      recordingSafetyTimeoutRef.current = null;
-    }
+    clearRecordingTimers();
+    visionRecordingActiveRef.current = false;
+    visionStopRequestedRef.current = false;
   };
 
   // --- VIDEO EDITING ---
   const handleEditVideo = async () => {
     handleRecordVideo();
   };
+
+  const handleRetryRecordingAfterMaxDuration = useCallback(() => {
+    setShowMaxDurationReachedModal(false);
+    setRecordedVideoUri(null);
+    setEditedVideoUri(null);
+    setCapturedImageUri(null);
+    setThumbnailUri(null);
+    setServerMediaUrl(null);
+    setUploadProgress(0);
+    setTimeout(() => {
+      handleRecordVideo();
+    }, 120);
+  }, [handleRecordVideo]);
 
   // --- TOAST MESSAGE ---
   const showToast = (message: string) => {
@@ -2498,15 +2495,24 @@ export default function CreatePostScreen() {
             </View>
             <Text style={styles.maxDurationTitle}>2 minutes max reached</Text>
             <Text style={styles.maxDurationMessage}>
-              Maximum recording time reached. Taking you to add captions and publish.
+              2 minutes reached. Your video has been saved. You can continue with this recording, or record again to adjust the length.
             </Text>
-            <TouchableOpacity
-              style={styles.maxDurationButton}
-              onPress={() => setShowMaxDurationReachedModal(false)}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.maxDurationButtonText}>Continue</Text>
-            </TouchableOpacity>
+            <View style={styles.maxDurationActions}>
+              <TouchableOpacity
+                style={[styles.maxDurationButton, styles.maxDurationSecondaryButton]}
+                onPress={handleRetryRecordingAfterMaxDuration}
+                activeOpacity={0.9}
+              >
+                <Text style={[styles.maxDurationButtonText, styles.maxDurationSecondaryButtonText]}>Record Again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.maxDurationButton}
+                onPress={() => setShowMaxDurationReachedModal(false)}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.maxDurationButtonText}>Continue</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2710,7 +2716,7 @@ export default function CreatePostScreen() {
             <MaterialIcons name="videocam" size={72} color={C.primary} />
               <Text style={[styles.studioHint, { color: C.textSecondary }]}>
               {shouldUseVisionCameraVideo
-                ? 'Using the in-app Android 13 video camera with native recording'
+                ? 'Using the in-app Android video camera with native recording'
                 : 'Camera opens automatically'}
               </Text>
 
@@ -4280,6 +4286,10 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingHorizontal: 8,
   },
+  maxDurationActions: {
+    width: '100%',
+    gap: 12,
+  },
   maxDurationButton: {
     backgroundColor: '#f59e0b',
     paddingVertical: 16,
@@ -4287,11 +4297,19 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     width: '100%',
   },
+  maxDurationSecondaryButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
   maxDurationButtonText: {
     color: '#000',
     fontSize: 17,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  maxDurationSecondaryButtonText: {
+    color: '#e5e7eb',
   },
   recordLimitHint: {
     fontSize: 12,

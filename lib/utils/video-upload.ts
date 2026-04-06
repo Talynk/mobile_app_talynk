@@ -2,7 +2,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import {
   Video as CompressorVideo,
   backgroundUpload,
-  createVideoThumbnail,
   getRealPath,
   getVideoMetaData,
   UploaderHttpMethod,
@@ -101,13 +100,15 @@ export async function prepareVideoForUpload(
   onCompressionProgress?: (progress: number) => void
 ): Promise<PreparedVideoAsset> {
   const originalUri = await resolveVideoUri(sourceUri);
-  const originalFileInfo = await getSafeFileInfo(originalUri);
+  const [originalFileInfo, originalMeta] = await Promise.all([
+    getSafeFileInfo(originalUri),
+    getSafeVideoMetaData(originalUri),
+  ]);
 
   if (!originalFileInfo.exists) {
     throw new Error('Video file not found on device');
   }
 
-  const originalMeta = await getSafeVideoMetaData(originalUri);
   const shouldCompress = shouldCompressVideo(originalUri, originalFileInfo, originalMeta);
 
   let uploadUri = originalUri;
@@ -154,23 +155,16 @@ export async function prepareVideoForUpload(
     }
   }
 
-  const uploadFileInfo = await getSafeFileInfo(uploadUri);
-  const uploadMeta = await getSafeVideoMetaData(uploadUri);
-
-  let thumbnailUri: string | undefined;
-  try {
-    const thumbnail = await createVideoThumbnail(uploadUri);
-    thumbnailUri = ensureFileUri(thumbnail.path);
-  } catch {
-    thumbnailUri = undefined;
-  }
+  const [uploadFileInfo, uploadMeta] = await Promise.all([
+    getSafeFileInfo(uploadUri),
+    getSafeVideoMetaData(uploadUri),
+  ]);
 
   return {
     originalUri,
     uploadUri,
     fileName: getFileNameFromUri(uploadUri),
     mimeType: 'video/mp4',
-    thumbnailUri,
     didCompress,
     originalSizeBytes: originalFileInfo.size || 0,
     uploadSizeBytes: uploadFileInfo.size || originalFileInfo.size || 0,
