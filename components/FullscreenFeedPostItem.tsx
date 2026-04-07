@@ -330,6 +330,7 @@ export interface FullscreenFeedPostItemProps {
   isChallengeEnded?: boolean;
   challengeName?: string;
   onPublishPress?: (postId: string) => void;
+  bottomOverlayOffset?: number;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -352,6 +353,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   likesDuringChallenge,
   isChallengeEnded,
   challengeName,
+  bottomOverlayOffset = 0,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
   const isAppActive = useAppActive();
@@ -756,8 +758,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const adTitle = (item as any).title || (item as any).ad_title || '';
   const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
   const mediaContentFit = isAd ? 'contain' : 'cover';
-  const feedOverlayBottomInset = Math.max(insets.bottom + 10, 12);
-  const feedProgressBottomInset = Math.max(insets.bottom + 6, 8);
+  const reservedBottomSpace = Math.max(insets.bottom + bottomOverlayOffset, 8);
+  const feedProgressBottomInset = reservedBottomSpace;
+  const feedOverlayBottomInset = reservedBottomSpace + 14;
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">

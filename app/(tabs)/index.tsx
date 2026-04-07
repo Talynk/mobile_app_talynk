@@ -72,6 +72,7 @@ export default function FeedScreen() {
   const [createChallengeVisible, setCreateChallengeVisible] = useState(false);
   const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
+  const [feedViewportHeight, setFeedViewportHeight] = useState(0);
   const flatListRef = useRef<FlatList<Post>>(null);
   const followingAutoloadAttemptedRef = useRef(false);
   const { user } = useAuth();
@@ -98,7 +99,8 @@ export default function FeedScreen() {
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
   const headerHeight = insets.top + headerTabsHeight + headerPaddingVertical;
-  const availableHeight = screenHeight - headerHeight;
+  const fallbackAvailableHeight = screenHeight - headerHeight;
+  const availableHeight = feedViewportHeight > 0 ? feedViewportHeight : fallbackAvailableHeight;
 
   useFocusEffect(
     useCallback(() => {
@@ -425,7 +427,15 @@ export default function FeedScreen() {
           />
         </>
       ) : (
-        <>
+        <View
+          style={styles.feedViewport}
+          onLayout={(event) => {
+            const nextHeight = Math.round(event.nativeEvent.layout.height);
+            if (nextHeight > 0 && nextHeight !== feedViewportHeight) {
+              setFeedViewportHeight(nextHeight);
+            }
+          }}
+        >
           {isLoading && posts.length === 0 ? (
             <View style={styles.loadingContainer}>
               {[1, 2, 3].map((i) => (
@@ -528,7 +538,7 @@ export default function FeedScreen() {
               }
             />
           )}
-        </>
+        </View>
       )}
 
 
@@ -570,6 +580,9 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
     backgroundColor: FEED_BG,
+  },
+  feedViewport: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
