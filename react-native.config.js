@@ -8,7 +8,11 @@ module.exports = {
   dependencies: {
     'ffmpeg-kit-react-native': {
       platforms: {
-        android: null  // Disable autolinking for Android - Expo config plugin handles it
+        // Android is handled by Expo config plugin + patch-package.
+        android: null,
+        // iOS ffmpeg-kit upstream binaries currently return 404 during pod install.
+        // Disable iOS autolinking to prevent pod install failure in EAS iOS builds.
+        ios: null
       }
     }
   }
