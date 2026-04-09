@@ -47,6 +47,7 @@ import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
 } from '@/lib/utils/post-detail-enrichment';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -837,7 +838,7 @@ export default function ProfileScreen() {
           if (!id) return;
           if (!byId.has(id)) byId.set(id, p);
         });
-        const fresh = Array.from(byId.values()).filter(hasRenderableMedia);
+        const fresh = filterSecondarySurfacePosts(Array.from(byId.values()).filter(hasRenderableMedia));
 
         if (__DEV__) {
           console.log('📥 [loadPosts] Profile posts (completed, deduped, with media only):', {
@@ -870,7 +871,7 @@ export default function ProfileScreen() {
           enrichedPosts.forEach((post: any) => {
             if (post?.id) enrichedById.set(post.id, post);
           });
-          const refreshedPosts = sortPostsNewestFirst(Array.from(enrichedById.values()));
+          const refreshedPosts = filterSecondarySurfacePosts(sortPostsNewestFirst(Array.from(enrichedById.values())));
           primePostDetailsCache(refreshedPosts);
           postsCacheRef.current[activeTab] = refreshedPosts;
           persistentProfilePostsCache[activeTab] = refreshedPosts;

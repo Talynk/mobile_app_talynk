@@ -46,7 +46,15 @@ export class UploadNotificationService {
     }
   }
 
-  async showUploadProgress(progress: number, filename?: string): Promise<void> {
+  async showUploadProgress(
+    progress: number,
+    filename?: string,
+    meta?: {
+      stage?: string;
+      speedLabel?: string | null;
+      etaLabel?: string | null;
+    }
+  ): Promise<void> {
     if (isExpoGo) {
       // In Expo Go, just log to console
       console.log(`Uploading: ${filename || 'file'} - ${Math.min(Math.max(progress, 0), 100)}%`);
@@ -57,10 +65,12 @@ export class UploadNotificationService {
       // Cap progress at 100%
       const cappedProgress = Math.min(Math.max(progress, 0), 100);
       
-      const title = 'Uploading';
-      const body = filename 
+      const title = meta?.stage || 'Uploading';
+      const extra = [meta?.speedLabel, meta?.etaLabel].filter(Boolean).join(' • ');
+      const baseBody = filename
         ? `Uploading ${filename}... ${cappedProgress}%`
         : `Uploading... ${cappedProgress}%`;
+      const body = extra ? `${baseBody} • ${extra}` : baseBody;
 
       if (this.notificationId) {
         // Update existing notification

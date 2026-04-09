@@ -22,7 +22,7 @@ import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { setPostLikeCounts, addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedQuery } from '@/lib/hooks/use-feed-query';
 import { queryClient } from '@/lib/query-client';
 import ReportModal from '@/components/ReportModal';
@@ -83,6 +83,7 @@ export default function FeedScreen() {
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
   const insets = useSafeAreaInsets();
+  const safeAreaFrame = useSafeAreaFrame();
   const { height: screenHeight } = useWindowDimensions();
 
   const feedTab = activeTab === 'challenges' ? 'foryou' : activeTab as 'foryou' | 'following';
@@ -99,8 +100,9 @@ export default function FeedScreen() {
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
   const headerHeight = insets.top + headerTabsHeight + headerPaddingVertical;
-  const fallbackAvailableHeight = screenHeight - headerHeight;
+  const fallbackAvailableHeight = Math.max(0, (safeAreaFrame.height || screenHeight) - headerHeight);
   const availableHeight = feedViewportHeight > 0 ? feedViewportHeight : fallbackAvailableHeight;
+  const isFeedViewportReady = activeTab === 'challenges' || availableHeight > 0;
 
   useFocusEffect(
     useCallback(() => {
@@ -436,7 +438,7 @@ export default function FeedScreen() {
             }
           }}
         >
-          {isLoading && posts.length === 0 ? (
+          {!isFeedViewportReady || (isLoading && posts.length === 0) ? (
             <View style={styles.loadingContainer}>
               {[1, 2, 3].map((i) => (
                 <View key={i} style={[styles.skeletonItem, { height: availableHeight }]}>
@@ -467,7 +469,9 @@ export default function FeedScreen() {
                 index,
               })}
               pagingEnabled={true}
+              snapToInterval={availableHeight}
               snapToAlignment="start"
+              disableIntervalMomentum
               decelerationRate="fast"
               showsVerticalScrollIndicator={false}
               windowSize={VIDEO_FEED_WINDOW_SIZE}
@@ -477,6 +481,7 @@ export default function FeedScreen() {
               scrollEventThrottle={16}
               scrollEnabled={true}
               bounces={false}
+              alwaysBounceVertical={false}
               refreshControl={
                 <RefreshControl
                   refreshing={isRefetching}

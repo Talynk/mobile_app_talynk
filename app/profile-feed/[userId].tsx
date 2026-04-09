@@ -37,7 +37,7 @@ import RealtimeProvider from '@/lib/realtime-context';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
@@ -47,6 +47,7 @@ import { normalizePost } from '@/lib/utils/normalize-post';
 import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
@@ -275,7 +276,7 @@ function ProfileFeedContent({
           const subId = exploreSubCategoryId ? parseInt(exploreSubCategoryId, 10) : null;
           const cId = exploreCountryId ? parseInt(exploreCountryId, 10) : null;
 
-          explorePosts = filterHlsReady(allPosts);
+          explorePosts = filterSecondarySurfacePosts(allPosts);
           explorePosts = applyExploreFilters(
             explorePosts,
             categories,
@@ -373,7 +374,65 @@ function ProfileFeedContent({
           },
         });
       });
+      postsArray = filterSecondarySurfacePosts(postsArray);
       primePostDetailsCache(postsArray);
+
+      if (response?.status === 'success' && postsArray.length >= 0) {
+        const pagination = response.data?.pagination || {};
+        const hasMoreData = pagination.hasNextPage !== false && postsArray.length === LIMIT;
+        setHasMore(hasMoreData);
+
+        const likeCountsMap: Record<string, number> = {};
+        postsArray.forEach((post: Post) => {
+          if (post.likes !== undefined) {
+            likeCountsMap[post.id] = post.likes;
+          }
+        });
+        if (Object.keys(likeCountsMap).length > 0) {
+          dispatch(setPostLikeCounts(likeCountsMap));
+        }
+
+        if (page === 1 || refresh) {
+          const sortedPosts = [...postsArray].sort((a, b) => {
+            const dateA = new Date(a.createdAt || a.uploadDate || 0).getTime();
+            const dateB = new Date(b.createdAt || b.uploadDate || 0).getTime();
+            return dateB - dateA;
+          });
+
+          setPosts(sortedPosts);
+
+          if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {
+            setUsername(sortedPosts[0].user.username);
+          }
+
+          if (!initialScrollDone) {
+            if (initialPostId) {
+              const initialIndex = sortedPosts.findIndex((p: Post) => p.id === initialPostId);
+              if (initialIndex >= 0) {
+                setTimeout(() => {
+                  flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
+                  setCurrentIndex(initialIndex);
+                  setInitialScrollDone(true);
+                }, 0);
+              } else {
+                setInitialScrollDone(true);
+              }
+            } else {
+              setInitialScrollDone(true);
+            }
+          }
+        } else {
+          setPosts(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newPosts = postsArray.filter(p => p.id && !existingIds.has(p.id));
+            return [...prev, ...newPosts];
+          });
+        }
+
+        if (page === 1 || refresh) {
+          setLoading(false);
+        }
+      }
 
       // CRITICAL ENRICHMENT: The user-post endpoints return hlsReady:true but
       // OMIT hls_url and thumbnail_url. Enrich from individual post endpoint.
@@ -455,9 +514,6 @@ function ProfileFeedContent({
         }
       }
 
-      // Apply HLS filter — only show HLS-transcoded video posts
-      postsArray = filterHlsReady(postsArray);
-
       if (__DEV__) {
         console.log('📥 [ProfileFeed fetchPosts] API Response:', {
           status: response?.status,
@@ -478,21 +534,6 @@ function ProfileFeedContent({
       }
 
       if (response?.status === 'success' && postsArray.length >= 0) {
-        const pagination = response.data?.pagination || {};
-        const hasMoreData = pagination.hasNextPage !== false && postsArray.length === LIMIT;
-        setHasMore(hasMoreData);
-
-        // Update like counts in Redux
-        const likeCountsMap: Record<string, number> = {};
-        postsArray.forEach((post: Post) => {
-          if (post.likes !== undefined) {
-            likeCountsMap[post.id] = post.likes;
-          }
-        });
-        if (Object.keys(likeCountsMap).length > 0) {
-          dispatch(setPostLikeCounts(likeCountsMap));
-        }
-
         // Sync liked posts from server if user is logged in
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
@@ -526,42 +567,7 @@ function ProfileFeedContent({
         }
 
         if (page === 1 || refresh) {
-          // Ensure posts are in correct order (newest first typically)
-          const sortedPosts = [...postsArray].sort((a, b) => {
-            const dateA = new Date(a.createdAt || a.uploadDate || 0).getTime();
-            const dateB = new Date(b.createdAt || b.uploadDate || 0).getTime();
-            return dateB - dateA; // Newest first
-          });
-
-          setPosts(sortedPosts);
-
-          // Get username from first post
-          if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {
-            setUsername(sortedPosts[0].user.username);
-          }
-
-          // Scroll to initial post if provided
-          if (initialPostId && !initialScrollDone) {
-            const initialIndex = sortedPosts.findIndex((p: Post) => p.id === initialPostId);
-            if (initialIndex >= 0) {
-              setTimeout(() => {
-                flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
-                setCurrentIndex(initialIndex);
-                setInitialScrollDone(true);
-              }, 100);
-            } else {
-              setInitialScrollDone(true);
-            }
-          } else {
-            setInitialScrollDone(true);
-          }
-        } else {
-          // Deduplicate when appending
-          setPosts(prev => {
-            const existingIds = new Set(prev.map(p => p.id));
-            const newPosts = postsArray.filter(p => p.id && !existingIds.has(p.id));
-            return [...prev, ...newPosts];
-          });
+          setRefreshing(false);
         }
       } else {
         if (page === 1) {
@@ -807,7 +813,7 @@ function ProfileFeedContent({
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)}
           accessibilityLabel="Go back"
           accessibilityRole="button"
         >

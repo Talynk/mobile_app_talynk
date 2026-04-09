@@ -27,7 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-cache';
@@ -38,7 +38,7 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EXPLORE_PAGE_LIMIT = 24;
 
 function normalizeExplorePosts(items: any[]): Post[] {
-  return filterHlsReady(
+  return filterSecondarySurfacePosts(
     items
       .map((post) => normalizePost(post))
       .filter((post: any) => !post?.isAd && !post?.challenge_id && !post?.challengeId)

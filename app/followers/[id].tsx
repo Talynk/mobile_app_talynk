@@ -17,6 +17,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
+import { safeRouterBack } from '@/lib/utils/navigation';
 
 const COLORS = {
   light: {
@@ -76,7 +77,7 @@ export default function FollowersScreen() {
         if (response.status === 'success' && response.data) {
           setProfile(response.data);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.warn('Error fetching profile:', error?.message);
       }
     };
@@ -301,7 +302,7 @@ export default function FollowersScreen() {
         <View style={[styles.header, { backgroundColor: C.card, borderBottomColor: C.border }]}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => safeRouterBack(router, '/(tabs)/profile' as any)}
           >
             <MaterialIcons name="arrow-back" size={24} color={C.text} />
           </TouchableOpacity>

@@ -703,6 +703,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       router.push({ pathname: '/auth/login' as any });
       return;
     }
+    if (isOwnPost) {
+      return;
+    }
     if (isFollowing) setShowUnfollowModal(true);
     else onFollow(item.user?.id || '');
   };
@@ -867,7 +870,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 size={48}
                 style={styles.userAvatar}
               />
-              {user && user.id !== item.user?.id && (
+              {user && !isOwnPost && (
                 <TouchableOpacity style={styles.followIconButton} onPress={handleFollow}>
                   <Feather name={isFollowing ? 'check' : 'plus'} size={16} color="#000" />
                 </TouchableOpacity>
@@ -960,7 +963,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               <Text style={styles.categoryText}>#{getCategoryDisplayName(typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name)}</Text>
             </TouchableOpacity>
           )}
-          {!isAd && user && user.id !== item.user?.id && (
+          {!isAd && user && !isOwnPost && (
             <TouchableOpacity
               style={[styles.followButton, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }]}
               onPress={handleFollow}

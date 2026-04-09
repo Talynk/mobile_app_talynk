@@ -19,8 +19,9 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { Avatar } from '@/components/Avatar';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -65,7 +66,7 @@ export default function SearchScreen() {
         const postsList = postsData
           ? ((postsData as any).posts || (Array.isArray(postsData) ? postsData : []))
           : [];
-        const posts = filterHlsReady(postsList) as Post[];
+        const posts = filterSecondarySurfacePosts(postsList) as Post[];
 
         setUsersResults(users);
         setPostsResults(posts);
@@ -84,7 +85,7 @@ export default function SearchScreen() {
       } else if (activeTab === 'videos') {
         const res = await postsApi.search(searchQuery);
         if (res.status === 'success') {
-          const posts = filterHlsReady((res.data as any).posts || (Array.isArray(res.data) ? res.data : [])) as Post[];
+          const posts = filterSecondarySurfacePosts((res.data as any).posts || (Array.isArray(res.data) ? res.data : [])) as Post[];
           setPostsResults(posts);
           setSearchResults(posts);
         } else {
@@ -196,7 +197,7 @@ export default function SearchScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
 

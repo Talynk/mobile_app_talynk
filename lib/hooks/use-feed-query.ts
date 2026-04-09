@@ -2,7 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { useMemo } from 'react';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { normalizePost } from '@/lib/utils/normalize-post';
@@ -73,7 +73,7 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
       .map((post: any) => normalizePost({ ...post, is_following_author: true }))
       .map((post: any) => ({ ...post, is_following_author: true }));
 
-    filterHlsReady(approvedPosts).forEach((post) => {
+    filterSecondarySurfacePosts(approvedPosts).forEach((post) => {
       if (post?.id && !merged.has(post.id)) {
         merged.set(post.id, post);
       }
@@ -116,7 +116,7 @@ export function useFeedQuery(tab: FeedTab) {
           is_following_author: true,
         }));
         primePostDetailsCache(allPosts);
-        const hlsPosts = filterHlsReady(allPosts);
+        const hlsPosts = filterSecondarySurfacePosts(allPosts);
         if (__DEV__) {
           console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
         }

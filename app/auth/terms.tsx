@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { safeRouterBack } from '@/lib/utils/navigation';
 
 const THEME = {
   background: '#000000',
@@ -33,7 +34,7 @@ export default function TermsAndConditionsScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => safeRouterBack(router, '/auth/login' as any)}
           hitSlop={10}
         >
           <Ionicons name="arrow-back" size={24} color={C.text} />
@@ -246,7 +247,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-
 
 
 

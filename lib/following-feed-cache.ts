@@ -2,7 +2,7 @@ import type { InfiniteData } from '@tanstack/react-query';
 import { postsApi } from '@/lib/api';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { queryClient } from '@/lib/query-client';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { Post } from '@/types';
 
 type FeedPage = {
@@ -49,6 +49,7 @@ function mergeFollowingFeedPosts(currentPosts: Post[], incomingPosts: Post[]) {
 function normalizeSeedPosts(posts: Post[], targetUserId: string) {
   return posts
     .filter((post) => post?.id && post.user?.id === targetUserId)
+    .filter((post) => filterSecondarySurfacePosts([post]).length > 0)
     .map((post) => ({ ...post, is_following_author: true }));
 }
 
@@ -62,7 +63,7 @@ function fetchFollowingFeedPage(viewerUserId: string) {
     }));
 
     primePostDetailsCache(allPosts);
-    const hlsPosts = filterHlsReady(allPosts);
+    const hlsPosts = filterSecondarySurfacePosts(allPosts);
     const pagination = raw?.data?.pagination;
     const hasNext = pagination?.hasNext ?? (allPosts.length >= FOLLOWING_FEED_LIMIT);
 
@@ -136,7 +137,7 @@ export async function prefetchFollowingFeed(viewerUserId: string) {
   await queryClient.fetchInfiniteQuery({
     queryKey: getFollowingFeedQueryKey(viewerUserId),
     initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    getNextPageParam: (lastPage: FeedPage) => lastPage.nextCursor ?? undefined,
     queryFn: fetchFollowingFeedPage(viewerUserId),
     staleTime: 30_000,
   });

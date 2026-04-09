@@ -31,7 +31,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { UnfollowConfirmModal } from '@/components/UnfollowConfirmModal';
 import { timeAgo } from '@/lib/utils/time-ago';
-import { filterHlsReady } from '@/lib/utils/post-filter';
+import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { useCache } from '@/lib/cache-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
@@ -43,6 +43,7 @@ import { setProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
 import { sharePost } from '@/lib/post-share';
 import { downloadPostToLibrary } from '@/lib/post-download';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
@@ -308,7 +309,7 @@ const mergeApprovedPostsNewestFirst = (currentPosts: Post[], incomingPosts: Post
       existing.hls_url !== post.hls_url ||
       existing.video_url !== post.video_url ||
       existing.image !== post.image ||
-      existing.thumbnail !== post.thumbnail ||
+      (existing as any).thumbnail !== (post as any).thumbnail ||
       (existing as any).thumbnail_url !== (post as any).thumbnail_url ||
       (existing as any).processing_status !== (post as any).processing_status ||
       existing.likes !== post.likes ||
@@ -627,7 +628,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     const byId = new Map<string, Post>();
 
     sortExternalProfilePostsNewestFirst(
-      items.map((post: any) => normalizeUserProfilePost(post, fallbackProfile ?? profileSnapshotRef.current ?? undefined))
+      filterSecondarySurfacePosts(
+        items.map((post: any) => normalizeUserProfilePost(post, fallbackProfile ?? profileSnapshotRef.current ?? undefined))
+      )
     )
       .forEach((post: Post) => {
         if (!post?.id || byId.has(post.id)) {
@@ -952,11 +955,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       return;
     }
 
-    setProfileFeedLaunchCache(
-      id as string,
-      'active',
-      approvedPosts.filter((item) => getExternalProfilePostCardMeta(item).canOpen),
-    );
+    setProfileFeedLaunchCache(id as string, 'active', approvedPosts);
     // Navigate to full-screen profile feed with current post as initial
     router.push({
       pathname: '/profile-feed/[userId]',
@@ -1070,7 +1069,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       <View style={[styles.header, { backgroundColor: C.background, borderBottomColor: C.border }]}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)}
         >
           <MaterialIcons name="arrow-back" size={24} color={C.text} />
         </TouchableOpacity>

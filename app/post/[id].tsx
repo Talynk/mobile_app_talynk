@@ -37,6 +37,7 @@ import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 
 const timeAgo = (dateString?: string | null) => {
@@ -286,7 +287,7 @@ export default function PostDetailScreen() {
     return (
       <View style={styles.errorContainer}>
         <Text style={styles.errorText}>Post not found</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/' as any)} style={styles.backButton}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
@@ -434,7 +435,7 @@ export default function PostDetailScreen() {
     >
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerBack}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/' as any)} style={styles.headerBack}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
 

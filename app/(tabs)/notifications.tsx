@@ -17,7 +17,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRealtime } from '@/lib/realtime-context';
-import { Notification } from '@/types';
+import { Notification, User } from '@/types';
 import { useNotificationBadge } from '@/lib/notification-badge-context';
 import { frontendNotifications } from '@/lib/frontend-notifications';
 import { localNotificationEvents } from '@/lib/local-notification-events';
@@ -28,32 +28,106 @@ const NOTIFICATION_TABS = [
 ];
 
 export default function NotificationsScreen() {
+  const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  if (!user) {
+    return (
+      <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          <Text style={styles.headerTitle}>Notifications</Text>
+        </View>
+
+        <View style={styles.loginPrompt}>
+          <View style={styles.loginIconContainer}>
+            <Feather name="bell" size={48} color="#60a5fa" />
+          </View>
+          <Text style={styles.loginPromptTitle}>Stay in the loop</Text>
+          <Text style={styles.loginPromptText}>
+            Sign in to see your notifications
+          </Text>
+          <TouchableOpacity
+            style={styles.loginButton}
+            onPress={() => router.push('/auth/login')}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.loginButtonText}>Sign In</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return <AuthenticatedNotificationsScreen user={user} insetsTop={insets.top} />;
+}
+
+function AuthenticatedNotificationsScreen({
+  user,
+  insetsTop,
+}: {
+  user: User;
+  insetsTop: number;
+}) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const [showMarkAllModal, setShowMarkAllModal] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
-  const { user } = useAuth();
-  const insets = useSafeAreaInsets();
   const { isConnected, onNewNotification } = useRealtime();
   const { refreshCount } = useNotificationBadge();
 
-  // Load notifications on mount and when screen is focused
+  const loadNotifications = useCallback(async () => {
+    try {
+      console.log('[Notifications] 📥 Loading notifications for user:', user.username);
+      setLoading(true);
+      const [response, localItems] = await Promise.all([
+        notificationsApi.getAll(),
+        frontendNotifications.getAll(user.id),
+      ]);
+
+      console.log('[Notifications] 📦 API Response:', {
+        status: response.status,
+        notificationCount: response.data?.notifications?.length || 0,
+      });
+
+      if (response.status === 'success' && response.data?.notifications) {
+        const normalized = response.data.notifications.map((n: any) => ({
+          id: n.id || n.notification_id,
+          userID: n.userID || n.user_id || '',
+          message: n.message || n.notification_text || '',
+          type: n.type,
+          isRead: n.isRead !== undefined ? n.isRead : (n.is_read !== undefined ? n.is_read : false),
+          createdAt: n.createdAt || n.notification_date || n.created_at || new Date().toISOString(),
+          metadata: n.metadata || {},
+          related_post_id: n.related_post_id || n.metadata?.postId,
+          related_user_id: n.related_user_id,
+          related_user: n.related_user,
+        }));
+
+        setNotifications(
+          [...normalized, ...localItems].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )
+        );
+      } else {
+        setNotifications(localItems);
+      }
+    } catch (error) {
+      console.error('[Notifications] ❌ Error loading notifications:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [user.id, user.username]);
+
   useFocusEffect(
     useCallback(() => {
-      if (user) {
-        loadNotifications();
-        // Refresh badge count when screen is focused
-        refreshCount();
-      }
-    }, [user, refreshCount])
+      void loadNotifications();
+      refreshCount();
+    }, [loadNotifications, refreshCount])
   );
 
-  // Subscribe to real-time notifications — only add when notification is for current user
   useEffect(() => {
-    if (!user) return;
-
     const unsubscribe = onNewNotification((update: any) => {
       const notificationData: any = update.notification || update;
       if (!notificationData) return;
@@ -81,76 +155,23 @@ export default function NotificationsScreen() {
     });
 
     return unsubscribe;
-  }, [onNewNotification, user]);
+  }, [onNewNotification, user.id, user.username]);
 
   useEffect(() => {
-    if (!user) return;
     return localNotificationEvents.onChanged(() => {
-      loadNotifications();
+      void loadNotifications();
       refreshCount();
     });
-  }, [user, refreshCount]);
+  }, [loadNotifications, refreshCount]);
 
-  useRefetchOnReconnect(() => loadNotifications());
+  useRefetchOnReconnect(() => {
+    void loadNotifications();
+  });
 
-  const loadNotifications = async () => {
-    if (!user) return;
-
-    try {
-      console.log('[Notifications] 📥 Loading notifications for user:', user.username);
-      setLoading(true);
-      const [response, localItems] = await Promise.all([
-        notificationsApi.getAll(),
-        frontendNotifications.getAll(user.id),
-      ]);
-
-      console.log('[Notifications] 📦 API Response:', {
-        status: response.status,
-        notificationCount: response.data?.notifications?.length || 0,
-      });
-
-      if (response.status === 'success' && response.data?.notifications) {
-        // Normalize notification structure (handle both old and new formats)
-        const normalized = response.data.notifications.map((n: any) => ({
-          id: n.id || n.notification_id,
-          userID: n.userID || n.user_id || '',
-          message: n.message || n.notification_text || '',
-          type: n.type,
-          isRead: n.isRead !== undefined ? n.isRead : (n.is_read !== undefined ? n.is_read : false),
-          createdAt: n.createdAt || n.notification_date || n.created_at || new Date().toISOString(),
-          metadata: n.metadata || {},
-          // Extract metadata fields to related_* for backward compatibility
-          related_post_id: n.related_post_id || n.metadata?.postId,
-          related_user_id: n.related_user_id,
-          related_user: n.related_user,
-        }));
-
-        console.log('[Notifications] ✅ Normalized notifications:', {
-          count: normalized.length,
-          unreadCount: normalized.filter(n => !n.isRead).length,
-          types: normalized.map(n => n.type),
-        });
-
-        setNotifications(
-          [...normalized, ...localItems].sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          )
-        );
-      } else {
-        setNotifications(localItems);
-      }
-    } catch (error) {
-      console.error('[Notifications] ❌ Error loading notifications:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadNotifications();
-  };
+    void loadNotifications();
+  }, [loadNotifications]);
 
   const handleMarkAllAsRead = () => {
     setShowMarkAllModal(true);
@@ -561,40 +582,13 @@ export default function NotificationsScreen() {
     );
   };
 
-  if (!user) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-          <Text style={styles.headerTitle}>Notifications</Text>
-        </View>
-
-        <View style={styles.loginPrompt}>
-          <View style={styles.loginIconContainer}>
-            <Feather name="bell" size={48} color="#60a5fa" />
-          </View>
-          <Text style={styles.loginPromptTitle}>Stay in the loop</Text>
-          <Text style={styles.loginPromptText}>
-            Sign in to see your notifications
-          </Text>
-          <TouchableOpacity
-            style={styles.loginButton}
-            onPress={() => router.push('/auth/login')}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.loginButtonText}>Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   const unreadCount = notifications.filter(n => !n.isRead).length;
   const filteredNotifications = getFilteredNotifications();
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { paddingTop: insetsTop + 8 }]}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Notifications</Text>
           {isConnected && (

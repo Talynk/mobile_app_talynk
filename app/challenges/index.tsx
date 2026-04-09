@@ -29,6 +29,7 @@ import {
   isChallengeParticipationOpen,
   isChallengeUpcoming,
 } from '@/lib/utils/challenge';
+import { safeRouterBack } from '@/lib/utils/navigation';
 
 const COLORS = {
   light: {
@@ -367,7 +368,7 @@ export default function ChallengesScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: C.border }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => safeRouterBack(router, '/(tabs)/index' as any)}>
           <MaterialIcons name="arrow-back" size={24} color={C.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: C.text }]}>Competitions</Text>

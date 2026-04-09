@@ -1,468 +1,372 @@
-import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
   ActivityIndicator,
-  TouchableOpacity,
-  StatusBar,
-  RefreshControl,
   Dimensions,
-  Image,
-  Modal,
   FlatList,
-  Share,
-  Alert,
-  useWindowDimensions,
+  RefreshControl,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { postsApi, categoriesApi, followsApi, likesApi } from '@/lib/api';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Post } from '@/types';
-import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
-import { sharePost } from '@/lib/post-share';
-import { filterHlsReady } from '@/lib/utils/post-filter';
-import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
-import ReportModal from '@/components/ReportModal';
-import CommentsModal from '@/components/CommentsModal';
-import { useAuth } from '@/lib/auth-context';
-import { useCache } from '@/lib/cache-context';
-import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { setPostLikeCounts } from '@/lib/store/slices/likesSlice';
-import { useLikesManager } from '@/lib/hooks/use-likes-manager';
-import { useCreateFocus } from '@/lib/create-focus-context';
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  shouldPreloadFeedVideo,
-  VIDEO_FEED_INITIAL_NUM_TO_RENDER,
-  VIDEO_FEED_MAX_TO_RENDER_PER_BATCH,
-  VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
-  VIDEO_FEED_WINDOW_SIZE,
-} from '@/lib/utils/video-feed';
+import { Image as ExpoImage } from 'expo-image';
+import { router, useLocalSearchParams } from 'expo-router';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { categoriesApi, postsApi } from '@/lib/api';
+import { setExplorePostsCache } from '@/lib/explore-posts-cache';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
-import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
-import { warmFeedWindow } from '@/lib/feed-window-warmup';
-import { runQuerySafely } from '@/lib/utils/query-cancellation';
+import { getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { safeRouterBack } from '@/lib/utils/navigation';
+import { normalizePost } from '@/lib/utils/normalize-post';
+import { Post } from '@/types';
 
-const POSTS_PER_PAGE = 20;
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const FULLSCREEN_HEADER_PX = 64;
+const POSTS_PER_PAGE = 24;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const COLORS = {
-  dark: {
-    background: '#000000',
-    card: '#1a1a1a',
-    border: '#2a2a2a',
-    text: '#f3f4f6',
-    textSecondary: '#9ca3af',
-    primary: '#60a5fa',
-    overlay: 'rgba(0,0,0,0.5)',
-  },
-};
+type CategoryTarget =
+  | { id: number; mode: 'category'; name: string }
+  | { id: number; mode: 'subcategory'; name: string };
+
+function normalizeCategoryTagName(value?: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function dedupePostsById(items: Post[]) {
+  const byId = new Map<string, Post>();
+
+  items.forEach((post) => {
+    if (!post?.id || byId.has(post.id)) {
+      return;
+    }
+
+    byId.set(post.id, post);
+  });
+
+  return Array.from(byId.values());
+}
+
+const CategoryGridCard = React.memo(function CategoryGridCard({
+  item,
+  onPress,
+}: {
+  item: Post;
+  onPress: (postId: string) => void;
+}) {
+  const isVideo = item.type === 'video' || !!item.video_url;
+  const thumbnailUrl =
+    getThumbnailUrl(item) ||
+    getFileUrl((item as any).image || (item as any).thumbnail || '');
+
+  return (
+    <TouchableOpacity style={styles.postCard} activeOpacity={0.9} onPress={() => onPress(item.id)}>
+      {thumbnailUrl ? (
+        <ExpoImage
+          source={{ uri: thumbnailUrl }}
+          style={styles.postMedia}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={0}
+        />
+      ) : (
+        <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
+          <MaterialIcons name={isVideo ? 'video-library' : 'image'} size={28} color="#444" />
+        </View>
+      )}
+
+      <View style={styles.postOverlay}>
+        <View style={styles.postStats}>
+          <Feather name="heart" size={14} color="#fff" />
+          <Text style={styles.postStatText}>{item.likes || item.like_count || 0}</Text>
+        </View>
+        {isVideo ? (
+          <View style={styles.playIcon}>
+            <Feather name="play" size={16} color="#fff" />
+          </View>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+});
 
 export default function CategoryScreen() {
   const { name } = useLocalSearchParams();
   const categoryName = Array.isArray(name) ? name[0] : (name as string);
   const categoryDisplayName = getCategoryDisplayName(categoryName);
-  const C = COLORS.dark;
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
-  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
+  const normalizedRequestedName = normalizeCategoryTagName(categoryName);
 
-  const [fullscreenIndex, setFullscreenIndex] = useState(0);
-  const [showFullscreen, setShowFullscreen] = useState(false);
-  const [isFullscreenTransitioning, setIsFullscreenTransitioning] = useState(false);
-  const fullscreenListRef = useRef<FlatList>(null);
-  const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [reportPostId, setReportPostId] = useState<string | null>(null);
-  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
-  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
-  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const loadVersionRef = useRef(0);
 
-  const { user } = useAuth();
-  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
-  const dispatch = useAppDispatch();
-  const likesManager = useLikesManager();
-  const likedPosts = useAppSelector(state => state.likes.likedPosts);
-  const { isCreateFocused } = useCreateFocus();
-  const queryClient = useQueryClient();
-
-  const fullscreenViewableHandler = useRef(({ viewableItems }: any) => {
-    if (!viewableItems || viewableItems.length === 0) return;
-    const mostVisible = viewableItems.reduce((best: any, item: any) =>
-      item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
-    , null as any);
-    const idx = mostVisible?.index ?? viewableItems[0]?.index;
-    if (idx !== undefined && idx !== null) {
-      setIsFullscreenTransitioning(false);
-      setFullscreenIndex(idx);
-    }
-  }).current;
-
-  const fullscreenViewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 60,
-    minimumViewTime: 100,
-  }).current;
-
-  // Cache categories globally — shared across all category screens, long TTL
   const { data: categoriesData, isLoading: categoryLoading } = useQuery({
     queryKey: ['categories'],
     queryFn: async () => {
-      const res = await categoriesApi.getAll();
-      return res.status === 'success' ? (res.data?.categories || []) : [];
+      const response = await categoriesApi.getAll();
+      return response.status === 'success' ? response.data?.categories || [] : [];
     },
     staleTime: 10 * 60_000,
     gcTime: 30 * 60_000,
   });
 
-  const categoryId = useMemo(() => {
-    if (!categoriesData || !categoryName) return null;
-    const match = categoriesData.find(
-      (c: any) => c.name?.toLowerCase() === categoryName.toLowerCase()
-    );
-    return match?.id ?? null;
-  }, [categoriesData, categoryName]);
+  const categoryTarget = useMemo(() => {
+    if (!categoriesData || !categoryName) {
+      return null;
+    }
 
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading: postsLoading,
-    isRefetching,
-    refetch,
-    isError,
-  } = useInfiniteQuery({
-    queryKey: ['categoryPosts', categoryId],
-    enabled: categoryId !== null,
-    queryFn: async ({ pageParam = 1 }) => {
-      const res = await postsApi.getByCategory(categoryId!, pageParam as number, POSTS_PER_PAGE);
-      if (res.status !== 'success') throw new Error(res.message);
-      const rawPosts = res.data?.posts || [];
-      primePostDetailsCache(rawPosts);
-      const posts = filterHlsReady(rawPosts) as Post[];
-      const pagination = res.data?.pagination || {};
-      const hasNext = pagination.hasNextPage !== false && rawPosts.length === POSTS_PER_PAGE;
-      return { posts, nextPage: hasNext ? (pageParam as number) + 1 : undefined };
+    for (const category of categoriesData) {
+      const categoryRawName = category?.name;
+      if (
+        normalizeCategoryTagName(categoryRawName) === normalizedRequestedName ||
+        normalizeCategoryTagName(getCategoryDisplayName(categoryRawName)) === normalizedRequestedName
+      ) {
+        return { id: category.id, mode: 'category', name: categoryRawName } satisfies CategoryTarget;
+      }
+
+      const children = Array.isArray(category?.children) ? category.children : [];
+      const matchingChild = children.find((child: any) => {
+        const childRawName = child?.name;
+        return (
+          normalizeCategoryTagName(childRawName) === normalizedRequestedName ||
+          normalizeCategoryTagName(getCategoryDisplayName(childRawName)) === normalizedRequestedName
+        );
+      });
+
+      if (matchingChild) {
+        return { id: matchingChild.id, mode: 'subcategory', name: matchingChild.name } satisfies CategoryTarget;
+      }
+    }
+
+    return null;
+  }, [categoriesData, categoryName, normalizedRequestedName]);
+
+  const loadCategoryPosts = useCallback(
+    async (forceRefresh = false) => {
+      if (!categoryTarget) {
+        setPosts([]);
+        setLoadingPosts(false);
+        setRefreshing(false);
+        return;
+      }
+
+      const loadVersion = ++loadVersionRef.current;
+      const shouldShowLoader = forceRefresh || posts.length === 0;
+
+      try {
+        setError(null);
+        if (shouldShowLoader) {
+          setLoadingPosts(true);
+        }
+
+        const queryOptions =
+          categoryTarget.mode === 'subcategory'
+            ? { subcategory_id: categoryTarget.id, status: 'active' as const }
+            : { category_id: categoryTarget.id, status: 'active' as const };
+
+        const seen = new Set<string>();
+        const mergedPosts: Post[] = [];
+        let page = 1;
+        let keepGoing = true;
+        let firstBatchCommitted = false;
+
+        while (keepGoing) {
+          const response = await postsApi.getAll(page, POSTS_PER_PAGE, queryOptions);
+          if (response.status !== 'success') {
+            throw new Error(response.message || 'Failed to load posts');
+          }
+
+          const rawPosts = response.data?.posts || [];
+          const normalizedPage = dedupePostsById(
+            filterSecondarySurfacePosts(rawPosts.map((post: any) => normalizePost(post)))
+          ).filter((post) => {
+            if (!post?.id || seen.has(post.id)) {
+              return false;
+            }
+            return true;
+          });
+
+          normalizedPage.forEach((post) => {
+            seen.add(post.id);
+            mergedPosts.push(post);
+          });
+
+          if (loadVersion !== loadVersionRef.current) {
+            return;
+          }
+
+          if (normalizedPage.length > 0) {
+            primePostDetailsCache(normalizedPage);
+            void ExpoImage.prefetch(
+              normalizedPage
+                .map((post) => getThumbnailUrl(post) || getFileUrl((post as any).image || (post as any).thumbnail || ''))
+                .filter((url): url is string => !!url),
+              'memory-disk',
+            ).catch(() => {});
+            setPosts([...mergedPosts]);
+          }
+
+          if (!firstBatchCommitted) {
+            firstBatchCommitted = true;
+            setLoadingPosts(false);
+          }
+
+          const pagination = response.data?.pagination || {};
+          const hasNextPage =
+            pagination.hasNextPage === true ||
+            pagination.hasNext === true ||
+            rawPosts.length === POSTS_PER_PAGE;
+
+          if (!hasNextPage) {
+            keepGoing = false;
+          } else {
+            page += 1;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+
+        if (loadVersion === loadVersionRef.current && mergedPosts.length === 0) {
+          setPosts([]);
+        }
+      } catch (err: any) {
+        if (loadVersion === loadVersionRef.current) {
+          setError(err?.message || 'Failed to load posts');
+        }
+      } finally {
+        if (loadVersion === loadVersionRef.current) {
+          setLoadingPosts(false);
+          setRefreshing(false);
+        }
+      }
     },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage) => lastPage.nextPage,
-    staleTime: 30_000,
-  });
-
-  const posts = data?.pages.flatMap((p) => p.posts) ?? [];
-  const loading = categoryLoading || postsLoading;
-
-  const handlePostPress = useCallback((index: number) => {
-    warmFeedWindow(posts, index);
-    setFullscreenIndex(index);
-    setShowFullscreen(true);
-    setTimeout(() => {
-      fullscreenListRef.current?.scrollToIndex({ index, animated: false });
-    }, 100);
-  }, [posts]);
+    [categoryTarget, posts.length],
+  );
 
   useEffect(() => {
-    if (!showFullscreen || posts.length === 0) {
+    if (!categoryTarget) {
       return;
     }
 
-    warmFeedWindow(posts, Math.max(0, fullscreenIndex));
-  }, [fullscreenIndex, posts, showFullscreen]);
+    void loadCategoryPosts();
+  }, [categoryTarget, loadCategoryPosts]);
 
-  const handleLike = useCallback(async (postId: string) => {
-    if (!user) {
-      Alert.alert('Login Required', 'Please log in to like posts.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Log In', onPress: () => router.push('/auth/login' as any) },
-      ]);
-      return;
-    }
-    await likesManager.toggleLike(postId);
-  }, [user, likesManager]);
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    void loadCategoryPosts(true);
+  }, [loadCategoryPosts]);
 
-  const handleComment = useCallback((postId: string) => {
-    setCommentsPostId(postId);
-    setCommentsModalVisible(true);
-  }, []);
+  const handlePostPress = useCallback(
+    (postId: string) => {
+      setExplorePostsCache(posts);
+      router.push({
+        pathname: '/profile-feed/explore' as any,
+        params: {
+          initialPostId: postId,
+        },
+      });
+    },
+    [posts],
+  );
 
-  const handleShare = useCallback(async (postId: string) => {
-    const post = posts.find(p => p.id === postId);
-    if (post) {
-      try {
-        await sharePost(post);
-      } catch {}
-    }
-  }, [posts]);
+  const renderGridItem = useCallback(
+    ({ item }: { item: Post }) => <CategoryGridCard item={item} onPress={handlePostPress} />,
+    [handlePostPress],
+  );
 
-  const handleReport = useCallback((postId: string) => {
-    if (!user) { router.push('/auth/login' as any); return; }
-    setReportPostId(postId);
-    setReportModalVisible(true);
-  }, [user]);
-
-  const handleFollow = useCallback(async (targetUserId: string) => {
-    if (!user) return;
-    seedFollowingFeedCache(user.id, targetUserId, posts);
-    updateFollowedUsers(targetUserId, true);
-    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
-    try {
-      const res = await followsApi.follow(targetUserId);
-      if (res.status !== 'success') {
-        updateFollowedUsers(targetUserId, false);
-        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
-        removeUserFromFollowingFeedCache(user.id, targetUserId);
-      } else {
-        void syncFollowedUsersFromServer();
-        void prefetchFollowingFeed(user.id);
-      }
-    } catch {
-      updateFollowedUsers(targetUserId, false);
-      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
-      removeUserFromFollowingFeedCache(user.id, targetUserId);
-    }
-  }, [user, posts, syncFollowedUsersFromServer, updateFollowedUsers]);
-
-  const handleUnfollow = useCallback(async (targetUserId: string) => {
-    if (!user) return;
-    removeUserFromFollowingFeedCache(user.id, targetUserId);
-    updateFollowedUsers(targetUserId, false);
-    setUserFollowStatus(prev => ({ ...prev, [targetUserId]: false }));
-    try {
-      const res = await followsApi.unfollow(targetUserId);
-      if (res.status !== 'success') {
-        updateFollowedUsers(targetUserId, true);
-        setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
-        seedFollowingFeedCache(user.id, targetUserId, posts);
-      } else {
-        void syncFollowedUsersFromServer();
-      }
-    } catch {
-      updateFollowedUsers(targetUserId, true);
-      setUserFollowStatus(prev => ({ ...prev, [targetUserId]: true }));
-      seedFollowingFeedCache(user.id, targetUserId, posts);
-    }
-  }, [user, posts, syncFollowedUsersFromServer, updateFollowedUsers]);
-
-  const PostCard = useCallback(({ item, index }: { item: Post; index: number }) => {
-    const isVideo = item.type === 'video' || !!(item.video_url);
-    const serverThumbnail = getThumbnailUrl(item);
-    const fallbackImageUrl = getFileUrl((item as any).image || (item as any).thumbnail || '');
-    const thumbnailUrl = serverThumbnail || fallbackImageUrl;
-
+  if (categoryLoading || (loadingPosts && posts.length === 0)) {
     return (
-      <TouchableOpacity
-        style={styles.postCard}
-        activeOpacity={0.9}
-        onPress={() => handlePostPress(index)}
-      >
-        {thumbnailUrl ? (
-          <Image source={{ uri: thumbnailUrl }} style={styles.postMedia} resizeMode="cover" />
-        ) : (
-          <View style={[styles.postMedia, styles.noMediaPlaceholder]}>
-            <MaterialIcons name={isVideo ? 'video-library' : 'image'} size={28} color="#444" />
-          </View>
-        )}
-        <View style={styles.postOverlay}>
-          <View style={styles.postStats}>
-            <Feather name="heart" size={14} color="#fff" />
-            <Text style={styles.postStatText}>{item.likes || item.like_count || 0}</Text>
-          </View>
-          {isVideo && (
-            <View style={styles.playIcon}>
-              <Feather name="play" size={16} color="#fff" />
-            </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  }, [handlePostPress]);
-
-  if (loading && posts.length === 0) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={[styles.header, { paddingTop: insets.top > 0 ? 0 : 8 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
-          <View style={{ width: 40 }} />
+          <View style={styles.headerSpacer} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={C.primary} />
-          <Text style={[styles.loadingText, { color: C.text }]}>Loading posts...</Text>
+          <ActivityIndicator size="large" color="#60a5fa" />
+          <Text style={styles.loadingText}>Loading posts...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (isError && posts.length === 0) {
+  if (error && posts.length === 0) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <View style={[styles.header, { paddingTop: insets.top > 0 ? 0 : 8 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)} style={styles.backButton}>
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
-          <View style={{ width: 40 }} />
+          <View style={styles.headerSpacer} />
         </View>
         <View style={styles.errorContainer}>
-          <MaterialIcons name="error-outline" size={48} color={C.textSecondary} />
-          <Text style={[styles.errorText, { color: C.text }]}>Failed to load posts</Text>
+          <MaterialIcons name="error-outline" size={48} color="#9ca3af" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => void loadCategoryPosts(true)}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" />
 
       <View style={[styles.header, { paddingTop: insets.top > 0 ? 0 : 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/(tabs)/explore' as any)} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>#{categoryDisplayName}</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <FlatList
         data={posts}
-        renderItem={({ item, index }) => (
-          <View style={styles.gridCard}>
-            <PostCard item={item} index={index} />
-          </View>
-        )}
+        renderItem={renderGridItem}
         keyExtractor={(item) => item.id}
         numColumns={3}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.gridContainer}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching && !isFetchingNextPage}
-            onRefresh={() => refetch()}
-            tintColor={C.primary}
-            colors={[C.primary]}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#60a5fa"
+            colors={['#60a5fa']}
           />
         }
-        onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) {
-            void runQuerySafely(() => fetchNextPage(), 'category grid pagination');
-          }
-        }}
-        onEndReachedThreshold={0.5}
+        initialNumToRender={12}
+        maxToRenderPerBatch={18}
+        windowSize={9}
+        updateCellsBatchingPeriod={30}
+        removeClippedSubviews={false}
+        showsVerticalScrollIndicator={false}
         ListFooterComponent={
-          isFetchingNextPage ? (
+          loadingPosts && posts.length > 0 ? (
             <View style={styles.footerLoader}>
-              <ActivityIndicator size="small" color={C.primary} />
+              <ActivityIndicator size="small" color="#60a5fa" />
             </View>
           ) : null
         }
         ListEmptyComponent={
-          !loading ? (
+          !loadingPosts ? (
             <View style={styles.emptyContainer}>
-              <MaterialIcons name="video-library" size={64} color={C.textSecondary} />
-              <Text style={[styles.emptyText, { color: C.textSecondary }]}>
-                No posts in this category yet
-              </Text>
+              <MaterialIcons name="video-library" size={64} color="#9ca3af" />
+              <Text style={styles.emptyText}>No posts in this tag yet</Text>
             </View>
           ) : null
         }
-      />
-
-      <Modal
-        visible={showFullscreen}
-        animationType="fade"
-        transparent={false}
-        onRequestClose={() => setShowFullscreen(false)}
-      >
-        <SafeAreaView style={[styles.fullscreenContainer, { backgroundColor: C.background }]} edges={['top']}>
-          <View style={styles.fullscreenHeader}>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => setShowFullscreen(false)}
-            >
-              <Feather name="x" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Text style={styles.positionText}>
-              {fullscreenIndex + 1} / {posts.length}
-            </Text>
-          </View>
-
-          <FlatList
-            ref={fullscreenListRef}
-            data={posts}
-            renderItem={({ item, index }) => {
-              const isActive = fullscreenIndex === index;
-              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, {
-                disabled: isCreateFocused || isActive,
-              });
-              return (
-                <FullscreenFeedPostItem
-                  item={item}
-                  index={index}
-                  onLike={handleLike}
-                  onComment={handleComment}
-                  onShare={handleShare}
-                  onReport={handleReport}
-                  onFollow={handleFollow}
-                  onUnfollow={handleUnfollow}
-                  isLiked={item.is_liked ?? likedPosts.includes(item.id)}
-                  isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
-                  isActive={isActive}
-                  suspendPlayback={isFullscreenTransitioning}
-                  shouldPreload={shouldPreload}
-                  availableHeight={fullscreenAvailableHeight}
-                />
-              );
-            }}
-            keyExtractor={(item) => item.id}
-            pagingEnabled
-            snapToInterval={fullscreenAvailableHeight}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            windowSize={VIDEO_FEED_WINDOW_SIZE}
-            initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
-            maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
-            removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
-            onViewableItemsChanged={fullscreenViewableHandler}
-            viewabilityConfig={fullscreenViewabilityConfig}
-            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
-            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
-            onMomentumScrollEnd={(event) => {
-              const idx = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
-              setFullscreenIndex(Math.max(0, Math.min(idx, posts.length - 1)));
-              setIsFullscreenTransitioning(false);
-              if (hasNextPage && !isFetchingNextPage) {
-                if (posts.length - idx <= 3) {
-                  void runQuerySafely(() => fetchNextPage(), 'category fullscreen pagination');
-                }
-              }
-            }}
-            getItemLayout={(_, index) => ({
-              length: fullscreenAvailableHeight,
-              offset: fullscreenAvailableHeight * index,
-              index,
-            })}
-          />
-        </SafeAreaView>
-      </Modal>
-
-      <ReportModal
-        isVisible={reportModalVisible}
-        postId={reportPostId}
-        onClose={() => { setReportModalVisible(false); setReportPostId(null); }}
-        onReported={() => { setReportModalVisible(false); setReportPostId(null); }}
-      />
-      <CommentsModal
-        visible={commentsModalVisible}
-        postId={commentsPostId || ''}
-        onClose={() => { setCommentsModalVisible(false); setCommentsPostId(null); }}
       />
     </SafeAreaView>
   );
@@ -471,6 +375,7 @@ export default function CategoryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
@@ -493,6 +398,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
+  headerSpacer: {
+    width: 40,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -501,42 +409,43 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
+    color: '#f3f4f6',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 24,
   },
   errorText: {
-    fontSize: 16,
     marginTop: 16,
-    marginBottom: 24,
+    marginBottom: 20,
+    color: '#f3f4f6',
+    fontSize: 16,
     textAlign: 'center',
   },
   retryButton: {
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
+    backgroundColor: '#60a5fa',
   },
   retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#000',
+    fontSize: 15,
+    fontWeight: '700',
   },
   gridContainer: {
     padding: 8,
+    paddingBottom: 24,
   },
   gridRow: {
     justifyContent: 'space-between',
   },
-  gridCard: {
-    width: (SCREEN_WIDTH - 24) / 3,
-    marginHorizontal: 4,
-    marginBottom: 8,
-  },
   postCard: {
+    width: (SCREEN_WIDTH - 24) / 3,
     aspectRatio: 9 / 16,
+    marginBottom: 8,
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#1a1a1a',
@@ -552,20 +461,19 @@ const styles = StyleSheet.create({
   },
   postOverlay: {
     position: 'absolute',
-    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
     padding: 6,
     flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   postStats: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     paddingHorizontal: 6,
     paddingVertical: 4,
     borderRadius: 4,
@@ -579,7 +487,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -588,39 +496,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingVertical: 80,
   },
   emptyText: {
+    color: '#9ca3af',
     fontSize: 16,
     marginTop: 16,
-  },
-  fullscreenContainer: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-  },
-  fullscreenHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  positionText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

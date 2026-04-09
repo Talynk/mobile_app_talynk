@@ -14,6 +14,48 @@ const MAX_VIDEO_DIMENSION = 1280;
 const MAX_UPLOAD_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1250;
 
+function createUploadAbortError(): Error {
+  const e = new Error('Upload cancelled');
+  e.name = 'AbortError';
+  return e;
+}
+
+/** Guess an order-of-magnitude upload rate before any bytes move (sparse native progress). */
+export function estimateWarmupUploadBytesPerSecond(totalBytes: number): number {
+  if (totalBytes <= 0) return 256 * 1024;
+  const bySize = totalBytes / 75;
+  return Math.min(Math.max(bySize, 48 * 1024), 12 * 1024 * 1024);
+}
+
+/**
+ * Native progress is often bursty; EMA stays 0 until the second tick. Blend session-average
+ * (bytes / elapsed) with instantaneous smoothing so speed/ETA stay visible and sane.
+ */
+function blendedBytesPerSecond(params: {
+  smoothedInstant: number;
+  bestWrittenBytes: number;
+  elapsedMs: number;
+  totalBytes: number;
+}): { bps: number; isEstimated: boolean } {
+  const { smoothedInstant, bestWrittenBytes, elapsedMs, totalBytes } = params;
+  const elapsedSec = Math.max(elapsedMs / 1000, 0.001);
+  const sessionAvg = bestWrittenBytes > 0 ? bestWrittenBytes / elapsedSec : 0;
+  const fromSamples = Math.max(
+    Number.isFinite(smoothedInstant) ? smoothedInstant : 0,
+    Number.isFinite(sessionAvg) ? sessionAvg : 0
+  );
+
+  if (fromSamples > 0) {
+    return { bps: fromSamples, isEstimated: false };
+  }
+
+  if (totalBytes > 0) {
+    return { bps: estimateWarmupUploadBytesPerSecond(totalBytes), isEstimated: true };
+  }
+
+  return { bps: 0, isEstimated: true };
+}
+
 type FileInfoWithSize = {
   exists: boolean;
   size?: number;
@@ -29,6 +71,36 @@ export type PreparedVideoAsset = {
   originalSizeBytes: number;
   uploadSizeBytes: number;
   durationSeconds: number;
+};
+
+export type UploadProgressSnapshot = {
+  attempt: number;
+  maxAttempts: number;
+  writtenBytes: number;
+  bestWrittenBytes: number;
+  totalBytes: number;
+  currentAttemptPercent: number;
+  overallPercent: number;
+  /** Blended rate for UI: max(instant EMA, session average), or a size-based warmup before first bytes. */
+  bytesPerSecond: number;
+  etaSeconds: number;
+  elapsedMs: number;
+  /** True when speed/ETA use a heuristic (no real throughput sample yet). */
+  speedIsEstimated?: boolean;
+};
+
+export type UploadRetrySnapshot = {
+  attempt: number;
+  maxAttempts: number;
+  retryDelayMs: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  errorMessage: string;
+};
+
+export type UploadPreparedVideoCallbacks = {
+  onProgress?: (snapshot: UploadProgressSnapshot) => void;
+  onRetry?: (snapshot: UploadRetrySnapshot) => void;
 };
 
 function ensureFileUri(uri: string): string {
@@ -175,12 +247,80 @@ export async function prepareVideoForUpload(
 export async function uploadPreparedVideo(
   uploadUrl: string,
   fileUri: string,
-  onProgress?: (written: number, total: number) => void
+  callbacks?: UploadPreparedVideoCallbacks,
+  abortSignal?: AbortSignal
 ) {
+  const fileInfo = await getSafeFileInfo(fileUri);
+  const fallbackTotalBytes = Math.max(0, fileInfo.size || 0);
+  const startedAt = Date.now();
+  let bestWrittenBytes = 0;
+  let smoothedBytesPerSecond = 0;
   let lastError: unknown;
 
+  const emitUploadSnapshot = (
+    attempt: number,
+    now: number,
+    normalizedTotal: number,
+    cappedWritten: number
+  ) => {
+    const elapsedMs = now - startedAt;
+    const currentAttemptPercent =
+      normalizedTotal > 0 ? (cappedWritten / normalizedTotal) * 100 : 0;
+    const overallPercent =
+      normalizedTotal > 0 ? (bestWrittenBytes / normalizedTotal) * 100 : currentAttemptPercent;
+
+    const { bps: displayBps, isEstimated } = blendedBytesPerSecond({
+      smoothedInstant: smoothedBytesPerSecond,
+      bestWrittenBytes,
+      elapsedMs,
+      totalBytes: normalizedTotal,
+    });
+
+    const remaining = Math.max(0, normalizedTotal - bestWrittenBytes);
+    const etaSeconds =
+      displayBps > 0 && normalizedTotal > 0
+        ? Math.max(remaining / displayBps, 0)
+        : 0;
+
+    callbacks?.onProgress?.({
+      attempt,
+      maxAttempts: MAX_UPLOAD_ATTEMPTS,
+      writtenBytes: cappedWritten,
+      bestWrittenBytes,
+      totalBytes: normalizedTotal,
+      currentAttemptPercent,
+      overallPercent,
+      bytesPerSecond: displayBps,
+      etaSeconds,
+      elapsedMs,
+      speedIsEstimated: isEstimated,
+    });
+  };
+
+  emitUploadSnapshot(1, Date.now(), fallbackTotalBytes, 0);
+
   for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+    let lastTickAt = Date.now();
+    let lastWrittenBytes = 0;
+    let lastTotalBytes = fallbackTotalBytes;
+    let uploadTickTimer: ReturnType<typeof setInterval> | null = null;
+
+    if (abortSignal?.aborted) {
+      throw createUploadAbortError();
+    }
+
     try {
+      uploadTickTimer = setInterval(() => {
+        if (abortSignal?.aborted) return;
+        const now = Date.now();
+        const normalizedTotal = Math.max(0, lastTotalBytes);
+        const cappedWritten =
+          normalizedTotal > 0
+            ? Math.min(bestWrittenBytes, normalizedTotal)
+            : bestWrittenBytes;
+        emitUploadSnapshot(attempt, now, normalizedTotal, cappedWritten);
+      }, 400);
+
       const response = await backgroundUpload(
         uploadUrl,
         fileUri,
@@ -192,8 +332,40 @@ export async function uploadPreparedVideo(
             'Content-Type': 'video/mp4',
           },
         },
-        onProgress
+        (written, total) => {
+          const now = Date.now();
+          const normalizedTotal = Math.max(0, Number(total) || fallbackTotalBytes);
+          lastTotalBytes = normalizedTotal;
+          const normalizedWritten = Math.max(0, Number(written) || 0);
+          const cappedWritten =
+            normalizedTotal > 0 ? Math.min(normalizedWritten, normalizedTotal) : normalizedWritten;
+
+          if (cappedWritten > bestWrittenBytes) {
+            bestWrittenBytes = cappedWritten;
+          }
+
+          const deltaBytes = Math.max(0, cappedWritten - lastWrittenBytes);
+          const deltaMs = Math.max(1, now - lastTickAt);
+          if (deltaBytes > 0) {
+            const instantaneousBytesPerSecond = deltaBytes / (deltaMs / 1000);
+            smoothedBytesPerSecond =
+              smoothedBytesPerSecond > 0
+                ? smoothedBytesPerSecond * 0.75 + instantaneousBytesPerSecond * 0.25
+                : instantaneousBytesPerSecond;
+          }
+
+          lastWrittenBytes = cappedWritten;
+          lastTickAt = now;
+
+          emitUploadSnapshot(attempt, now, normalizedTotal, cappedWritten);
+        },
+        abortSignal
       );
+
+      if (uploadTickTimer) {
+        clearInterval(uploadTickTimer);
+        uploadTickTimer = null;
+      }
 
       const statusCode = Number(response?.status || response?.responseCode || 0);
       if (statusCode >= 200 && statusCode < 300) {
@@ -202,9 +374,29 @@ export async function uploadPreparedVideo(
 
       throw new Error(statusCode ? `Upload failed with status ${statusCode}` : 'Upload failed');
     } catch (error) {
+      if (uploadTickTimer) {
+        clearInterval(uploadTickTimer);
+        uploadTickTimer = null;
+      }
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
+      const msg = error instanceof Error ? error.message : String(error);
+      if (/cancel/i.test(msg) || /abort/i.test(msg)) {
+        throw createUploadAbortError();
+      }
       lastError = error;
       if (attempt < MAX_UPLOAD_ATTEMPTS) {
-        await wait(RETRY_DELAY_MS * attempt);
+        const retryDelayMs = RETRY_DELAY_MS * attempt;
+        callbacks?.onRetry?.({
+          attempt,
+          maxAttempts: MAX_UPLOAD_ATTEMPTS,
+          retryDelayMs,
+          uploadedBytes: bestWrittenBytes,
+          totalBytes: fallbackTotalBytes,
+          errorMessage: error instanceof Error ? error.message : 'Upload interrupted',
+        });
+        await wait(retryDelayMs);
       }
     }
   }

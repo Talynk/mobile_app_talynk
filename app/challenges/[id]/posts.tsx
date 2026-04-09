@@ -38,6 +38,8 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
@@ -209,9 +211,9 @@ export default function ChallengePostsScreen() {
           if (postId) map[postId] = likes;
         });
 
-        const list = await prepareRenderableChallengePosts(response.data?.posts || [], {
+        const list = filterSecondarySurfacePosts(await prepareRenderableChallengePosts(response.data?.posts || [], {
           preserveUnavailableVideos: true,
-        });
+        }));
         const postsList = sortChallengePosts(list, map, ended);
         const missingExpectedPosts =
           page === 1 && expectedPostsCount > 0 && postsList.length < expectedPostsCount;
@@ -228,7 +230,7 @@ export default function ChallengePostsScreen() {
 
         if (shouldUseFallback) {
           const fallbackData = await loadFallbackChallengePosts(String(id));
-          const filteredFallbackPosts = filterFallbackPosts(fallbackData.posts);
+          const filteredFallbackPosts = filterSecondarySurfacePosts(filterFallbackPosts(fallbackData.posts));
           const sortedFallbackPosts = sortChallengePosts(
             filteredFallbackPosts as Post[],
             fallbackData.likesMap,
@@ -551,7 +553,7 @@ export default function ChallengePostsScreen() {
       <StatusBar barStyle="light-content" />
 
       <View style={styles.screenHeader}>
-        <TouchableOpacity style={styles.headerBackButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.headerBackButton} onPress={() => safeRouterBack(router, '/challenges/index' as any)}>
           <Feather name="arrow-left" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={styles.screenHeaderText}>

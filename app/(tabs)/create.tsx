@@ -46,8 +46,10 @@ import Constants from 'expo-constants';
 import { videoReadyTracker } from '@/lib/video-ready-tracker';
 import {
   cleanupPreparedVideo,
+  estimateWarmupUploadBytesPerSecond,
   prepareVideoForUpload,
   PreparedVideoAsset,
+  UploadProgressSnapshot,
   uploadPreparedVideo,
 } from '@/lib/utils/video-upload';
 import { useAppActive } from '@/lib/hooks/use-app-active';
@@ -62,6 +64,7 @@ import {
 } from '@/lib/create-screen-cache';
 import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import websocketService from '@/lib/websocket-service';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -121,6 +124,9 @@ async function _legacyMultipartUpload(
   setThumbnailUri: (v: string | null) => void,
   setIsVideoPlaying: (v: boolean) => void,
   setCapturedImageUri: (v: string | null) => void,
+  registerActiveXhr?: (xhr: XMLHttpRequest | null) => void,
+  uploadWasCancelled?: () => boolean,
+  onMultipartProgress?: (info: { percent: number; loaded: number; total: number; startedAt: number }) => void,
 ): Promise<void> {
   return new Promise<void>((resolveUpload) => {
     const formData = new FormData();
@@ -132,12 +138,14 @@ async function _legacyMultipartUpload(
     formData.append('file', fileData as any);
 
     const xhr = new XMLHttpRequest();
+    registerActiveXhr?.(xhr);
     const apiUrl = `${API_BASE_URL}/api/posts`;
     xhr.open('POST', apiUrl);
     xhr.setRequestHeader('Accept', 'application/json');
 
     AsyncStorage.getItem('talynk_token').then((authToken) => {
       if (!authToken) {
+        registerActiveXhr?.(null);
         setUploading(false);
         setUploadProgress(0);
         Alert.alert('Authentication Error', 'Please login again to create posts.');
@@ -148,11 +156,20 @@ async function _legacyMultipartUpload(
       xhr.setRequestHeader('Authorization', `Bearer ${authToken.trim()}`);
 
       let lastLoggedPercent = -10;
-      xhr.upload.onprogress = async (event) => {
+      let multipartStartedAt = 0;
+      xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
           const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           setUploadProgress(percent);
-          await uploadNotificationService.showUploadProgress(percent, fileName);
+          onMultipartProgress?.({
+            percent,
+            loaded: event.loaded,
+            total: event.total,
+            startedAt: multipartStartedAt,
+          });
+          void uploadNotificationService.showUploadProgress(percent, fileName, {
+            stage: 'Uploading...',
+          });
           if (percent - lastLoggedPercent >= 10 || percent === 100) {
             console.log(`[Upload] Legacy progress: ${percent}%`);
             lastLoggedPercent = percent;
@@ -161,6 +178,7 @@ async function _legacyMultipartUpload(
       };
 
       xhr.onload = async () => {
+        registerActiveXhr?.(null);
         setUploading(false);
         setUploadProgress(0);
 
@@ -221,15 +239,28 @@ async function _legacyMultipartUpload(
         resolveUpload();
       };
 
-      xhr.onerror = async () => {
+      xhr.onabort = () => {
+        registerActiveXhr?.(null);
         setUploading(false);
         setUploadProgress(0);
+        resolveUpload();
+      };
+
+      xhr.onerror = async () => {
+        registerActiveXhr?.(null);
+        setUploading(false);
+        setUploadProgress(0);
+        if (uploadWasCancelled?.()) {
+          resolveUpload();
+          return;
+        }
         await uploadNotificationService.showUploadError('Network error', fileName);
         Alert.alert('Error', 'Network error. Please check your connection.');
         resolveUpload();
       };
 
       xhr.ontimeout = async () => {
+        registerActiveXhr?.(null);
         setUploading(false);
         setUploadProgress(0);
         await uploadNotificationService.showUploadError('Upload timeout', fileName);
@@ -237,6 +268,7 @@ async function _legacyMultipartUpload(
         resolveUpload();
       };
 
+      multipartStartedAt = Date.now();
       xhr.send(formData);
     });
   });
@@ -270,6 +302,11 @@ export default function CreatePostScreen() {
   const [serverMediaUrl, setServerMediaUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStageText, setUploadStageText] = useState('Preparing upload...');
+  const [uploadSpeedText, setUploadSpeedText] = useState<string | null>(null);
+  const [uploadEtaText, setUploadEtaText] = useState<string | null>(null);
+  const [uploadElapsedText, setUploadElapsedText] = useState<string | null>(null);
+  const [uploadConnectionHint, setUploadConnectionHint] = useState<string | null>(null);
   const [errors, setErrors] = useState<{ [k: string]: string }>({});
   const [accordionOpen, setAccordionOpen] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -346,6 +383,34 @@ export default function CreatePostScreen() {
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
+  const uploadDisplayProgressRef = useRef(0);
+  const uploadToastUpdatedAtRef = useRef(0);
+  const uploadStageRef = useRef('Preparing upload...');
+  const uploadFileNameRef = useRef<string | null>(null);
+  const uploadSessionStartRef = useRef(0);
+  const uploadCancelledRef = useRef(false);
+  const uploadAbortControllerRef = useRef<AbortController | null>(null);
+  const activeXhrRef = useRef<XMLHttpRequest | null>(null);
+
+  useEffect(() => {
+    if (!uploading) {
+      return;
+    }
+    const start = uploadSessionStartRef.current;
+    const tick = () => {
+      const elapsed = Date.now() - start;
+      const totalSeconds = Math.floor(elapsed / 1000);
+      const mins = Math.floor(totalSeconds / 60);
+      const secs = totalSeconds % 60;
+      if (isMountedRef.current) {
+        setUploadElapsedText(`${mins}:${secs.toString().padStart(2, '0')}`);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [uploading]);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -1808,6 +1873,137 @@ export default function CreatePostScreen() {
     });
   };
 
+  /** Always returns a numeric rate string (never null, never a hyphen placeholder). */
+  const formatUploadRate = useCallback((bytesPerSecond: number) => {
+    const bps = Number.isFinite(bytesPerSecond) ? Math.max(0, bytesPerSecond) : 0;
+    if (bps <= 0) {
+      return '0.00 KB/s';
+    }
+    if (bps >= 1024 * 1024) {
+      return `${(bps / (1024 * 1024)).toFixed(2)} MB/s`;
+    }
+    return `${(bps / 1024).toFixed(2)} KB/s`;
+  }, []);
+
+  /** Always returns a numeric duration string (never null). */
+  const formatEta = useCallback((seconds: number | null) => {
+    const sec = seconds != null && Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+    if (sec >= 3600) {
+      const hours = Math.floor(sec / 3600);
+      const mins = Math.ceil((sec % 3600) / 60);
+      return `${hours}h ${mins}m`;
+    }
+    if (sec >= 60) {
+      const mins = Math.floor(sec / 60);
+      const secs = Math.ceil(sec % 60);
+      return `${mins}m ${secs}s`;
+    }
+    return `${Math.ceil(sec)}s`;
+  }, []);
+
+  const resetUploadUi = useCallback(() => {
+    uploadDisplayProgressRef.current = 0;
+    uploadToastUpdatedAtRef.current = 0;
+    uploadStageRef.current = 'Preparing upload...';
+    uploadFileNameRef.current = null;
+    uploadAbortControllerRef.current = null;
+    activeXhrRef.current = null;
+    setUploadProgress(0);
+    setUploadStageText('Preparing upload...');
+    setUploadSpeedText('0.00 KB/s');
+    setUploadEtaText('0s');
+    setUploadElapsedText(null);
+    setUploadConnectionHint(null);
+  }, []);
+
+  const updateUploadUi = useCallback((
+    nextProgress: number,
+    options?: {
+      stage?: string;
+      speedBytesPerSecond?: number;
+      etaSeconds?: number | null;
+      hint?: string | null;
+      force?: boolean;
+      filename?: string;
+    }
+  ) => {
+    const now = Date.now();
+    const clamped = Math.max(0, Math.min(100, Math.round(nextProgress)));
+    const monotonic = options?.force
+      ? clamped
+      : Math.max(uploadDisplayProgressRef.current, clamped);
+
+    if (monotonic !== uploadDisplayProgressRef.current) {
+      uploadDisplayProgressRef.current = monotonic;
+      setUploadProgress(monotonic);
+    }
+
+    if (options?.stage) {
+      uploadStageRef.current = options.stage;
+      setUploadStageText(options.stage);
+    }
+
+    if (options?.filename) {
+      uploadFileNameRef.current = options.filename;
+    }
+
+    if (options && 'speedBytesPerSecond' in options) {
+      const raw = options.speedBytesPerSecond;
+      const bps = raw != null && Number.isFinite(raw) ? Math.max(0, raw) : 0;
+      setUploadSpeedText(formatUploadRate(bps));
+    }
+
+    if (options && 'etaSeconds' in options) {
+      const sec = options.etaSeconds ?? null;
+      const etaVal = sec != null && Number.isFinite(sec) ? Math.max(0, sec) : 0;
+      setUploadEtaText(formatEta(etaVal));
+    }
+
+    if (options && 'hint' in options) {
+      setUploadConnectionHint(options.hint || null);
+    }
+
+    if (options?.hint && now - uploadToastUpdatedAtRef.current >= 12000) {
+      uploadToastUpdatedAtRef.current = now;
+      showToast(options.hint);
+    }
+
+    const speedForNotify =
+      options && 'speedBytesPerSecond' in options
+        ? formatUploadRate(options.speedBytesPerSecond ?? 0)
+        : null;
+    const etaForNotify =
+      options && 'etaSeconds' in options ? formatEta(options.etaSeconds ?? 0) : null;
+
+    if (monotonic === 100 || monotonic <= 5 || options?.force) {
+      void uploadNotificationService.showUploadProgress(monotonic, options?.filename || uploadFileNameRef.current || 'video', {
+        stage: options?.stage || uploadStageRef.current,
+        speedLabel: speedForNotify,
+        etaLabel: etaForNotify ? `ETA ${etaForNotify}` : null,
+      });
+    }
+  }, [formatEta, formatUploadRate]);
+
+  const handleCancelUpload = useCallback(() => {
+    if (!uploading) return;
+    uploadCancelledRef.current = true;
+    try {
+      uploadAbortControllerRef.current?.abort();
+    } catch {
+      /* noop */
+    }
+    try {
+      activeXhrRef.current?.abort();
+    } catch {
+      /* noop */
+    }
+    activeXhrRef.current = null;
+    uploadAbortControllerRef.current = null;
+    setUploading(false);
+    resetUploadUi();
+    showToast('Upload cancelled');
+  }, [uploading, resetUploadUi]);
+
   // --- VALIDATION ---
   const validate = async () => {
     const newErrors: { [k: string]: string } = {};
@@ -1855,8 +2051,8 @@ export default function CreatePostScreen() {
     setThumbnailUri(null);
     setIsVideoPlaying(false);
     setUploading(false);
-    setUploadProgress(0);
-  }, []);
+    resetUploadUi();
+  }, [resetUploadUi]);
 
   // --- SUBMIT ---
   const handleCreatePost = async (status: 'active' | 'draft' = 'active') => {
@@ -1908,25 +2104,19 @@ export default function CreatePostScreen() {
     }
 
     setUploading(true);
-    setUploadProgress(0);
+    resetUploadUi();
+    uploadSessionStartRef.current = Date.now();
+    uploadCancelledRef.current = false;
+    uploadAbortControllerRef.current = new AbortController();
+    setUploadElapsedText('0:00');
 
     let preparedVideo: PreparedVideoAsset | null = null;
 
     try {
-      let lastReportedProgress = -1;
-      const updateProgress = (nextProgress: number) => {
-        const clamped = Math.max(0, Math.min(100, Math.round(nextProgress)));
-        setUploadProgress(clamped);
-        if (clamped === 100 || clamped <= 5 || clamped - lastReportedProgress >= 3 || clamped < lastReportedProgress) {
-          lastReportedProgress = clamped;
-          void uploadNotificationService.showUploadProgress(clamped, 'video');
-        }
-      };
-
       const categoryName = getSelectedCategoryName();
       if (!categoryName || categoryName.trim() === '') {
         setUploading(false);
-        setUploadProgress(0);
+        resetUploadUi();
         Alert.alert('Category Error', 'Selected category name is missing. Please re-select a category and try again.');
         return;
       }
@@ -1938,15 +2128,73 @@ export default function CreatePostScreen() {
 
       const isVideo = !!rawVideoUri;
 
+      if (!isVideo && imageUri) {
+        let imgBytes = 512 * 1024;
+        try {
+          const fi = await FileSystem.getInfoAsync(imageUri);
+          if (fi.exists && typeof fi.size === 'number' && fi.size > 0) {
+            imgBytes = fi.size;
+          }
+        } catch {
+          /* use default */
+        }
+        const iw = estimateWarmupUploadBytesPerSecond(imgBytes);
+        updateUploadUi(0, {
+          stage: 'Preparing upload...',
+          force: true,
+          filename: 'image',
+          speedBytesPerSecond: iw,
+          etaSeconds: iw > 0 ? imgBytes / iw : 0,
+        });
+      }
+
       if (isVideo && rawVideoUri) {
-        updateProgress(4);
+        let approxFileBytes = 5 * 1024 * 1024;
+        try {
+          const fi = await FileSystem.getInfoAsync(rawVideoUri);
+          if (fi.exists && typeof fi.size === 'number' && fi.size > 0) {
+            approxFileBytes = fi.size;
+          }
+        } catch {
+          /* use default */
+        }
+        const prepWarm = estimateWarmupUploadBytesPerSecond(approxFileBytes);
+        const prepEtaSec = approxFileBytes > 0 && prepWarm > 0 ? approxFileBytes / prepWarm : 0;
+        updateUploadUi(0, {
+          stage: 'Preparing upload...',
+          force: true,
+          filename: 'video',
+          speedBytesPerSecond: prepWarm,
+          etaSeconds: prepEtaSec,
+        });
+        updateUploadUi(4, {
+          stage: 'Preparing video...',
+          force: true,
+          filename: 'video',
+          speedBytesPerSecond: prepWarm,
+          etaSeconds: prepEtaSec,
+        });
         preparedVideo = await prepareVideoForUpload(rawVideoUri, (progress) => {
-          updateProgress(4 + progress * 16);
+          const warm = estimateWarmupUploadBytesPerSecond(approxFileBytes);
+          const remainingBytes = (1 - progress) * approxFileBytes;
+          updateUploadUi(4 + progress * 16, {
+            stage: 'Preparing video...',
+            filename: uploadFileNameRef.current || 'video',
+            speedBytesPerSecond: warm,
+            etaSeconds: warm > 0 ? remainingBytes / warm : 0,
+          });
         });
         mediaUri = preparedVideo.uploadUri;
 
         if (preparedVideo.thumbnailUri) {
           setThumbnailUri(preparedVideo.thumbnailUri);
+        }
+
+        if (uploadCancelledRef.current) {
+          await cleanupPreparedVideo(preparedVideo);
+          setUploading(false);
+          resetUploadUi();
+          return;
         }
       }
 
@@ -1957,6 +2205,7 @@ export default function CreatePostScreen() {
 
       const fileName = preparedVideo?.fileName || mediaUri.split('/').pop() || (isVideo ? 'video.mp4' : 'image.jpg');
       const fileType = preparedVideo?.mimeType || 'image/jpeg';
+      uploadFileNameRef.current = fileName;
 
       const mediaInfo = await FileSystem.getInfoAsync(mediaUri);
       if (!mediaInfo.exists) {
@@ -2005,6 +2254,7 @@ export default function CreatePostScreen() {
         });
 
         const xhr = new XMLHttpRequest();
+        activeXhrRef.current = xhr;
         const apiUrl = `${API_BASE_URL}/api/challenges/${effectiveSelectedChallengeId}/posts`;
 
         xhr.open('POST', apiUrl);
@@ -2013,8 +2263,9 @@ export default function CreatePostScreen() {
         const authToken = await AsyncStorage.getItem('talynk_token');
 
         if (!authToken) {
+          activeXhrRef.current = null;
           setUploading(false);
-          setUploadProgress(0);
+          resetUploadUi();
           Alert.alert('Authentication Error', 'Please login again to create posts.');
           router.push('/auth/login');
           return;
@@ -2024,11 +2275,24 @@ export default function CreatePostScreen() {
         xhr.setRequestHeader('Authorization', `Bearer ${cleanToken}`);
 
         let lastLoggedPercent = -10;
-        xhr.upload.onprogress = async (event) => {
+        let challengeUploadStartedAt = 0;
+        xhr.upload.onprogress = (event) => {
           if (event.lengthComputable) {
-            const percent = Math.min(Math.round((event.loaded / event.total) * 100), 100);
-            setUploadProgress(percent);
-            await uploadNotificationService.showUploadProgress(percent, fileName);
+            const loaded = event.loaded;
+            const total = event.total;
+            const percent = Math.min(Math.round((loaded / total) * 100), 100);
+            const elapsedSec = Math.max((Date.now() - challengeUploadStartedAt) / 1000, 0.001);
+            const bps = loaded / elapsedSec;
+            const etaSec = bps > 0 && total > loaded ? (total - loaded) / bps : 0;
+            updateUploadUi(percent, {
+              stage: 'Uploading to competition...',
+              filename: fileName,
+              speedBytesPerSecond: bps,
+              etaSeconds: etaSec,
+            });
+            void uploadNotificationService.showUploadProgress(percent, fileName, {
+              stage: 'Uploading to competition...',
+            });
 
             if (percent - lastLoggedPercent >= 10 || percent === 100) {
               console.log(`Upload progress: ${percent}%`);
@@ -2038,8 +2302,9 @@ export default function CreatePostScreen() {
         };
 
         xhr.onload = async () => {
+          activeXhrRef.current = null;
           setUploading(false);
-          setUploadProgress(0);
+          resetUploadUi();
 
           if (xhr.status === 401) {
             await uploadNotificationService.showUploadError('Authentication failed. Please login again.', fileName);
@@ -2123,7 +2388,7 @@ export default function CreatePostScreen() {
               setServerMediaUrl(null);
               setCapturedImageUri(null);
               setUploading(false);
-              setUploadProgress(0);
+              resetUploadUi();
 
               const isImagePost = createdType === 'image' || createdType === 'photo' || !createdType;
               const successBody = isImagePost
@@ -2137,11 +2402,11 @@ export default function CreatePostScreen() {
                     if (challengeIdToOpen) {
                       router.replace(`/challenges/${challengeIdToOpen}` as any);
                     } else {
-                      router.back();
+                      safeRouterBack(router, '/(tabs)/create' as any);
                     }
                   },
                 },
-                { text: 'Done', onPress: () => router.back() },
+                { text: 'Done', onPress: () => safeRouterBack(router, '/(tabs)/create' as any) },
               ]);
             } else {
               const errorMsg = response.message || 'Failed to create post in challenge';
@@ -2155,13 +2420,24 @@ export default function CreatePostScreen() {
           }
         };
 
-        xhr.onerror = async () => {
+        xhr.onabort = () => {
+          activeXhrRef.current = null;
           setUploading(false);
-          setUploadProgress(0);
+          resetUploadUi();
+        };
+
+        xhr.onerror = async () => {
+          activeXhrRef.current = null;
+          setUploading(false);
+          resetUploadUi();
+          if (uploadCancelledRef.current) {
+            return;
+          }
           await uploadNotificationService.showUploadError('Network error. Please check your connection.', fileName);
           Alert.alert('Upload Error', 'Network error. Please check your connection and try again.');
         };
 
+        challengeUploadStartedAt = Date.now();
         xhr.send(formData);
         return;
       }
@@ -2175,8 +2451,26 @@ export default function CreatePostScreen() {
       if (isVideo) {
         console.log('[Upload] Using signed URL flow for video');
 
+        if (uploadCancelledRef.current) {
+          await cleanupPreparedVideo(preparedVideo);
+          setUploading(false);
+          resetUploadUi();
+          return;
+        }
+
         // Step 1: Get signed upload URL from backend
-        updateProgress(22);
+        {
+          const bytes = preparedVideo?.uploadSizeBytes ?? 0;
+          const warm = estimateWarmupUploadBytesPerSecond(bytes);
+          const etaGuess = bytes > 0 && warm > 0 ? bytes / warm : null;
+          updateUploadUi(22, {
+            stage: 'Requesting secure upload slot...',
+            force: true,
+            filename: fileName,
+            speedBytesPerSecond: warm,
+            etaSeconds: etaGuess,
+          });
+        }
 
         const createRes = await postsApi.createUpload({
           title: autoTitle,
@@ -2189,35 +2483,89 @@ export default function CreatePostScreen() {
           throw new Error(createRes.message || 'Upload service is currently unavailable');
         }
 
+        if (uploadCancelledRef.current) {
+          await cleanupPreparedVideo(preparedVideo);
+          setUploading(false);
+          resetUploadUi();
+          return;
+        }
+
         const { postId, uploadUrl } = createRes.data;
         console.log('[Upload] Got signed URL for post:', postId);
 
+        if (uploadCancelledRef.current) {
+          await cleanupPreparedVideo(preparedVideo);
+          setUploading(false);
+          resetUploadUi();
+          return;
+        }
+
         // Step 2: Upload video directly to R2 via signed URL
-        updateProgress(28);
+        {
+          const bytes = preparedVideo?.uploadSizeBytes ?? 0;
+          const warm = estimateWarmupUploadBytesPerSecond(bytes);
+          const etaGuess = bytes > 0 && warm > 0 ? bytes / warm : null;
+          updateUploadUi(28, {
+            stage: 'Uploading securely...',
+            force: true,
+            filename: fileName,
+            speedBytesPerSecond: warm,
+            etaSeconds: etaGuess,
+          });
+        }
 
         try {
           await uploadPreparedVideo(
             uploadUrl,
             mediaUri,
-            (totalBytesSent, totalBytesExpectedToSend) => {
-              if (totalBytesExpectedToSend > 0) {
-                const rawPercent = totalBytesSent / totalBytesExpectedToSend;
-                updateProgress(28 + rawPercent * 60);
-              }
-            }
+            {
+              onProgress: (snapshot: UploadProgressSnapshot) => {
+                const stageProgress = 28 + snapshot.overallPercent * 0.6;
+                const isSlowConnection = snapshot.bytesPerSecond > 0 && snapshot.bytesPerSecond < 80 * 1024;
+                updateUploadUi(stageProgress, {
+                  stage: snapshot.attempt > 1 ? 'Uploading securely after reconnect...' : 'Uploading securely...',
+                  speedBytesPerSecond: snapshot.bytesPerSecond,
+                  etaSeconds: snapshot.etaSeconds ?? 0,
+                  hint: isSlowConnection
+                    ? 'Low connection detected. Upload will continue, but it may take longer.'
+                    : null,
+                  filename: fileName,
+                });
+              },
+              onRetry: ({ attempt, maxAttempts, uploadedBytes, totalBytes }) => {
+                const retryPercent = totalBytes > 0 ? (uploadedBytes / totalBytes) * 100 : 0;
+                updateUploadUi(28 + retryPercent * 0.6, {
+                  stage: `Reconnecting upload (${attempt + 1}/${maxAttempts})...`,
+                  hint: 'Connection became unstable. Resuming your upload progress...',
+                  force: true,
+                  filename: fileName,
+                });
+              },
+            },
+            uploadAbortControllerRef.current?.signal
           );
           console.log('[Upload] R2 upload complete (compressed/native upload)');
         } catch (uploadError: any) {
-          console.error('[Upload] R2 upload failed:', uploadError.message);
+          console.error('[Upload] R2 upload failed:', uploadError?.message);
+          if (uploadCancelledRef.current || uploadError?.name === 'AbortError') {
+            await cleanupPreparedVideo(preparedVideo);
+            setUploading(false);
+            resetUploadUi();
+            return;
+          }
           setUploading(false);
-          setUploadProgress(0);
+          resetUploadUi();
           await uploadNotificationService.showUploadError('Video upload failed: ' + uploadError.message, fileName);
           Alert.alert('Upload Error', 'Failed to upload video. Please try again.');
           return;
         }
 
         // Step 3: Notify backend upload is complete → queues HLS processing
-        updateProgress(92);
+        updateUploadUi(92, {
+          stage: 'Finalizing upload...',
+          force: true,
+          filename: fileName,
+        });
         console.log('[Upload] Notifying backend upload complete for post:', postId);
 
         const completeRes = await postsApi.completeUpload(postId);
@@ -2225,7 +2573,7 @@ export default function CreatePostScreen() {
         if (completeRes.status !== 'success') {
           console.error('[Upload] Complete upload failed:', completeRes.message);
           setUploading(false);
-          setUploadProgress(0);
+          resetUploadUi();
           await uploadNotificationService.showUploadError('Failed to finish the upload.', fileName);
           Alert.alert('Error', 'Video upload finished, but the app could not finalize it. Please try again.');
           return;
@@ -2258,7 +2606,11 @@ export default function CreatePostScreen() {
           challengeName: selectedChallengeName,
         });
 
-        updateProgress(100);
+        updateUploadUi(100, {
+          stage: 'Upload complete',
+          force: true,
+          filename: fileName,
+        });
         await uploadNotificationService.showUploadQueued(
           status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
           selectedChallengeName
@@ -2351,11 +2703,31 @@ export default function CreatePostScreen() {
         setCaption, setSelectedGroup, setSelectedCategoryId as any,
         setRecordedVideoUri, setEditedVideoUri, setThumbnailUri, setIsVideoPlaying,
         setCapturedImageUri,
+        (xhr) => {
+          activeXhrRef.current = xhr;
+        },
+        () => uploadCancelledRef.current,
+        ({ loaded, total, startedAt, percent }) => {
+          const elapsedSec = Math.max((Date.now() - startedAt) / 1000, 0.001);
+          const bps = loaded / elapsedSec;
+          const etaSec = bps > 0 && total > loaded ? (total - loaded) / bps : 0;
+          updateUploadUi(percent, {
+            stage: 'Uploading...',
+            filename: fileName,
+            speedBytesPerSecond: bps,
+            etaSeconds: etaSec,
+          });
+        },
       );
     } catch (error: any) {
       await cleanupPreparedVideo(preparedVideo);
+      if (uploadCancelledRef.current || error?.name === 'AbortError') {
+        setUploading(false);
+        resetUploadUi();
+        return;
+      }
       setUploading(false);
-      setUploadProgress(0);
+      resetUploadUi();
       await uploadNotificationService.showUploadError(error.message || 'Failed to create post', 'video.mp4');
       Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
     }
@@ -3325,7 +3697,7 @@ export default function CreatePostScreen() {
                   <View style={styles.uploadProgressHeader}>
                     <ActivityIndicator size="small" color={C.primary} />
                     <Text style={[styles.uploadProgressTitle, { color: C.text }]}>
-                      Uploading your talent...
+                      {uploadStageText}
                     </Text>
                   </View>
                   <View style={styles.uploadProgressBarContainer}>
@@ -3339,6 +3711,49 @@ export default function CreatePostScreen() {
                   <Text style={[styles.uploadProgressPercent, { color: C.primary }]}>
                     {Math.min(Math.round(uploadProgress), 100)}%
                   </Text>
+                  {uploadStageText !== 'Finalizing upload...' &&
+                    uploadStageText !== 'Upload complete' && (
+                      <TouchableOpacity
+                        style={[styles.uploadCancelButton, { borderColor: C.border, backgroundColor: C.inputBg }]}
+                        onPress={handleCancelUpload}
+                        activeOpacity={0.85}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cancel upload"
+                      >
+                        <MaterialIcons name="close" size={18} color={C.textSecondary} />
+                        <Text style={[styles.uploadCancelButtonLabel, { color: C.text }]}>
+                          Cancel upload
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  <View style={styles.uploadStatRow}>
+                    <View style={[styles.uploadStatChip, { backgroundColor: C.inputBg, borderColor: C.border }]}>
+                      <MaterialIcons name="speed" size={14} color={C.primary} />
+                      <Text style={[styles.uploadStatText, { color: C.text }]}>
+                        {uploadSpeedText ?? '0.00 KB/s'}
+                      </Text>
+                    </View>
+                    <View style={[styles.uploadStatChip, { backgroundColor: C.inputBg, borderColor: C.border }]}>
+                      <MaterialIcons name="schedule" size={14} color={C.primary} />
+                      <Text style={[styles.uploadStatText, { color: C.text }]}>
+                        ETA {uploadEtaText ?? '0s'}
+                      </Text>
+                    </View>
+                    <View style={[styles.uploadStatChip, { backgroundColor: C.inputBg, borderColor: C.border }]}>
+                      <MaterialIcons name="timer" size={14} color={C.primary} />
+                      <Text style={[styles.uploadStatText, { color: C.text }]}>
+                        Elapsed {uploadElapsedText ?? '0:00'}
+                      </Text>
+                    </View>
+                  </View>
+                  {!!uploadConnectionHint && (
+                    <View style={[styles.uploadHintBanner, { backgroundColor: C.warningBg, borderColor: C.warningBorder }]}>
+                      <MaterialIcons name="wifi-tethering-error-rounded" size={16} color={C.warning} />
+                      <Text style={[styles.uploadHintText, { color: C.warning }]}>
+                        {uploadConnectionHint}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -4645,6 +5060,56 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginTop: 8,
+  },
+  uploadCancelButton: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  uploadCancelButtonLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  uploadStatRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  uploadStatChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  uploadStatText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  uploadHintBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  uploadHintText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   publishButton: {
     flexDirection: 'row',

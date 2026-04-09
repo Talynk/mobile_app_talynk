@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { router } from 'expo-router';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supportApi } from '@/lib/api';
@@ -94,7 +95,7 @@ export default function ReportProblemScreen() {
     return (
       <View style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={12}>
+          <TouchableOpacity onPress={() => safeRouterBack(router, '/settings/index' as any)} style={styles.backButton} hitSlop={12}>
             <Feather name="arrow-left" size={24} color={THEME.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Report a Problem</Text>
@@ -110,7 +111,7 @@ export default function ReportProblemScreen() {
           </Text>
           <TouchableOpacity
             style={styles.successButton}
-            onPress={() => router.back()}
+            onPress={() => safeRouterBack(router, '/settings/index' as any)}
             activeOpacity={0.8}
           >
             <Text style={styles.successButtonText}>Back to Settings</Text>
@@ -123,7 +124,7 @@ export default function ReportProblemScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={12}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/settings/index' as any)} style={styles.backButton} hitSlop={12}>
           <Feather name="arrow-left" size={24} color={THEME.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Report a Problem</Text>

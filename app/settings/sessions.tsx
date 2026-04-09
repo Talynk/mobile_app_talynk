@@ -10,6 +10,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
+import { safeRouterBack } from '@/lib/utils/navigation';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { settingsApi } from '@/lib/api';
@@ -194,7 +195,7 @@ export default function SessionsScreen() {
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={12}>
+        <TouchableOpacity onPress={() => safeRouterBack(router, '/settings/index' as any)} style={styles.backButton} hitSlop={12}>
           <Feather name="arrow-left" size={24} color={THEME.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Active Sessions</Text>

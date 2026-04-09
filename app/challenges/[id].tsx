@@ -53,6 +53,7 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
@@ -63,6 +64,7 @@ import {
 } from '@/lib/utils/video-feed';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
+import { safeRouterBack } from '@/lib/utils/navigation';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -327,10 +329,10 @@ export default function ChallengeDetailScreen() {
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
-        const normalizedPosts = await prepareRenderableChallengePosts(
+        const normalizedPosts = filterSecondarySurfacePosts(await prepareRenderableChallengePosts(
           Array.isArray(postsList) ? postsList : [],
           { preserveUnavailableVideos: true },
-        );
+        ));
         const likesMapFromResponse = buildLikesMapFromRawItems(Array.isArray(rawItems) ? rawItems : []);
         const challengeStatus = response.data?.challenge_status;
         const declaredPostCount = Number(
@@ -351,7 +353,7 @@ export default function ChallengeDetailScreen() {
         if (shouldUseFallback) {
           const fallbackData = await getFallbackChallengeData(options);
           const fallbackPostsToUse =
-            fallbackData.posts.length >= normalizedPosts.length ? fallbackData.posts : normalizedPosts;
+            fallbackData.posts.length >= normalizedPosts.length ? filterSecondarySurfacePosts(fallbackData.posts) : normalizedPosts;
           const likesMapToUse =
             fallbackPostsToUse === fallbackData.posts ? fallbackData.likesMap : likesMapFromResponse;
 
@@ -1646,7 +1648,7 @@ export default function ChallengeDetailScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
         <View style={[styles.header, { borderBottomColor: C.border }]}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.backButton} onPress={() => safeRouterBack(router, '/challenges/index' as any)}>
             <MaterialIcons name="arrow-back" size={24} color={C.text} />
           </TouchableOpacity>
           <Text style={[styles.headerTitle, { color: C.text }]}>Competition</Text>
@@ -1675,7 +1677,7 @@ export default function ChallengeDetailScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: C.background }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: C.border }]}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => safeRouterBack(router, '/challenges/index' as any)}>
           <MaterialIcons name="arrow-back" size={24} color={C.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: C.text }]} numberOfLines={1}>
