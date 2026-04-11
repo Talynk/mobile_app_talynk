@@ -241,8 +241,10 @@ export function getPlaybackUrl(post: any): string | null {
   // Also allow if hlsReady boolean flag is set
   if (!hlsReady && !post.hlsReady) return null;
 
-  // Prefer hls_url, then hlsUrl, then fullUrl (which backend sets to hls_url when completed)
-  const url = post.playback_url || post.hls_url || post.hlsUrl || post.fullUrl;
+  // Prefer hls_url/hlsUrl (guaranteed to be HLS), then playback_url, then fullUrl.
+  // IMPORTANT: hls_url MUST come before playback_url because playback_url is often
+  // a raw MP4 which gets rejected by the .mp4 safety check below.
+  const url = post.hls_url || post.hlsUrl || post.playback_url || post.fullUrl;
   if (!url) return null;
 
   const resolved = getFileUrl(url);

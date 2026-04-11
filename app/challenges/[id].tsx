@@ -13,6 +13,7 @@ import {
   Modal,
   useWindowDimensions,
   StatusBar,
+  Platform,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { challengesApi, followsApi } from '@/lib/api';
@@ -883,7 +884,10 @@ export default function ChallengeDetailScreen() {
 
   const sortedWinners = useMemo(() => {
     if (!winners.length) return winners;
-    return [...winners].sort((a, b) => {
+    // Only show entries the backend has flagged as actual winners (respects max_winners cap)
+    const actualWinners = winners.filter((w: any) => w.is_winner === true);
+    if (!actualWinners.length) return actualWinners;
+    return [...actualWinners].sort((a, b) => {
       const rankA = Number(a.winner_rank ?? 999);
       const rankB = Number(b.winner_rank ?? 999);
       if (rankA !== rankB) return rankA - rankB;
@@ -1795,8 +1799,8 @@ export default function ChallengeDetailScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled
-            snapToInterval={fullscreenAvailableHeight}
+            pagingEnabled={Platform.OS === 'ios'}
+            snapToInterval={Platform.OS === 'android' ? fullscreenAvailableHeight : undefined}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}

@@ -12,6 +12,7 @@ import {
   Animated,
   Alert,
   FlatList,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -468,8 +469,8 @@ export default function FeedScreen() {
                 offset: availableHeight * index,
                 index,
               })}
-              pagingEnabled={true}
-              snapToInterval={availableHeight}
+              pagingEnabled={Platform.OS === 'ios'}
+              snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
               snapToAlignment="start"
               disableIntervalMomentum
               decelerationRate="fast"
@@ -510,6 +511,19 @@ export default function FeedScreen() {
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
               ListEmptyComponent={
+                isRefetching || isLoading ? (
+                  <View style={[styles.loadingContainer, { height: availableHeight }]}>
+                    {[1, 2].map((i) => (
+                      <View key={i} style={[styles.skeletonItem, { height: availableHeight }]}>
+                        <Animated.View style={[styles.skeletonMedia, { opacity: shimmerOpacity }]} />
+                        <View style={styles.skeletonActions}>
+                          <Animated.View style={[styles.skeletonAvatar, { opacity: shimmerOpacity }]} />
+                          <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
                   <Feather name={activeTab === 'following' ? "user-plus" : "video"} size={64} color="#666" />
                   <Text style={styles.emptyText}>
@@ -540,6 +554,7 @@ export default function FeedScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
+                )
               }
             />
           )}

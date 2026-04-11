@@ -12,6 +12,7 @@ import {
   Alert,
   RefreshControl,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -151,6 +152,8 @@ const getExternalProfilePostCardMeta = (post: any) => {
     };
   }
 
+  // Only block genuinely processing posts — others should be openable
+  // because the profile-feed will enrich them with HLS data on load.
   if (
     processingStatus.includes('pending') ||
     processingStatus.includes('processing') ||
@@ -165,10 +168,13 @@ const getExternalProfilePostCardMeta = (post: any) => {
     };
   }
 
+  // CRITICAL FIX: Allow opening even without HLS. The profile-feed page
+  // will enrich the post with hls_url from the individual post endpoint.
+  // Previously this returned canOpen:false, blocking all un-enriched videos.
   return {
     isVideo: true,
-    canOpen: false,
-    statusLabel: 'Unavailable',
+    canOpen: true,
+    statusLabel: null,
     thumbnailUrl,
   };
 };
@@ -1084,14 +1090,19 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         data={approvedPosts}
         keyExtractor={(item) => item.id}
         numColumns={3}
-        removeClippedSubviews={false}
-        initialNumToRender={12}
-        maxToRenderPerBatch={18}
-        windowSize={7}
+        removeClippedSubviews={Platform.OS === 'android'}
+        initialNumToRender={18}
+        maxToRenderPerBatch={24}
+        windowSize={9}
         updateCellsBatchingPeriod={30}
+        getItemLayout={(_data, index) => ({
+          length: EXTERNAL_PROFILE_POST_ITEM_SIZE + 2,
+          offset: (EXTERNAL_PROFILE_POST_ITEM_SIZE + 2) * Math.floor(index / 3),
+          index,
+        })}
         contentContainerStyle={styles.postsGrid}
         onEndReached={handleLoadMorePosts}
-        onEndReachedThreshold={0.6}
+        onEndReachedThreshold={0.8}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

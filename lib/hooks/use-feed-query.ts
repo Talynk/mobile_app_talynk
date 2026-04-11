@@ -161,9 +161,11 @@ export function useFeedQuery(tab: FeedTab) {
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    staleTime: 30_000,
+    placeholderData: (prev: any) => prev, // Keep previous data during key transitions (auth init)
+    staleTime: 10_000,
     gcTime: 5 * 60_000,
-    retry: 1,
+    retry: 2,
+    refetchOnMount: 'always' as const,
   });
 
   const posts = useMemo(

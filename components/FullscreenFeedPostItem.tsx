@@ -442,6 +442,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
+      // Aggressively stop audio on unmount to prevent leaks
+      const controller = videoControllerRef.current;
+      if (controller) {
+        try {
+          controller.setMuted(true);
+          controller.pause();
+        } catch (_) {}
+      }
       playerValidRef.current = false;
       videoControllerRef.current = null;
       if (videoMountRetryTimeoutRef.current) {
@@ -449,6 +457,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       }
     };
   }, []);
+
+  // CRITICAL: Immediately mute and pause audio when scrolling away from this post.
+  // Without this, audio bleeds between posts during scroll.
+  useEffect(() => {
+    if (!isActive || suspendPlayback) {
+      const controller = videoControllerRef.current;
+      if (controller) {
+        try {
+          controller.setMuted(true);
+          controller.pause();
+        } catch (_) {}
+      }
+    }
+  }, [isActive, suspendPlayback]);
 
   useEffect(() => {
     if (!videoPlayerSource) {
@@ -1065,6 +1087,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPostItemProps) {
   return (
     prev.item.id === next.item.id &&
+    // CRITICAL: Detect when enrichment adds HLS playback data to the same item
+    (prev.item as any).hls_url === (next.item as any).hls_url &&
+    (prev.item as any).hlsUrl === (next.item as any).hlsUrl &&
+    (prev.item as any).fullUrl === (next.item as any).fullUrl &&
     prev.isActive === next.isActive &&
     prev.shouldPreload === next.shouldPreload &&
     prev.isLiked === next.isLiked &&

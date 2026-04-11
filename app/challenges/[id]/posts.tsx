@@ -14,6 +14,7 @@ import {
   Share,
   Alert,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
@@ -669,8 +670,8 @@ export default function ChallengePostsScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled
-            snapToInterval={fullscreenAvailableHeight}
+            pagingEnabled={Platform.OS === 'ios'}
+            snapToInterval={Platform.OS === 'android' ? fullscreenAvailableHeight : undefined}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}

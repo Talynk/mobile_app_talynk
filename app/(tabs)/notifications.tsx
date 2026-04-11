@@ -30,34 +30,39 @@ const NOTIFICATION_TABS = [
 export default function NotificationsScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  if (!user) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-          <Text style={styles.headerTitle}>Notifications</Text>
-        </View>
 
-        <View style={styles.loginPrompt}>
-          <View style={styles.loginIconContainer}>
-            <Feather name="bell" size={48} color="#60a5fa" />
-          </View>
-          <Text style={styles.loginPromptTitle}>Stay in the loop</Text>
-          <Text style={styles.loginPromptText}>
-            Sign in to see your notifications
-          </Text>
-          <TouchableOpacity
-            style={styles.loginButton}
-            onPress={() => router.push('/auth/login')}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.loginButtonText}>Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
+  if (!user) {
+    return <NotificationsLoginPrompt insetsTop={insets.top} />;
   }
 
   return <AuthenticatedNotificationsScreen user={user} insetsTop={insets.top} />;
+}
+
+function NotificationsLoginPrompt({ insetsTop }: { insetsTop: number }) {
+  return (
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insetsTop + 8 }]}>
+        <Text style={styles.headerTitle}>Notifications</Text>
+      </View>
+
+      <View style={styles.loginPrompt}>
+        <View style={styles.loginIconContainer}>
+          <Feather name="bell" size={48} color="#60a5fa" />
+        </View>
+        <Text style={styles.loginPromptTitle}>Stay in the loop</Text>
+        <Text style={styles.loginPromptText}>
+          Sign in to see your notifications
+        </Text>
+        <TouchableOpacity
+          style={styles.loginButton}
+          onPress={() => router.push('/auth/login')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.loginButtonText}>Sign In</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 }
 
 function AuthenticatedNotificationsScreen({

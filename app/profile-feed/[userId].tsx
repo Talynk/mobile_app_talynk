@@ -172,6 +172,7 @@ function ProfileFeedContent({
   const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
   const [initialScrollDone, setInitialScrollDone] = useState(false);
   const lastActiveIndexRef = useRef(0);
+  const loadVersionRef = useRef(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -226,6 +227,7 @@ function ProfileFeedContent({
   }, [initialPostId, initialScrollDone, posts]);
 
   const loadPosts = useCallback(async (page = 1, refresh = false) => {
+    const thisVersion = ++loadVersionRef.current;
     try {
       if (refresh) {
         setRefreshing(true);
@@ -392,6 +394,96 @@ function ProfileFeedContent({
           dispatch(setPostLikeCounts(likeCountsMap));
         }
 
+        // ─── ENRICHMENT: Fetch HLS URLs BEFORE setting posts in state ───
+        // This ensures the FlatList only ever receives playable posts,
+        // matching how the For You feed works (posts arrive pre-enriched).
+        const postsNeedingEnrichment = postsArray.filter(
+          (p: any) => {
+            const processingStatus = p.processing_status ?? p.processingStatus ?? '';
+            const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
+            const staleProcessingState =
+              p.type === 'video' &&
+              !!processingStatus &&
+              processingStatus !== 'completed' &&
+              processingStatus !== 'failed';
+            return (
+              needsPlaybackData ||
+              staleProcessingState ||
+              needsRenderableMediaEnrichment(p) ||
+              needsChallengeMetaEnrichment(p)
+            );
+          }
+        );
+
+        if (postsNeedingEnrichment.length > 0) {
+          if (__DEV__) {
+            console.log(`🔄 [ProfileFeed] Enriching ${postsNeedingEnrichment.length} posts with full data...`);
+          }
+
+          const videoAssetMap = await getPostVideoAssetsBatchCached(
+            postsNeedingEnrichment
+              .filter((p: any) => p.type === 'video')
+              .map((p: any) => p.id),
+          );
+          const enrichMap = await getPostDetailsCached(
+            postsNeedingEnrichment.map((p: any) => p.id),
+            { requireNetwork: true },
+          );
+
+          // Merge enriched data back, including any challenge / competition metadata.
+          postsArray = postsArray.map((p: any) => {
+            const videoAssets = videoAssetMap.get(p.id);
+            const enriched = enrichMap.get(p.id);
+            if (!enriched && !videoAssets) return p;
+
+            const enrichedFirstChallengePost = Array.isArray(enriched?.challenge_posts)
+              ? enriched.challenge_posts[0]
+              : undefined;
+            const enrichedChallenge =
+              enriched?.challenge ||
+              enriched?.competition ||
+              enrichedFirstChallengePost?.challenge;
+
+            const enrichedChallengeId =
+              enriched?.challenge_id ||
+              enriched?.challengeId ||
+              enrichedChallenge?.id ||
+              enrichedFirstChallengePost?.challenge_id;
+
+            const enrichedChallengeName =
+              enriched?.challenge_name ||
+              enriched?.challengeName ||
+              enrichedChallenge?.name;
+
+            return {
+              ...normalizePost({
+                ...p,
+                ...videoAssets,
+                ...enriched,
+                user: enriched?.user || p.user,
+                challenge: enrichedChallenge || p.challenge || p.competition,
+                challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
+                challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
+                challenge_name: enrichedChallengeName || p.challenge_name || p.challengeName,
+                challengeName: enrichedChallengeName || p.challengeName || p.challenge_name,
+              }),
+            };
+          });
+
+          if (__DEV__) {
+            console.log(`✅ [ProfileFeed] Enriched ${enrichMap.size} posts with HLS data`);
+          }
+        }
+
+        // Bail out if a newer loadPosts call has started while we were enriching
+        if (thisVersion !== loadVersionRef.current) {
+          if (__DEV__) {
+            console.log(`⏭️ [ProfileFeed] Stale load (v${thisVersion} < v${loadVersionRef.current}), skipping setPosts`);
+          }
+          return;
+        }
+
+        // ─── SINGLE setPosts: posts are now fully enriched with HLS URLs ───
         if (page === 1 || refresh) {
           const sortedPosts = [...postsArray].sort((a, b) => {
             const dateA = new Date(a.createdAt || a.uploadDate || 0).getTime();
@@ -400,6 +492,7 @@ function ProfileFeedContent({
           });
 
           setPosts(sortedPosts);
+          primePostDetailsCache(sortedPosts);
 
           if (sortedPosts.length > 0 && sortedPosts[0].user?.username) {
             setUsername(sortedPosts[0].user.username);
@@ -429,145 +522,49 @@ function ProfileFeedContent({
           });
         }
 
-        if (page === 1 || refresh) {
-          setLoading(false);
-        }
-      }
-
-      // CRITICAL ENRICHMENT: The user-post endpoints return hlsReady:true but
-      // OMIT hls_url and thumbnail_url. Enrich from individual post endpoint.
-      const postsNeedingEnrichment = postsArray.filter(
-        (p: any) => {
-          const processingStatus = p.processing_status ?? p.processingStatus ?? '';
-          const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
-          const staleProcessingState =
-            p.type === 'video' &&
-            !!processingStatus &&
-            processingStatus !== 'completed' &&
-            processingStatus !== 'failed';
-          return (
-            needsPlaybackData ||
-            staleProcessingState ||
-            needsRenderableMediaEnrichment(p) ||
-            needsChallengeMetaEnrichment(p)
-          );
-        }
-      );
-
-      if (postsNeedingEnrichment.length > 0) {
         if (__DEV__) {
-          console.log(`🔄 [ProfileFeed] Enriching ${postsNeedingEnrichment.length} posts with full data...`);
+          console.log('📥 [ProfileFeed fetchPosts] API Response:', {
+            status: response?.status,
+            isOwnProfile,
+            postStatus,
+            postsCount: postsArray.length,
+            firstPost: postsArray[0] ? {
+              id: postsArray[0].id,
+              type: postsArray[0].type,
+              hls_url: (postsArray[0] as any).hls_url,
+              hlsUrl: (postsArray[0] as any).hlsUrl,
+              fullUrl: (postsArray[0] as any).fullUrl,
+            } : null,
+          });
         }
 
-        const videoAssetMap = await getPostVideoAssetsBatchCached(
-          postsNeedingEnrichment
-            .filter((p: any) => p.type === 'video')
-            .map((p: any) => p.id),
-        );
-        const enrichMap = await getPostDetailsCached(
-          postsNeedingEnrichment.map((p: any) => p.id),
-          { requireNetwork: true },
-        );
-
-        // Merge enriched data back, including any challenge / competition metadata.
-        postsArray = postsArray.map((p: any) => {
-          const videoAssets = videoAssetMap.get(p.id);
-          const enriched = enrichMap.get(p.id);
-          if (!enriched && !videoAssets) return p;
-
-          const enrichedFirstChallengePost = Array.isArray(enriched?.challenge_posts)
-            ? enriched.challenge_posts[0]
-            : undefined;
-          const enrichedChallenge =
-            enriched?.challenge ||
-            enriched?.competition ||
-            enrichedFirstChallengePost?.challenge;
-
-          const enrichedChallengeId =
-            enriched?.challenge_id ||
-            enriched?.challengeId ||
-            enrichedChallenge?.id ||
-            enrichedFirstChallengePost?.challenge_id;
-
-          const enrichedChallengeName =
-            enriched?.challenge_name ||
-            enriched?.challengeName ||
-            enrichedChallenge?.name;
-
-          return {
-            ...normalizePost({
-              ...p,
-              ...videoAssets,
-              ...enriched,
-              user: enriched?.user || p.user,
-              challenge: enrichedChallenge || p.challenge || p.competition,
-              challenge_id: enrichedChallengeId || p.challenge_id || p.challengeId,
-              challengeId: enrichedChallengeId || p.challengeId || p.challenge_id,
-              challenge_name: enrichedChallengeName || p.challenge_name || p.challengeName,
-              challengeName: enrichedChallengeName || p.challengeName || p.challenge_name,
-            }),
-          };
-        });
-
-        if (__DEV__) {
-          console.log(`✅ [ProfileFeed] Enriched ${enrichMap.size} posts with HLS data`);
-        }
-      }
-
-      if (__DEV__) {
-        console.log('📥 [ProfileFeed fetchPosts] API Response:', {
-          status: response?.status,
-          isOwnProfile,
-          postStatus,
-          postsCount: postsArray.length,
-          firstPost: postsArray[0] ? {
-            id: postsArray[0].id,
-            type: postsArray[0].type,
-            video_url: postsArray[0].video_url,
-            image: postsArray[0].image,
-            imageUrl: postsArray[0].imageUrl,
-            fullUrl: (postsArray[0] as any).fullUrl,
-            allKeys: Object.keys(postsArray[0]),
-          } : null,
-          samplePost: postsArray[0],
-        });
-      }
-
-      if (response?.status === 'success' && postsArray.length >= 0) {
-        // Sync liked posts from server if user is logged in
+        // Sync liked posts and follow status in background (non-blocking)
         if (user && postsArray.length > 0) {
           const postIds = postsArray.map((p: Post) => p.id);
           syncLikedPostsFromServer(postIds).catch(console.error);
           const uniqueUserIds = [...new Set(postsArray.map((p: Post) => p.user?.id).filter(Boolean))] as string[];
-          const followStatusPromises = uniqueUserIds.map(async (uid: string) => {
-            try {
-              const res = await followsApi.checkFollowing(uid);
-              return { userId: uid, isFollowing: !!res.data?.isFollowing };
-            } catch {
-              return { userId: uid, isFollowing: false };
-            }
+          Promise.all(
+            uniqueUserIds.map(async (uid: string) => {
+              try {
+                const res = await followsApi.checkFollowing(uid);
+                return { userId: uid, isFollowing: !!res.data?.isFollowing };
+              } catch {
+                return { userId: uid, isFollowing: false };
+              }
+            })
+          ).then((followStatuses) => {
+            const followMap: Record<string, boolean> = {};
+            followStatuses.forEach(({ userId: uid, isFollowing }) => {
+              followMap[uid] = isFollowing;
+              updateFollowedUsers(uid, isFollowing);
+            });
+            setUserFollowStatus(prev => ({ ...prev, ...followMap }));
           });
-          const followStatuses = await Promise.all(followStatusPromises);
-          const followMap: Record<string, boolean> = {};
-          followStatuses.forEach(({ userId: uid, isFollowing }) => {
-            followMap[uid] = isFollowing;
-            updateFollowedUsers(uid, isFollowing);
-          });
-          setUserFollowStatus(prev => ({ ...prev, ...followMap }));
-        }
-
-        // Prefetch video URLs for instant playback (Expo AV handles caching automatically)
-        if (postsArray.length > 0 && (page === 1 || refresh)) {
-          const videoPosts = postsArray
-            .filter(p => (p.type === 'video' || p.video_url) && getPostMediaUrl(p))
-            .slice(0, 3); // Prefetch first 3 videos
-
-          // Videos will be cached automatically when loaded by Expo AV
-          // The cache headers in source will ensure proper caching
         }
 
         if (page === 1 || refresh) {
           setRefreshing(false);
+          setLoading(false);
         }
       } else {
         if (page === 1) {
@@ -859,9 +856,9 @@ function ProfileFeedContent({
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
           }}
-          pagingEnabled={true}
+          pagingEnabled={Platform.OS === 'ios'}
           showsVerticalScrollIndicator={false}
-          snapToInterval={availableHeight}
+          snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
           snapToAlignment="start"
           decelerationRate="fast"
           contentContainerStyle={{ paddingBottom: 0 }}
