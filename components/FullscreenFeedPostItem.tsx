@@ -641,6 +641,26 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [isActive, suspendPlayback, isAppActive, isMuted, decoderErrorDetected, index, pausedByUser, isPlayerValid, canMountVideoPlayer]);
 
+  // Poll video progress every 250ms for smooth progress bar animation.
+  // Expo Video's native timeUpdate event is unreliable on many devices.
+  useEffect(() => {
+    if (!isActive || !isPlayerValid || pausedByUser || suspendPlayback) return;
+
+    const interval = setInterval(() => {
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current) return;
+      try {
+        const currentTime = controller.getCurrentTime?.() ?? 0;
+        const duration = controller.getDuration?.() ?? 0;
+        if (duration > 0 && isMountedRef.current) {
+          setVideoProgress(currentTime / duration);
+        }
+      } catch (_) {}
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [isActive, isPlayerValid, pausedByUser, suspendPlayback]);
+
   // Fade out thumbnail when video is playing and ready
   useEffect(() => {
     if (isActive && isPlaying && videoReady) {
@@ -667,7 +687,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
-  const handleTapToPause = () => {
+  const handleTapToPause = useCallback((e?: any) => {
+    // Only pause/play when tapping the CENTER of the screen.
+    // Ignore taps in the bottom 25% (progress bar + bottom overlay area).
+    if (e?.nativeEvent) {
+      const tapY = e.nativeEvent.locationY;
+      const threshold = availableHeight * 0.75;
+      if (tapY > threshold) return; // Bottom zone — don't pause
+    }
     const controller = videoControllerRef.current;
     if (!controller || !isPlayerValid) return;
     try {
@@ -681,7 +708,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         pauseIndicatorOpacity.setValue(0);
       }
     } catch (_) {}
-  };
+  }, [availableHeight, isPlayerValid]);
 
   const handleMuteToggle = () => {
     const newMuted = toggleMute();
@@ -756,14 +783,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const seekRef = useRef((_x: number) => {});
   seekRef.current = handleProgressBarSeek;
-  const progressBarPan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => seekRef.current(e.nativeEvent.locationX),
-      onPanResponderMove: (e) => seekRef.current(e.nativeEvent.locationX),
-    })
-  ).current;
+
+  // Raw touch handlers — bypass React Native gesture system entirely.
+  // PanResponder couldn't reliably intercept touches from the parent Pressable.
+  const handleProgressTouch = useCallback((e: any) => {
+    e.stopPropagation();
+    const pageX = e.nativeEvent?.pageX ?? 0;
+    seekRef.current(pageX);
+  }, []);
 
   const handleUserPress = () => {
     if (item.user?.id) {
@@ -792,7 +819,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
-            <Pressable style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]} onPress={handleTapToPause}>
+            <Pressable style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]} onPress={(e) => handleTapToPause(e)}>
               {thumbnailOrPlaceholderUrl ? (
                 <Animated.Image
                   source={{ uri: thumbnailOrPlaceholderUrl }}
@@ -1000,9 +1027,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         {isVideo && isActive && (
           <View
             style={[styles.videoProgressBarContainer, { bottom: feedProgressBottomInset }]}
-            {...progressBarPan.panHandlers}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={handleProgressTouch}
+            onResponderMove={handleProgressTouch}
+            onTouchStart={handleProgressTouch}
+            onTouchMove={handleProgressTouch}
           >
-            <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
+            <View style={styles.videoProgressBarTrack}>
+              <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
+            </View>
           </View>
         )}
       </View>
@@ -1521,13 +1555,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 2,
+    height: 60, // Very large touch target — finger-friendly
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
+    zIndex: 200, // Above everything including the Pressable
+  },
+  videoProgressBarTrack: {
+    height: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    zIndex: 100,
+    borderRadius: 2,
   },
   videoProgressBarFill: {
     height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderRadius: 2,
   },
   draftOverlayContainer: {
     position: 'absolute',
