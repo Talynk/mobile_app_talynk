@@ -2866,9 +2866,9 @@ export default function CreatePostScreen() {
               <MaterialIcons name="timer" size={44} color="#f59e0b" />
             </View>
             <Text style={styles.maxDurationTitle}>2 minutes max reached</Text>
-            <Text style={styles.maxDurationMessage}>
+            {/* <Text style={styles.maxDurationMessage}>
               2 minutes reached. Your video has been saved. You can continue with this recording, or record again to adjust the length.
-            </Text>
+            </Text> */}
             <View style={styles.maxDurationActions}>
               <TouchableOpacity
                 style={[styles.maxDurationButton, styles.maxDurationSecondaryButton]}

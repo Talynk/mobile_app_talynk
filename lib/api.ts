@@ -126,7 +126,12 @@ export const authApi = {
     email: string
   ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
     try {
-      const response = await apiClient.post('/api/auth/register/request-otp', { email });
+      let response;
+      try {
+        response = await apiClient.post('/api/auth/request-otp', { email });
+      } catch {
+        response = await apiClient.post('/api/auth/register/request-otp', { email });
+      }
       return response.data;
     } catch (error: any) {
       const message =
@@ -149,10 +154,12 @@ export const authApi = {
     otpCode: string
   ): Promise<ApiResponse<RegisterOtpVerifyData & { code?: string }>> => {
     try {
-      const response = await apiClient.post('/api/auth/register/verify-otp', {
-        email,
-        otpCode,
-      });
+      let response;
+      try {
+        response = await apiClient.post('/api/auth/verify-otp', { email, otpCode });
+      } catch {
+        response = await apiClient.post('/api/auth/register/verify-otp', { email, otpCode });
+      }
       return response.data;
     } catch (error: any) {
       const apiData = error.response?.data;
@@ -175,7 +182,12 @@ export const authApi = {
     payload: RegisterCompletePayload
   ): Promise<ApiResponse<{ user: any }>> => {
     try {
-      const response = await apiClient.post('/api/auth/register/complete', payload);
+      let response;
+      try {
+        response = await apiClient.post('/api/auth/complete', payload);
+      } catch {
+        response = await apiClient.post('/api/auth/register/complete', payload);
+      }
       return response.data;
     } catch (error: any) {
       const apiData = error.response?.data;

@@ -18,6 +18,7 @@ export interface RegisterFormData {
   username?: string;
   email?: string;
   password: string;
+  date_of_birth: string;
   phone1: string;
   phone2?: string;
   country_id: number;
@@ -51,6 +52,7 @@ export interface Country {
   id: number;
   name: string;
   code: string;
+  dial_code?: string;
   flag_emoji?: string;
 }
 
@@ -151,6 +153,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  date_of_birth?: string;
   username?: string;
   avatar?: string;
   profile_picture?: string;

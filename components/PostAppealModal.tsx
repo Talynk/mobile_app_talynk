@@ -167,7 +167,7 @@ export const PostAppealModal: React.FC<PostAppealModalProps> = ({
                 onPress={() => {
                   onClose();
                   setTimeout(() => {
-                    router.push('/settings/appeals');
+                    return router.push('/settings/appeals' as any);
                   }, 300);
                 }}
                 activeOpacity={0.8}

@@ -22,10 +22,18 @@ export function getVideoSource(url: string): VideoSource {
   const contentType = isHlsUrl(url) ? 'hls' as const : undefined;
 
   if (convertUrl) {
-    return {
-      uri: convertUrl(url),
-      ...(contentType ? { contentType } : {}),
-    };
+    try {
+      const proxied = convertUrl(url);
+      if (proxied) {
+        return {
+          uri: proxied,
+          ...(contentType ? { contentType } : {}),
+        };
+      }
+    } catch (_) {
+      // Proxy failed (e.g., server crashed from NSFileHandleOperationException).
+      // Fall through to use the direct URL instead of crashing.
+    }
   }
 
   return {

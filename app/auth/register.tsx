@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal, FlatList, Dimensions } from 'react-native';
 import { authApi, countriesApi } from '@/lib/api';
 import { Country } from '@/types';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getCountryCallingCode, type CountryCode } from 'libphonenumber-js/min';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -43,6 +46,122 @@ const THEME = {
 };
 
 const OTP_LENGTH = 6;
+const AGE_GATE_LOCK_KEY = 'talynk_age_gate_locked_email';
+
+function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function parseDateOnly(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split('-').map(Number);
+  const parsed = new Date(y, m - 1, d);
+  if (
+    parsed.getFullYear() !== y ||
+    parsed.getMonth() !== m - 1 ||
+    parsed.getDate() !== d
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function getAgeInYears(dateOfBirth: Date): number {
+  const now = new Date();
+  let age = now.getFullYear() - dateOfBirth.getFullYear();
+  const monthDelta = now.getMonth() - dateOfBirth.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < dateOfBirth.getDate())) {
+    age -= 1;
+  }
+  return age;
+}
+
+function getDobFriendlyError(dateOfBirthValue: string): string | null {
+  if (!dateOfBirthValue) {
+    return 'Please choose your date of birth to continue.';
+  }
+
+  const dob = parseDateOnly(dateOfBirthValue);
+  if (!dob) {
+    return 'That date looks invalid. Please pick a valid date of birth.';
+  }
+
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dobOnly = new Date(dob.getFullYear(), dob.getMonth(), dob.getDate());
+  if (dobOnly > todayOnly) {
+    return 'That date is in the future. Please select your real date of birth.';
+  }
+
+  const minReasonableDob = new Date(1900, 0, 1);
+  if (dobOnly < minReasonableDob) {
+    return 'Please select a realistic date of birth.';
+  }
+
+  const age = getAgeInYears(dobOnly);
+  if (age < 18) {
+    return 'You must be 18+ to create an account at this time.';
+  }
+
+  return null;
+}
+
+function normalizeDialCode(raw: unknown): string {
+  if (raw == null) return '';
+  const asString = String(raw).trim();
+  if (!asString) return '';
+  const digits = asString.replace(/[^\d]/g, '');
+  return digits ? `+${digits}` : '';
+}
+
+function getCountryDialCode(country: Partial<Country> | null | undefined): string {
+  if (!country) return '';
+  const c = country as any;
+  const fromCommonFields =
+    normalizeDialCode(c.dial_code) ||
+    normalizeDialCode(c.dialCode) ||
+    normalizeDialCode(c.phone_code) ||
+    normalizeDialCode(c.phoneCode) ||
+    normalizeDialCode(c.calling_code) ||
+    normalizeDialCode(c.callingCode) ||
+    normalizeDialCode(c.country_code) ||
+    normalizeDialCode(c.countryCode) ||
+    normalizeDialCode(c.mobile_code) ||
+    normalizeDialCode(c.mobileCode) ||
+    normalizeDialCode(c.numeric_code) ||
+    normalizeDialCode(c.numericCode);
+
+  if (fromCommonFields) return fromCommonFields;
+
+  // RestCountries-like shape support: { idd: { root: "+2", suffixes: ["50"] } }
+  const iddRoot = typeof c.idd?.root === 'string' ? c.idd.root : '';
+  const iddSuffix =
+    Array.isArray(c.idd?.suffixes) && c.idd.suffixes.length > 0
+      ? String(c.idd.suffixes[0] || '')
+      : '';
+  const iddCombined = normalizeDialCode(`${iddRoot}${iddSuffix}`);
+  if (iddCombined) return iddCombined;
+
+  // Last resort: if backend puts numeric dial code in "code", use it.
+  const fromCode = normalizeDialCode(c.code);
+  if (fromCode) return fromCode;
+
+  // Backend currently returns ISO-2 in `code` (ex: RW). Resolve dial code locally.
+  if (typeof c.code === 'string' && /^[A-Za-z]{2}$/.test(c.code)) {
+    try {
+      const cc = c.code.toUpperCase() as CountryCode;
+      return `+${getCountryCallingCode(cc)}`;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Never return hyphen placeholders in UI.
+  return '';
+}
 
 export default function RegisterScreen() {
   const [name, setName] = useState('');
@@ -82,9 +201,23 @@ export default function RegisterScreen() {
   const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [showDobPicker, setShowDobPicker] = useState(false);
+  const [dobPickerTemp, setDobPickerTemp] = useState<Date>(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 18);
+    return d;
+  });
+  const [ageGateLocked, setAgeGateLocked] = useState(false);
   const otpInputRefs = useRef<any[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
   const formYRef = useRef(0);
+  const maxDobDate = useMemo(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 18);
+    return d;
+  }, []);
+  const minDobDate = useMemo(() => new Date(1900, 0, 1), []);
 
   // Clear any persisted auth errors when component mounts (fixes "Invalid credentials" showing before user submits)
   useEffect(() => {
@@ -103,7 +236,18 @@ export default function RegisterScreen() {
           if (Array.isArray(raw)) {
             raw.forEach((c: any) => {
               if (c && c.id != null && c.name && c.code && (c.is_active !== false)) {
-                list.push({ id: c.id, name: c.name, code: c.code, flag_emoji: c.flag_emoji });
+                const dialCode =
+                  normalizeDialCode(c.dial_code) ||
+                  normalizeDialCode(c.phone_code) ||
+                  normalizeDialCode(c.calling_code) ||
+                  normalizeDialCode(c.code);
+                list.push({
+                  id: c.id,
+                  name: c.name,
+                  code: c.code,
+                  dial_code: dialCode || undefined,
+                  flag_emoji: c.flag_emoji,
+                } as Country);
               }
             });
           }
@@ -144,6 +288,23 @@ export default function RegisterScreen() {
     setOtpDigits(Array(OTP_LENGTH).fill(''));
   }, [email]);
 
+  useEffect(() => {
+    const loadAgeGateLock = async () => {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!normalizedEmail) {
+        setAgeGateLocked(false);
+        return;
+      }
+      try {
+        const lockedEmail = await AsyncStorage.getItem(AGE_GATE_LOCK_KEY);
+        setAgeGateLocked((lockedEmail || '').toLowerCase() === normalizedEmail);
+      } catch {
+        setAgeGateLocked(false);
+      }
+    };
+    void loadAgeGateLock();
+  }, [email]);
+
   // Simple countdown for OTP cooldown
   useEffect(() => {
     if (otpCooldownSeconds <= 0) {
@@ -172,6 +333,19 @@ export default function RegisterScreen() {
     }
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   };
+
+  const lockAgeGate = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return;
+    try {
+      await AsyncStorage.setItem(AGE_GATE_LOCK_KEY, normalizedEmail);
+    } catch {
+      // Best effort lock persistence.
+    }
+    setAgeGateLocked(true);
+  };
+
+  const getDobValidationError = () => getDobFriendlyError(dateOfBirth);
 
   const handleRequestOtp = async (): Promise<boolean> => {
     clearError();
@@ -318,7 +492,7 @@ export default function RegisterScreen() {
     const trimmedUsername = username.trim();
     const trimmedEmail = email.trim();
 
-    const code = selectedCountry?.code?.replace('+', '') || '';
+    const code = getCountryDialCode(selectedCountry).replace('+', '');
     const digitsOnly = (v: string) => v.replace(/\D/g, '');
     const fullPhone1 = phone1.trim() ? code + digitsOnly(phone1) : undefined;
     const fullPhone2 = phone2.trim() ? code + digitsOnly(phone2) : undefined;
@@ -329,7 +503,7 @@ export default function RegisterScreen() {
       display_name: trimmedName || trimmedUsername,
       password,
       country_id: selectedCountry.id,
-      date_of_birth: '1990-01-01',
+      date_of_birth: dateOfBirth,
       email: trimmedEmail || undefined,
       phone1: fullPhone1,
       phone2: fullPhone2,
@@ -367,6 +541,17 @@ export default function RegisterScreen() {
     if (!otpVerified || !verificationToken) {
       errors.email = 'Please verify your email with the code we sent';
     }
+    if (ageGateLocked) {
+      errors.date_of_birth = 'Registration is blocked because your age does not meet the 18+ requirement.';
+    } else {
+      const dobError = getDobValidationError();
+      if (dobError) {
+        errors.date_of_birth = dobError;
+        if (dobError.includes('18+')) {
+          await lockAgeGate();
+        }
+      }
+    }
 
     if (!password) {
       errors.password = 'Please enter a password';
@@ -390,9 +575,19 @@ export default function RegisterScreen() {
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      setWarning(null);
-      const hasStep3Error = errors.password || errors.confirmPassword || errors.agreed;
-      if (hasStep3Error && step !== 3) setStep(3);
+      if (errors.email && step !== 2) {
+        setStep(2);
+        setWarning('Please verify your email code before completing sign up.');
+      } else if ((errors.password || errors.confirmPassword || errors.agreed) && step !== 3) {
+        setStep(3);
+        setWarning('Please fix the security details before completing sign up.');
+      } else if (errors.date_of_birth) {
+        setWarning(errors.date_of_birth);
+      } else if (errors.country || errors.name || errors.username || errors.phone1 || errors.phone2) {
+        setWarning('Please fix the highlighted profile details before continuing.');
+      } else {
+        setWarning('Please fix the highlighted errors before continuing.');
+      }
       setTimeout(() => {
         if (scrollViewRef.current && formYRef.current >= 0) {
           scrollViewRef.current.scrollTo({ y: Math.max(0, formYRef.current - 60), animated: true });
@@ -413,7 +608,26 @@ export default function RegisterScreen() {
       if (response.status === 'success') {
         setShowSuccessOverlay(true);
       } else {
-        setWarning(response.message || 'Registration failed. Please try again.');
+        const backendMessage = response.message || 'Registration failed. Please try again.';
+        if (backendMessage === 'Date of birth is required') {
+          const msg = 'Please choose your date of birth to continue.';
+          setFieldErrors((prev) => ({ ...prev, date_of_birth: msg }));
+          setWarning(msg);
+        } else if (backendMessage === 'Invalid date_of_birth format') {
+          const msg = 'That date looks invalid. Please pick a valid date of birth.';
+          setFieldErrors((prev) => ({ ...prev, date_of_birth: msg }));
+          setWarning(msg);
+        } else if (backendMessage === 'You must be at least 18 years old to register') {
+          await lockAgeGate();
+          const msg = 'You must be 18+ to create an account at this time.';
+          setFieldErrors((prev) => ({
+            ...prev,
+            date_of_birth: msg,
+          }));
+          setWarning(msg);
+        } else {
+          setWarning(backendMessage);
+        }
       }
     } catch (err: any) {
       setWarning('Registration failed. Please try again.');
@@ -444,11 +658,14 @@ export default function RegisterScreen() {
       return null;
     }
     if (s === 4) {
+      if (ageGateLocked) return 'Registration is blocked because your age does not meet the 18+ requirement.';
       if (!name.trim()) return 'Please enter your full name';
       if (!username.trim()) return 'Please enter a username';
       if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
         return 'Username can only contain letters, numbers, and underscores';
       }
+      const dobError = getDobValidationError();
+      if (dobError) return dobError;
       const digitsOnly = (v: string) => v.replace(/\D/g, '');
       if (phone1.trim() && digitsOnly(phone1).length < 6) return 'Primary phone must be at least 6 digits';
       if (phone2.trim() && digitsOnly(phone2).length < 6) return 'Secondary phone must be at least 6 digits';
@@ -458,6 +675,18 @@ export default function RegisterScreen() {
   };
 
   const handleNext = async () => {
+    if (step === 4 && !ageGateLocked) {
+      const dob = parseDateOnly(dateOfBirth);
+      if (dob && getAgeInYears(dob) < 18) {
+        await lockAgeGate();
+        setFieldErrors((prev) => ({
+          ...prev,
+          date_of_birth: 'You must be 18+ to create an account at this time.',
+        }));
+        setWarning('Registration is blocked for under-18 users.');
+        return;
+      }
+    }
     const err = validateStep(step);
     if (err) {
       setWarning(null);
@@ -630,10 +859,11 @@ export default function RegisterScreen() {
                           borderWidth: 1,
                           textAlign: 'center',
                           fontSize: 20,
-                          marginHorizontal: 4,
+                          marginHorizontal: 12,
                           backgroundColor: C.input,
                           borderColor: C.inputBorder,
                           color: C.text,
+                          marginLeft: -8
                         },
                         {
                           shadowColor: '#000',
@@ -935,12 +1165,55 @@ export default function RegisterScreen() {
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.country}</Text>
               ) : null}
 
+              <Text style={[styles.label, { color: C.text }]}>Date of birth</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!isFormBusy && !ageGateLocked) {
+                    setDobPickerTemp(parseDateOnly(dateOfBirth) || maxDobDate);
+                    setShowDobPicker(true);
+                  }
+                }}
+                activeOpacity={0.8}
+                disabled={isFormBusy || ageGateLocked}
+                style={[
+                  styles.input,
+                  styles.dobInput,
+                  {
+                    backgroundColor: C.input,
+                    borderColor: fieldErrors.date_of_birth ? C.errorBorder : C.inputBorder,
+                    opacity: isFormBusy || ageGateLocked ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <Ionicons name="calendar-outline" size={18} color={C.textSecondary} style={{ marginRight: 10 }} />
+                <Text style={{ color: dateOfBirth ? C.text : C.placeholder }}>
+                  {dateOfBirth || 'Select date of birth'}
+                </Text>
+              </TouchableOpacity>
+              {fieldErrors.date_of_birth ? (
+                <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.date_of_birth}</Text>
+              ) : (
+                <Text style={[styles.helperText, { color: C.textSecondary }]}>
+                  You must be at least 18 years old to create an account.
+                </Text>
+              )}
+              {ageGateLocked && (
+                <View style={[styles.alert, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}>
+                  <Ionicons name="lock-closed" size={18} color={'#fecaca'} style={{ marginRight: 8 }} />
+                  <Text style={[styles.alertText, { color: C.text }]}>
+                    Age gate locked. This registration cannot continue because the selected date indicates under 18.
+                  </Text>
+                </View>
+              )}
+
               <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
                 <Text style={[styles.label, { color: C.text }]}>Primary Phone (Optional)</Text>
               </View>
               <View style={styles.phoneInputRow}>
                 <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
+                  <Text style={{ color: C.text }}>
+                    {selectedCountry?.flag_emoji ?? '🏳️'} {getCountryDialCode(selectedCountry)}
+                  </Text>
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone1 ? C.errorBorder : C.inputBorder, color: C.text }]}
@@ -967,7 +1240,9 @@ export default function RegisterScreen() {
               </View>
               <View style={styles.phoneInputRow}>
                 <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
-                  <Text style={{ color: C.text }}>{selectedCountry?.flag_emoji ?? '🏳️'} {selectedCountry?.code ?? '--'}</Text>
+                  <Text style={{ color: C.text }}>
+                    {selectedCountry?.flag_emoji ?? '🏳️'} {getCountryDialCode(selectedCountry)}
+                  </Text>
                 </View>
                 <TextInput
                   style={[styles.phoneInputFlex, { backgroundColor: C.input, borderColor: fieldErrors.phone2 ? C.errorBorder : C.inputBorder, color: C.text }]}
@@ -988,7 +1263,7 @@ export default function RegisterScreen() {
               {fieldErrors.phone2 ? (
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.phone2}</Text>
               ) : null}
-              <Text style={[styles.helperText, { color: C.textSecondary }]}>
+              <Text style={[styles.helperText, { color: C.textSecondary, marginTop: 12 }]}>
                 Country code is set above. Enter your number excluding country code (length varies by country).
               </Text>
 
@@ -996,14 +1271,14 @@ export default function RegisterScreen() {
                 <View style={[styles.validationSummary, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}>
                   <Ionicons name="alert-circle" size={16} color="#fecaca" style={{ marginRight: 8 }} />
                   <Text style={[styles.validationSummaryText, { color: '#fecaca' }]}>
-                    Please fix the errors above to continue
+                    Please fix the highlighted fields on this step to continue.
                   </Text>
                 </View>
               )}
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: isFormBusy ? C.buttonDisabled : C.primary }]}
+                style={[styles.button, { backgroundColor: (isFormBusy || ageGateLocked) ? C.buttonDisabled : C.primary }]}
                 onPress={handleRegister}
-                disabled={isFormBusy}
+                disabled={isFormBusy || ageGateLocked}
                 activeOpacity={0.8}
               >
                 {isFormBusy ? (
@@ -1056,6 +1331,80 @@ export default function RegisterScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      {Platform.OS === 'ios' ? (
+        <Modal
+          transparent
+          visible={showDobPicker}
+          animationType="fade"
+          onRequestClose={() => setShowDobPicker(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalCard, { backgroundColor: C.card, borderColor: C.border }]}>
+              <Text style={[styles.modalTitle, { color: C.text }]}>Select date of birth</Text>
+              <DateTimePicker
+                value={dobPickerTemp}
+                mode="date"
+                display="spinner"
+                maximumDate={maxDobDate}
+                minimumDate={minDobDate}
+                onChange={(_event, selectedDate) => {
+                  if (selectedDate) {
+                    setDobPickerTemp(selectedDate);
+                  }
+                }}
+              />
+              <View style={styles.wizardNav}>
+                <TouchableOpacity
+                  style={[styles.navButton, { borderColor: C.border }]}
+                  onPress={() => setShowDobPicker(false)}
+                >
+                  <Text style={{ color: C.text }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.navButtonPrimary, { backgroundColor: C.primary }]}
+                  onPress={() => {
+                    setDateOfBirth(formatDateOnly(dobPickerTemp));
+                    setShowDobPicker(false);
+                    setFieldErrors((prev) => {
+                      if (!prev.date_of_birth) return prev;
+                      const next = { ...prev };
+                      delete next.date_of_birth;
+                      return next;
+                    });
+                  }}
+                >
+                  <Text style={{ color: '#000', fontWeight: '600' }}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : (
+        showDobPicker && (
+          <DateTimePicker
+            value={dobPickerTemp}
+            mode="date"
+            display="default"
+            maximumDate={maxDobDate}
+            minimumDate={minDobDate}
+            onChange={(event, selectedDate) => {
+              // Android picker is a native dialog; close immediately to prevent re-opening loop.
+              setShowDobPicker(false);
+              if (event.type === 'set' && selectedDate) {
+                setDobPickerTemp(selectedDate);
+                setDateOfBirth(formatDateOnly(selectedDate));
+                setFieldErrors((prev) => {
+                  if (!prev.date_of_birth) return prev;
+                  const next = { ...prev };
+                  delete next.date_of_birth;
+                  return next;
+                });
+              }
+            }}
+          />
+        )
+      )}
 
       {/* Success Overlay */}
       {showSuccessOverlay && (
@@ -1236,9 +1585,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 12,
   },
+  dobInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 52,
+  },
   helperText: {
     fontSize: 12,
-    marginTop: -8,
+    marginTop: -4,
     marginBottom: 12,
   },
   phoneContainer: {
