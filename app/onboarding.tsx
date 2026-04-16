@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   Animated,
+  Pressable,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 const ONBOARDING_KEY = 'talynk_has_seen_onboarding';
 
@@ -21,6 +23,7 @@ interface OnboardingPage {
   title: string;
   description: string;
   color: string;
+  type?: 'feature' | 'guide';
 }
 
 // Define pageStyles first so it's available when pages array is evaluated
@@ -103,6 +106,25 @@ const pages: OnboardingPage[] = [
       'Connect with creators, follow your favorites, and be part of something bigger.',
     color: '#10b981',
   },
+  {
+    id: '4',
+    icon: (
+      <View style={pageStyles.iconGroup}>
+        <Feather name="play-circle" size={40} color="#60a5fa" />
+        <MaterialIcons
+          name="auto-stories"
+          size={26}
+          color="#fbbf24"
+          style={{ position: 'absolute', top: -6, right: -10 }}
+        />
+      </View>
+    ),
+    title: 'Starter Guide',
+    description:
+      'Watch a quick walkthrough to learn how Talentix works best. You can play, pause, mute, seek, or skip anytime.',
+    color: '#60a5fa',
+    type: 'guide',
+  },
 ];
 
 export default function OnboardingScreen() {
@@ -111,6 +133,62 @@ export default function OnboardingScreen() {
   const [currentPage, setCurrentPage] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
+  const [guideStarted, setGuideStarted] = useState(false);
+  const [guidePlaying, setGuidePlaying] = useState(false);
+  const [guideMuted, setGuideMuted] = useState(false);
+  const [guideProgress, setGuideProgress] = useState(0);
+  const [guideDuration, setGuideDuration] = useState(0);
+  const guideSource = require('../guide_video/Talentix_Starter_Guide.mp4');
+  const guidePageIndex = pages.length - 1;
+
+  const guidePlayer = useVideoPlayer(guideSource, (player) => {
+    player.loop = false;
+    player.muted = false;
+    player.pause();
+  });
+
+  useEffect(() => {
+    if (!guidePlayer) return;
+    const interval = setInterval(() => {
+      try {
+        const ct = guidePlayer.currentTime || 0;
+        const dur = guidePlayer.duration || 0;
+        if (dur > 0) {
+          setGuideDuration(dur);
+          const ratio = Math.max(0, Math.min(1, ct / dur));
+          setGuideProgress(ratio);
+          if (ratio >= 0.995 && guidePlaying) {
+            setGuidePlaying(false);
+          }
+        }
+      } catch {
+        // no-op
+      }
+    }, 250);
+    return () => clearInterval(interval);
+  }, [guidePlayer, guidePlaying]);
+
+  useEffect(() => {
+    if (!guidePlayer) return;
+    try {
+      guidePlayer.muted = guideMuted;
+    } catch {
+      // no-op
+    }
+  }, [guidePlayer, guideMuted]);
+
+  useEffect(() => {
+    if (!guidePlayer) return;
+    try {
+      if (currentPage === guidePageIndex && guideStarted && guidePlaying) {
+        guidePlayer.play();
+      } else {
+        guidePlayer.pause();
+      }
+    } catch {
+      // no-op
+    }
+  }, [currentPage, guidePageIndex, guidePlayer, guidePlaying, guideStarted]);
 
   const completeOnboarding = async () => {
     await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
@@ -125,14 +203,146 @@ export default function OnboardingScreen() {
     }
   };
 
-  const renderPage = ({ item, index }: { item: OnboardingPage; index: number }) => (
+  const formatSeconds = (s: number) => {
+    const total = Math.max(0, Math.floor(s));
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const startGuidePlayback = () => {
+    if (!guidePlayer) return;
+    setGuideStarted(true);
+    setGuidePlaying(true);
+    try {
+      guidePlayer.currentTime = 0;
+      guidePlayer.play();
+    } catch {
+      // no-op
+    }
+  };
+
+  const toggleGuidePlayback = () => {
+    if (!guidePlayer) return;
+    setGuideStarted(true);
+    setGuidePlaying((prev) => {
+      const next = !prev;
+      try {
+        if (next) guidePlayer.play();
+        else guidePlayer.pause();
+      } catch {
+        // no-op
+      }
+      return next;
+    });
+  };
+
+  const seekGuideBy = (deltaSeconds: number) => {
+    if (!guidePlayer) return;
+    try {
+      const dur = guidePlayer.duration || guideDuration || 0;
+      const ct = guidePlayer.currentTime || 0;
+      const next = Math.max(0, Math.min(dur > 0 ? dur : Number.MAX_SAFE_INTEGER, ct + deltaSeconds));
+      guidePlayer.currentTime = next;
+      if (dur > 0) {
+        setGuideProgress(Math.max(0, Math.min(1, next / dur)));
+      }
+    } catch {
+      // no-op
+    }
+  };
+
+  const seekGuideToRatio = (ratio: number) => {
+    if (!guidePlayer) return;
+    try {
+      const dur = guidePlayer.duration || guideDuration || 0;
+      if (dur > 0) {
+        const next = Math.max(0, Math.min(dur, dur * ratio));
+        guidePlayer.currentTime = next;
+        setGuideProgress(next / dur);
+      }
+    } catch {
+      // no-op
+    }
+  };
+
+  const renderPage = ({ item }: { item: OnboardingPage; index: number }) => (
     <View style={[pageStyles.page, { width, height }]}>
       <View style={pageStyles.content}>
-        <View style={[pageStyles.iconContainer, { borderColor: item.color }]}>
-          {item.icon}
-        </View>
-        <Text style={pageStyles.title}>{item.title}</Text>
-        <Text style={pageStyles.description}>{item.description}</Text>
+        {!(item.type === 'guide' && guideStarted) && (
+          <>
+            <View style={[pageStyles.iconContainer, { borderColor: item.color }]}>
+              {item.icon}
+            </View>
+            <Text style={pageStyles.title}>{item.title}</Text>
+            <Text style={pageStyles.description}>{item.description}</Text>
+          </>
+        )}
+        {item.type === 'guide' && (
+          <View style={[styles.guideSection, guideStarted && styles.guideSectionPlaying]}>
+            <View style={styles.guideVideoShell}>
+              {!guideStarted ? (
+                <Pressable style={styles.guideStartCard} onPress={startGuidePlayback}>
+                  <View style={styles.guideStartIcon}>
+                    <Feather name="play" size={32} color="#000" />
+                  </View>
+                  <Text style={styles.guideStartTitle}>Play Starter Guide</Text>
+                  <Text style={styles.guideStartSubtitle}>
+                    Quick walkthrough before entering the app.
+                  </Text>
+                  <TouchableOpacity style={styles.guideSkipInline} onPress={completeOnboarding}>
+                    <Text style={styles.guideSkipInlineText}>Skip video and continue</Text>
+                  </TouchableOpacity>
+                </Pressable>
+              ) : (
+                <>
+                  <VideoView
+                    player={guidePlayer}
+                    style={styles.guideVideo}
+                    contentFit="contain"
+                    nativeControls={false}
+                  />
+                  <View style={styles.guideOverlayControls}>
+                    <TouchableOpacity style={styles.guideControlFab} onPress={toggleGuidePlayback}>
+                      <Feather name={guidePlaying ? 'pause' : 'play'} size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.guideControlFab} onPress={() => setGuideMuted((m) => !m)}>
+                      <Feather name={guideMuted ? 'volume-x' : 'volume-2'} size={18} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.guideControlFab} onPress={() => seekGuideBy(-10)}>
+                      <MaterialIcons name="replay-10" size={20} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.guideControlFab} onPress={() => seekGuideBy(10)}>
+                      <MaterialIcons name="forward-10" size={20} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.guideControlFab} onPress={completeOnboarding}>
+                      <Feather name="skip-forward" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
+            </View>
+
+            {guideStarted && (
+              <View style={styles.guideProgressWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={styles.guideProgressTrack}
+                  onPress={(e) => {
+                    const { locationX } = e.nativeEvent;
+                    const ratio = Math.max(0, Math.min(1, locationX / Math.max(1, width - 116)));
+                    seekGuideToRatio(ratio);
+                  }}
+                >
+                  <View style={[styles.guideProgressFill, { width: `${guideProgress * 100}%` }]} />
+                </TouchableOpacity>
+                <Text style={styles.guideTimeText}>
+                  {formatSeconds((guidePlayer?.currentTime || 0))} / {formatSeconds(guideDuration)}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -201,7 +411,7 @@ export default function OnboardingScreen() {
           activeOpacity={0.8}
         >
           <Text style={styles.nextButtonText}>
-            {currentPage === pages.length - 1 ? 'Get Started' : 'Next'}
+            {currentPage === pages.length - 1 ? 'Continue to App' : 'Next'}
           </Text>
           <Feather
             name={currentPage === pages.length - 1 ? 'check' : 'arrow-right'}
@@ -263,5 +473,110 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 18,
     fontWeight: '700',
+  },
+  guideSection: {
+    width: '100%',
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  guideSectionPlaying: {
+    marginTop: 40,
+  },
+  guideVideoShell: {
+    width: '100%',
+    maxWidth: 460,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderColor: '#27272a',
+    paddingVertical: 10,
+    marginTop: 40,
+  },
+  guideStartCard: {
+    minHeight: 240,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  guideStartIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#60a5fa',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  guideStartTitle: {
+    color: '#f3f4f6',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  guideStartSubtitle: {
+    color: '#a1a1aa',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  guideSkipInline: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  guideSkipInlineText: {
+    color: '#d4d4d8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  guideVideo: {
+    width: '100%',
+    aspectRatio: 9 / 16,
+    maxHeight: 500,
+    minHeight: 340,
+    backgroundColor: '#000',
+  },
+  guideOverlayControls: {
+    position: 'absolute',
+    right: 10,
+    top: 16,
+    gap: 8,
+  },
+  guideControlFab: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guideProgressWrap: {
+    width: '100%',
+    maxWidth: 440,
+    marginTop: 12,
+  },
+  guideProgressTrack: {
+    width: '100%',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#27272a',
+    overflow: 'hidden',
+  },
+  guideProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#60a5fa',
+  },
+  guideTimeText: {
+    marginTop: 6,
+    textAlign: 'right',
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
