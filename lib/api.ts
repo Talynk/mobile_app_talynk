@@ -1025,12 +1025,11 @@ export const userApi = {
       let response;
 
       if (profileImage) {
-        // Create FormData for multipart upload
         const formData = new FormData();
 
-        // Add phone numbers
-        if (updateData.phone1) formData.append('phone1', updateData.phone1);
-        if (updateData.phone2) formData.append('phone2', updateData.phone2);
+        if (updateData.phone1 !== undefined) formData.append('phone1', updateData.phone1);
+        if (updateData.phone2 !== undefined) formData.append('phone2', updateData.phone2);
+        if (updateData.bio !== undefined) formData.append('bio', updateData.bio);
 
         // Add profile image
         const imageUri = profileImage;

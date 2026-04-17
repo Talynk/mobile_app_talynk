@@ -158,6 +158,8 @@ export interface User {
   avatar?: string;
   profile_picture?: string;
   bio?: string;
+  phone1?: string;
+  phone2?: string;
   followers_count?: number;
   following_count?: number;
   posts_count?: number;

@@ -676,11 +676,12 @@ export default function ProfileScreen() {
           followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
           following_count: followingCount,
           posts_count: publishedPostsCountRef.current || prev?.posts_count || userData.posts_count || userData.postsCount || 0,
-          phone1: userData.phone1,
-          phone2: userData.phone2,
-          email: userData.email,
+          phone1: userData.phone1 || '',
+          phone2: userData.phone2 || '',
+          email: userData.email || '',
+          date_of_birth: userData.date_of_birth || '',
           profile_picture: userData.profile_picture,
-          bio: userData.bio || '',
+          bio: userData.bio ?? '',
           username: userData.username,
           id: userData.id,
         }));
@@ -1587,7 +1588,7 @@ export default function ProfileScreen() {
                 style={styles.editButton}
                 onPress={() => setEditModalVisible(true)}
               >
-                <Text style={styles.editButtonText}>Edit Profile</Text>
+                <Text style={styles.editButtonText}>View and Edit Full Profile</Text>
               </TouchableOpacity>
             </View>
 
