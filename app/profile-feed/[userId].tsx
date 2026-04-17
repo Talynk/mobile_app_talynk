@@ -48,6 +48,7 @@ import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
 import { safeRouterBack } from '@/lib/utils/navigation';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
@@ -613,12 +614,11 @@ function ProfileFeedContent({
         setCurrentIndex(lastActiveIndexRef.current);
       }
       return () => {
-        // Use ref to avoid dependency issues
         setIsScreenFocused(false);
         lastActiveIndexRef.current = currentIndexRef.current;
-        // expo-video handles pause/play internally via useVideoPlayer source changes
+        pauseAllVideos();
       };
-    }, []) // Empty dependency array - only run on focus/blur
+    }, [])
   );
 
   useEffect(() => {
@@ -789,8 +789,8 @@ function ProfileFeedContent({
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 80, // Higher threshold for full-screen pagination
-    minimumViewTime: 200,
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 50,
     waitForInteraction: false,
   }).current;
 
@@ -861,6 +861,7 @@ function ProfileFeedContent({
           snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
           snapToAlignment="start"
           decelerationRate="fast"
+          scrollEventThrottle={16}
           contentContainerStyle={{ paddingBottom: 0 }}
           windowSize={VIDEO_FEED_WINDOW_SIZE}
           initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
@@ -880,8 +881,16 @@ function ProfileFeedContent({
               progressViewOffset={20}
             />
           }
-          onScrollBeginDrag={() => setIsFeedTransitioning(true)}
-          onMomentumScrollBegin={() => setIsFeedTransitioning(true)}
+          onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
+          onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
+          onScroll={(event) => {
+            const y = event.nativeEvent.contentOffset.y;
+            const idx = Math.round(y / availableHeight);
+            if (idx !== currentIndexRef.current) {
+              pauseAllVideos();
+              currentIndexRef.current = idx;
+            }
+          }}
           onMomentumScrollEnd={(event) => {
             const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
             setCurrentIndex(nextIndex);

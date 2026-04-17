@@ -26,8 +26,10 @@ import {
   formatChallengeDateTime,
   getChallengeDateInfo,
   getChallengeDisplayStatus,
+  isChallengeOver,
   isChallengeParticipationOpen,
   isChallengeUpcoming,
+  parseChallengeDate,
 } from '@/lib/utils/challenge';
 import { safeRouterBack } from '@/lib/utils/navigation';
 
@@ -118,10 +120,10 @@ export default function ChallengesScreen() {
       const allListRaw = normalizeChallenges(allRes);
       const now = new Date();
 
-      const activeList = allListRaw.filter((ch: any) => isChallengeParticipationOpen(ch, now));
-      const upcomingList = allListRaw.filter((ch: any) => isChallengeUpcoming(ch, now));
+      const notOver = allListRaw.filter((ch: any) => !isChallengeOver(ch, now));
+      const activeList = notOver.filter((ch: any) => isChallengeParticipationOpen(ch, now));
+      const upcomingList = notOver.filter((ch: any) => isChallengeUpcoming(ch, now));
 
-      // Ended: GET /api/challenges/ended
       const endedFromApi = (endedRes.data?.challenges ?? []) as any[];
       const endedList = endedFromApi.map((item: any) => item.challenge || item);
 
@@ -161,12 +163,13 @@ export default function ChallengesScreen() {
   }, [isAuthenticated]);
 
   const visibleChallenges = useMemo(() => {
+    const now = new Date();
     if (activeTab === 'live_upcoming') {
-      const merged = [...activeChallenges, ...upcomingChallenges];
+      const merged = [...activeChallenges, ...upcomingChallenges]
+        .filter((ch) => !isChallengeOver(ch, now));
       return merged.sort((a, b) => {
-        const now = new Date();
-        const aStart = new Date(a.start_date).getTime();
-        const bStart = new Date(b.start_date).getTime();
+        const aStart = parseChallengeDate(a.start_date)?.getTime() ?? 0;
+        const bStart = parseChallengeDate(b.start_date)?.getTime() ?? 0;
         const aActive = isChallengeParticipationOpen(a, now);
         const bActive = isChallengeParticipationOpen(b, now);
         if (aActive && !bActive) return -1;

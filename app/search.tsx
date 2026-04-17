@@ -15,7 +15,6 @@ import { postsApi, userApi, followsApi } from '@/lib/api';
 import { Post, User } from '@/types';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { getPostMediaUrl } from '@/lib/utils/file-url';
@@ -325,11 +324,7 @@ export default function SearchScreen() {
 const SearchPostItem = ({ item }: { item: Post }) => {
   const mediaUrl = getPostMediaUrl(item) || '';
   const isVideo = !!(item.video_url || item.videoUrl);
-
-  const player = useVideoPlayer(isVideo ? mediaUrl : null, player => {
-    player.loop = true;
-    player.muted = true;
-  });
+  const thumbnailUrl = item.thumbnail_url || item.thumbnailUrl || '';
 
   return (
     <TouchableOpacity
@@ -342,15 +337,14 @@ const SearchPostItem = ({ item }: { item: Post }) => {
         }
       })}
     >
-      {isVideo ? (
-        <VideoView
-          player={player}
-          style={styles.resultMedia}
-          contentFit="cover"
-          nativeControls={false}
-        />
-      ) : (
-        <Image source={{ uri: mediaUrl }} style={styles.resultMedia} />
+      <Image
+        source={{ uri: isVideo && thumbnailUrl ? thumbnailUrl : mediaUrl }}
+        style={styles.resultMedia}
+      />
+      {isVideo && (
+        <View style={styles.videoIndicator}>
+          <Feather name="play" size={16} color="#fff" />
+        </View>
       )}
 
       <View style={styles.resultOverlay}>
@@ -459,6 +453,17 @@ const styles = StyleSheet.create({
   resultMedia: {
     width: '100%',
     height: '100%',
+  },
+  videoIndicator: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   resultOverlay: {
     position: 'absolute',

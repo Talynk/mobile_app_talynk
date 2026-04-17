@@ -46,6 +46,7 @@ import {
   VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -115,6 +116,7 @@ export default function FeedScreen() {
         const savedIndex = currentIndexRef.current;
         setIsScreenFocused(false);
         lastActiveIndexRef.current = savedIndex;
+        pauseAllVideos();
       };
     }, [])
   );
@@ -294,7 +296,7 @@ export default function FeedScreen() {
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
-    minimumViewTime: 200,
+    minimumViewTime: 50,
     waitForInteraction: false,
   }).current;
 
@@ -490,8 +492,16 @@ export default function FeedScreen() {
                   tintColor="#60a5fa"
                 />
               }
-              onScrollBeginDrag={() => setIsFeedTransitioning(true)}
-              onMomentumScrollBegin={() => setIsFeedTransitioning(true)}
+              onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
+              onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
+              onScroll={(event) => {
+                const y = event.nativeEvent.contentOffset.y;
+                const idx = Math.round(y / availableHeight);
+                if (idx !== currentIndexRef.current) {
+                  pauseAllVideos();
+                  currentIndexRef.current = idx;
+                }
+              }}
               onMomentumScrollEnd={(event) => {
                 const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
                 setCurrentIndex(nextIndex);

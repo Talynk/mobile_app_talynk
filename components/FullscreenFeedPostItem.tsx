@@ -37,6 +37,7 @@ import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibility';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const formatNumber = (num: number): string => {
@@ -170,6 +171,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         instance.muted = shouldPlay ? isMuted : true;
         instance.staysActiveInBackground = false;
         instance.timeUpdateEventInterval = 0.25;
+        (instance as any).preferredForwardBufferDuration = 8;
       } catch (e) {
         console.warn('[FeedVideo] Error configuring player:', e);
       }
@@ -182,7 +184,23 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         onPlayerInvalid();
       }
 
+      const unregister = player
+        ? registerVideoPauser(() => {
+            try {
+              player.muted = true;
+              player.pause();
+            } catch (_) {}
+          })
+        : undefined;
+
       return () => {
+        unregister?.();
+        if (player) {
+          try {
+            player.muted = true;
+            player.pause();
+          } catch (_) {}
+        }
         onPlayerInvalid();
       };
     }, [onPlayerInvalid, onPlayerReady, player]);
@@ -661,14 +679,19 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     return () => clearInterval(interval);
   }, [isActive, isPlayerValid, pausedByUser, suspendPlayback]);
 
-  // Fade out thumbnail when video is playing and ready
+  // Fade out thumbnail only after the video has buffered enough to play smoothly.
+  // Wait for readyToPlay status + isPlaying + a short delay so HLS segments load.
   useEffect(() => {
     if (isActive && isPlaying && videoReady) {
-      Animated.timing(thumbnailOpacity, {
-        toValue: 0,
-        duration: 80,
-        useNativeDriver: true,
-      }).start();
+      const timerId = setTimeout(() => {
+        if (!isMountedRef.current) return;
+        Animated.timing(thumbnailOpacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+      }, 350);
+      return () => clearTimeout(timerId);
     } else {
       thumbnailOpacity.setValue(1);
     }

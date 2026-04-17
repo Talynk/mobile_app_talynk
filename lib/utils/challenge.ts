@@ -16,18 +16,25 @@ export function parseChallengeDate(value: DateLike): Date | null {
   const input = String(value).trim();
   if (!input) return null;
 
-  const nativeDate = new Date(input);
-  if (!Number.isNaN(nativeDate.getTime())) {
-    return nativeDate;
-  }
+  // Normalize space-separated datetime to T-separated (Hermes doesn't parse "2026-04-14 22:30:00")
+  const normalized = input.replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T');
 
-  const normalized = input.replace(' ', 'T');
-  const match = normalized.match(
-    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2})(?::(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?)?$/
+  // Try ISO-like parsing first — works reliably across V8, JSC, and Hermes
+  const isoMatch = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2})(?::(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?)?)?([Zz]|[+-]\d{2}:?\d{2})?$/
   );
 
-  if (match) {
-    const [, year, month, day, hour = '00', minute = '00', second = '00', millisecond = '0'] = match;
+  if (isoMatch) {
+    const [, year, month, day, hour = '00', minute = '00', second = '00', frac = '0', tz] = isoMatch;
+
+    if (tz) {
+      // Has timezone info — let native parser handle it since the format is now clean
+      const isoStr = `${year}-${month}-${day}T${hour}:${minute}:${second}.${frac.padEnd(3, '0')}${tz.toUpperCase()}`;
+      const d = new Date(isoStr);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+
+    // No timezone — construct as local time explicitly (consistent across all engines)
     const date = new Date(
       Number(year),
       Number(month) - 1,
@@ -35,13 +42,19 @@ export function parseChallengeDate(value: DateLike): Date | null {
       Number(hour),
       Number(minute),
       Number(second),
-      Number(millisecond.padEnd(3, '0')),
+      Number(frac.padEnd(3, '0').slice(0, 3)),
     );
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const date = new Date(input);
-  return Number.isNaN(date.getTime()) ? null : date;
+  // Fallback: try native parser
+  const nativeDate = new Date(input);
+  if (!Number.isNaN(nativeDate.getTime())) {
+    return nativeDate;
+  }
+
+  const nativeNorm = new Date(normalized);
+  return Number.isNaN(nativeNorm.getTime()) ? null : nativeNorm;
 }
 
 export function getChallengeStatusValue(challenge: any): string {
@@ -53,6 +66,10 @@ export function isChallengeOver(challenge: any, now = new Date()): boolean {
 
   const status = getChallengeStatusValue(challenge);
   if (OVER_STATUSES.has(status)) {
+    return true;
+  }
+
+  if (challenge.is_ended === true || challenge.isEnded === true) {
     return true;
   }
 
@@ -90,9 +107,26 @@ export function isChallengeParticipationOpen(challenge: any, now = new Date()): 
     return false;
   }
 
+  // Also trust backend flags that indicate the challenge is finished
+  if (challenge.is_ended === true || challenge.isEnded === true) {
+    return false;
+  }
+
+  const endDate = parseChallengeDate(challenge.end_date);
+
   if (challenge.is_currently_active === true || status === 'active') {
-    const endDate = parseChallengeDate(challenge.end_date);
-    return !endDate || now.getTime() <= endDate.getTime();
+    // If there's no parseable end_date but the challenge was fetched from
+    // an "active" endpoint, only treat it as open if end_date is genuinely
+    // absent. If end_date exists but failed to parse, err on the side of
+    // "ended" to prevent ghost appearances in the ongoing tab.
+    if (!endDate) {
+      const rawEnd = challenge.end_date;
+      if (rawEnd !== null && rawEnd !== undefined && String(rawEnd).trim() !== '') {
+        return false;
+      }
+      return true;
+    }
+    return now.getTime() <= endDate.getTime();
   }
 
   if (status !== 'approved') {
@@ -100,7 +134,6 @@ export function isChallengeParticipationOpen(challenge: any, now = new Date()): 
   }
 
   const startDate = parseChallengeDate(challenge.start_date);
-  const endDate = parseChallengeDate(challenge.end_date);
 
   if (startDate && now.getTime() < startDate.getTime()) {
     return false;

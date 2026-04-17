@@ -66,6 +66,7 @@ import {
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { safeRouterBack } from '@/lib/utils/navigation';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -133,6 +134,7 @@ export default function ChallengeDetailScreen() {
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
   const challengeDetailListRef = useRef<FlatList>(null);
+  const tabsSectionYRef = useRef<number>(0);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -180,7 +182,7 @@ export default function ChallengeDetailScreen() {
   }).current;
   const fullscreenViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
-    minimumViewTime: 100,
+    minimumViewTime: 50,
   }).current;
 
   useRefetchOnReconnect(() => {
@@ -1153,6 +1155,21 @@ export default function ChallengeDetailScreen() {
                   <Text style={styles.statLabel}>Your Posts</Text>
                 </View>
               ) : null}
+              <TouchableOpacity
+                style={styles.moreDetailsLink}
+                onPress={() => {
+                  if (tabsSectionYRef.current > 0) {
+                    challengeDetailListRef.current?.scrollToOffset({
+                      offset: tabsSectionYRef.current - 10,
+                      animated: true,
+                    });
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.moreDetailsText}>More details</Text>
+                <MaterialIcons name="keyboard-arrow-down" size={18} color="#fff" />
+              </TouchableOpacity>
             </View>
           )}
         </LinearGradient>
@@ -1382,7 +1399,10 @@ export default function ChallengeDetailScreen() {
 
         {/* Tabs - only when challenge is approved (not pending); pending organizer sees no Posts/Participants tabs */}
         {challenge.status !== 'pending' && (
-          <View style={[styles.tabsSection, { backgroundColor: C.background }]}>
+          <View
+            style={[styles.tabsSection, { backgroundColor: C.background }]}
+            onLayout={(e) => { tabsSectionYRef.current = e.nativeEvent.layout.y; }}
+          >
             <View style={styles.tabsContainer}>
               <TouchableOpacity
                 style={[
@@ -1754,14 +1774,14 @@ export default function ChallengeDetailScreen() {
         visible={showFullscreen}
         animationType="fade"
         transparent={false}
-        onRequestClose={() => setShowFullscreen(false)}
+        onRequestClose={() => { pauseAllVideos(); setShowFullscreen(false); }}
       >
         <SafeAreaView style={[styles.fullscreenContainer, { backgroundColor: C.background }]} edges={['top']}>
           <StatusBar barStyle="light-content" />
           <View style={styles.fullscreenHeader}>
             <TouchableOpacity
               style={styles.closeButton}
-              onPress={() => setShowFullscreen(false)}
+              onPress={() => { pauseAllVideos(); setShowFullscreen(false); }}
             >
               <Feather name="x" size={28} color="#fff" />
             </TouchableOpacity>
@@ -1811,8 +1831,8 @@ export default function ChallengeDetailScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
-            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
-            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
+            onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
+            onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
               setFullscreenIndex(Math.max(0, Math.min(index, sortedPosts.length - 1)));
@@ -2271,6 +2291,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
     flexShrink: 1,
+  },
+  moreDetailsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 2,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginTop: 10,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 12,
+  },
+  moreDetailsText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   tabsSection: {
     paddingHorizontal: 20,

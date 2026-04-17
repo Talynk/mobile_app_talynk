@@ -53,6 +53,7 @@ import {
   uploadPreparedVideo,
 } from '@/lib/utils/video-upload';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { fetchWithRetry } from '@/lib/utils/fetch-with-retry';
 import {
@@ -353,6 +354,7 @@ export default function CreatePostScreen() {
     if (player) {
       player.loop = true;
       player.muted = false;
+      player.staysActiveInBackground = false;
     }
   });
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
@@ -536,6 +538,16 @@ export default function CreatePostScreen() {
       setIsVideoPlaying(false);
     } catch (_) {}
   }, [isAppActive, previewPlayer]);
+
+  useEffect(() => {
+    if (!previewPlayer) return;
+    return registerVideoPauser(() => {
+      try {
+        previewPlayer.pause();
+      } catch (_) {}
+      setIsVideoPlaying(false);
+    });
+  }, [previewPlayer]);
 
   const CATEGORY_ORDER = ['Music', 'Sport', 'Performance', 'Beauty', 'Arts', 'Communication'];
 
@@ -1840,18 +1852,11 @@ export default function CreatePostScreen() {
     handleRecordVideo();
   };
 
-  const handleRetryRecordingAfterMaxDuration = useCallback(() => {
-    setShowMaxDurationReachedModal(false);
-    setRecordedVideoUri(null);
-    setEditedVideoUri(null);
-    setCapturedImageUri(null);
-    setThumbnailUri(null);
-    setServerMediaUrl(null);
-    setUploadProgress(0);
-    setTimeout(() => {
-      handleRecordVideo();
-    }, 120);
-  }, [handleRecordVideo]);
+  useEffect(() => {
+    if (!showMaxDurationReachedModal) return;
+    const timer = setTimeout(() => setShowMaxDurationReachedModal(false), 2200);
+    return () => clearTimeout(timer);
+  }, [showMaxDurationReachedModal]);
 
   // --- TOAST MESSAGE ---
   const showToast = (message: string) => {
@@ -2853,41 +2858,15 @@ export default function CreatePostScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* 2 minutes reached — notify then user continues to caption screen */}
-      <Modal
-        visible={showMaxDurationReachedModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMaxDurationReachedModal(false)}
-      >
-        <View style={styles.maxDurationOverlay}>
-          <View style={styles.maxDurationCard}>
-            <View style={styles.maxDurationIconWrap}>
-              <MaterialIcons name="timer" size={44} color="#f59e0b" />
-            </View>
-            <Text style={styles.maxDurationTitle}>2 minutes max reached</Text>
-            {/* <Text style={styles.maxDurationMessage}>
-              2 minutes reached. Your video has been saved. You can continue with this recording, or record again to adjust the length.
-            </Text> */}
-            <View style={styles.maxDurationActions}>
-              <TouchableOpacity
-                style={[styles.maxDurationButton, styles.maxDurationSecondaryButton]}
-                onPress={handleRetryRecordingAfterMaxDuration}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.maxDurationButtonText, styles.maxDurationSecondaryButtonText]}>Record Again</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.maxDurationButton}
-                onPress={() => setShowMaxDurationReachedModal(false)}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.maxDurationButtonText}>Continue</Text>
-              </TouchableOpacity>
-            </View>
+      {/* 2 minutes reached — brief auto-dismiss toast */}
+      {showMaxDurationReachedModal && (
+        <View style={styles.maxDurationToast} pointerEvents="none">
+          <View style={styles.maxDurationToastInner}>
+            <MaterialIcons name="timer" size={22} color="#f59e0b" />
+            <Text style={styles.maxDurationToastText}>2 minutes max reached</Text>
           </View>
         </View>
-      </Modal>
+      )}
 
       {/* Camera Modal */}
       {showCamera && (
@@ -4660,71 +4639,29 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '500',
   },
-  maxDurationOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'center',
+  maxDurationToast: {
+    position: 'absolute',
+    top: 80,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    padding: 24,
+    zIndex: 9999,
   },
-  maxDurationCard: {
-    backgroundColor: '#1a1a1a',
+  maxDurationToastInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(30,30,30,0.92)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderRadius: 24,
-    padding: 28,
-    width: '100%',
-    maxWidth: 340,
-    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: 'rgba(245,158,11,0.35)',
   },
-  maxDurationIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  maxDurationTitle: {
+  maxDurationToastText: {
     color: '#fff',
-    fontSize: 19,
-    fontWeight: '700',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  maxDurationMessage: {
-    color: '#d1d5db',
     fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-    marginBottom: 24,
-    paddingHorizontal: 8,
-  },
-  maxDurationActions: {
-    width: '100%',
-    gap: 12,
-  },
-  maxDurationButton: {
-    backgroundColor: '#f59e0b',
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 14,
-    width: '100%',
-  },
-  maxDurationSecondaryButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  maxDurationButtonText: {
-    color: '#000',
-    fontSize: 17,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  maxDurationSecondaryButtonText: {
-    color: '#e5e7eb',
+    fontWeight: '600',
   },
   recordLimitHint: {
     fontSize: 12,

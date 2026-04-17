@@ -19,7 +19,7 @@ import {
   PanResponder,
   useWindowDimensions,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { sharePost } from '@/lib/post-share';
@@ -39,6 +39,7 @@ import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-c
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
+import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -321,9 +322,22 @@ export default function PostDetailScreen() {
       if (player) {
         player.loop = false;
         player.muted = isMuted;
+        player.staysActiveInBackground = false;
+        (player as any).preferredForwardBufferDuration = 10;
       }
     }
   );
+
+  // Register with global video pause coordinator
+  useEffect(() => {
+    if (!videoPlayer) return;
+    return registerVideoPauser(() => {
+      try {
+        videoPlayer.muted = true;
+        videoPlayer.pause();
+      } catch { }
+    });
+  }, [videoPlayer]);
 
   // Track playback state for thumbnail layer
   useEffect(() => {
@@ -345,6 +359,20 @@ export default function PostDetailScreen() {
     try { videoPlayer.muted = isMuted; } catch { }
   }, [isMuted, videoPlayer]);
 
+  // Pause on screen blur (navigation away) and resume on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (videoPlayer) {
+        try { videoPlayer.play(); } catch { }
+      }
+      return () => {
+        if (videoPlayer) {
+          try { videoPlayer.pause(); } catch { }
+        }
+      };
+    }, [videoPlayer])
+  );
+
   // Auto-play when screen loads
   useEffect(() => {
     if (!videoPlayer) return;
@@ -353,6 +381,7 @@ export default function PostDetailScreen() {
     } catch { }
   }, [videoPlayer]);
 
+  // Pause when app goes to background
   useEffect(() => {
     if (!videoPlayer || isAppActive) return;
     try {

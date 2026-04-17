@@ -16,8 +16,8 @@ export function shouldPreloadFeedVideo(
     return false;
   }
 
-  // Only preload the immediate neighbor. Wider HLS preloading made long videos
-  // compete for decoder/network/cache resources and destabilized playback.
+  // Preload the two nearest neighbors so HLS manifests + initial segments
+  // are ready before the user scrolls to them.
   const distance = Math.abs(index - activeIndex);
-  return distance === 1;
+  return distance >= 1 && distance <= 2;
 }

@@ -6,6 +6,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import RealtimeProvider from '@/lib/realtime-context';
 import { NotificationBadgeProvider, useNotificationBadge } from '@/lib/notification-badge-context';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 
 function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -37,7 +38,10 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
       {state.routes.map((route: any, idx: number) => {
         const isFocused = state.index === idx;
         const onPress = () => {
-          if (!isFocused) navigation.navigate(route.name);
+          if (!isFocused) {
+            pauseAllVideos();
+            navigation.navigate(route.name);
+          }
         };
 
         // Center create button - opens create tab

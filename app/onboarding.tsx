@@ -8,12 +8,14 @@ import {
   useWindowDimensions,
   Animated,
   Pressable,
+  AppState,
 } from 'react-native';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 
 const ONBOARDING_KEY = 'talynk_has_seen_onboarding';
 
@@ -36,16 +38,17 @@ const pageStyles = StyleSheet.create({
   content: {
     alignItems: 'center',
     marginBottom: 100,
+    paddingTop: 20,
   },
   iconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 28,
   },
   iconGroup: {
     position: 'relative',
@@ -121,7 +124,7 @@ const pages: OnboardingPage[] = [
     ),
     title: 'Starter Guide',
     description:
-      'Watch a quick walkthrough to learn how Talentix works best. You can play, pause, mute, seek, or skip anytime.',
+      'Watch a quick walkthrough to learn exactly how Talentix works. You are also free to skip it.',
     color: '#60a5fa',
     type: 'guide',
   },
@@ -144,8 +147,31 @@ export default function OnboardingScreen() {
   const guidePlayer = useVideoPlayer(guideSource, (player) => {
     player.loop = false;
     player.muted = false;
+    player.staysActiveInBackground = false;
     player.pause();
   });
+
+  // Pause when app goes to background
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && guidePlayer) {
+        try { guidePlayer.pause(); } catch { }
+        setGuidePlaying(false);
+      }
+    });
+    return () => sub.remove();
+  }, [guidePlayer]);
+
+  // Register with global video pause coordinator
+  useEffect(() => {
+    if (!guidePlayer) return;
+    return registerVideoPauser(() => {
+      try {
+        guidePlayer.pause();
+      } catch { }
+      setGuidePlaying(false);
+    });
+  }, [guidePlayer]);
 
   useEffect(() => {
     if (!guidePlayer) return;
@@ -266,30 +292,48 @@ export default function OnboardingScreen() {
     }
   };
 
+  const isGuidePage = (item: OnboardingPage) => item.type === 'guide';
+
   const renderPage = ({ item }: { item: OnboardingPage; index: number }) => (
-    <View style={[pageStyles.page, { width, height }]}>
-      <View style={pageStyles.content}>
+    <View style={[
+      pageStyles.page,
+      { width, height },
+      isGuidePage(item) && { justifyContent: 'flex-start', paddingTop: insets.top + 50 },
+    ]}>
+      <View style={[
+        pageStyles.content,
+        isGuidePage(item) && { marginBottom: 0 },
+      ]}>
         {!(item.type === 'guide' && guideStarted) && (
           <>
-            <View style={[pageStyles.iconContainer, { borderColor: item.color }]}>
+            <View style={[
+              pageStyles.iconContainer,
+              { borderColor: item.color },
+              isGuidePage(item) && { width: 70, height: 70, borderRadius: 35, marginBottom: 12 },
+            ]}>
               {item.icon}
             </View>
-            <Text style={pageStyles.title}>{item.title}</Text>
-            <Text style={pageStyles.description}>{item.description}</Text>
+            <Text style={[
+              pageStyles.title,
+              isGuidePage(item) && { fontSize: 24, marginBottom: 8 },
+            ]}>{item.title}</Text>
+            <Text style={[
+              pageStyles.description,
+              isGuidePage(item) && { fontSize: 14, lineHeight: 20, marginBottom: 0 },
+            ]}>{item.description}</Text>
           </>
         )}
         {item.type === 'guide' && (
           <View style={[styles.guideSection, guideStarted && styles.guideSectionPlaying]}>
+            {!guideStarted && (
+              <Text style={styles.guideCallToAction}>Click on the button below to start playing</Text>
+            )}
             <View style={styles.guideVideoShell}>
               {!guideStarted ? (
                 <Pressable style={styles.guideStartCard} onPress={startGuidePlayback}>
                   <View style={styles.guideStartIcon}>
                     <Feather name="play" size={32} color="#000" />
                   </View>
-                  <Text style={styles.guideStartTitle}>Play Starter Guide</Text>
-                  <Text style={styles.guideStartSubtitle}>
-                    Quick walkthrough before entering the app.
-                  </Text>
                   <TouchableOpacity style={styles.guideSkipInline} onPress={completeOnboarding}>
                     <Text style={styles.guideSkipInlineText}>Skip video and continue</Text>
                   </TouchableOpacity>
@@ -474,9 +518,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
+  guideCallToAction: {
+    color: '#f3f4f6',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
   guideSection: {
     width: '100%',
-    marginTop: 16,
+    marginTop: 10,
     alignItems: 'center',
   },
   guideSectionPlaying: {
@@ -491,33 +542,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#27272a',
     paddingVertical: 10,
-    marginTop: 40,
+    marginTop: 10,
   },
   guideStartCard: {
-    minHeight: 240,
+    minHeight: 160,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    padding: 20,
   },
   guideStartIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#60a5fa',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-  },
-  guideStartTitle: {
-    color: '#f3f4f6',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  guideStartSubtitle: {
-    color: '#a1a1aa',
-    fontSize: 13,
-    textAlign: 'center',
     marginBottom: 14,
   },
   guideSkipInline: {

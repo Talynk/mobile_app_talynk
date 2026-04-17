@@ -1385,11 +1385,10 @@ export default function RegisterScreen() {
           <DateTimePicker
             value={dobPickerTemp}
             mode="date"
-            display="default"
+            display="spinner"
             maximumDate={maxDobDate}
             minimumDate={minDobDate}
             onChange={(event, selectedDate) => {
-              // Android picker is a native dialog; close immediately to prevent re-opening loop.
               setShowDobPicker(false);
               if (event.type === 'set' && selectedDate) {
                 setDobPickerTemp(selectedDate);

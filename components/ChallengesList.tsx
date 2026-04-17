@@ -21,8 +21,10 @@ import {
     formatChallengeDateTime,
     getChallengeDateInfo,
     getChallengeDisplayStatus,
+    isChallengeOver,
     isChallengeParticipationOpen,
     isChallengeUpcoming,
+    parseChallengeDate,
 } from '@/lib/utils/challenge';
 
 interface Challenge {
@@ -144,11 +146,12 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                         const data = response.data?.challenges || response.data || [];
                         const all = Array.isArray(data) ? data : [];
                         challengesToDisplay = all.filter((challenge: any) => {
+                            if (isChallengeOver(challenge, now)) return false;
                             return isChallengeParticipationOpen(challenge, now) || isChallengeUpcoming(challenge, now);
                         });
                         challengesToDisplay.sort((a: any, b: any) => {
-                            const aStart = new Date(a.start_date).getTime();
-                            const bStart = new Date(b.start_date).getTime();
+                            const aStart = parseChallengeDate(a.start_date)?.getTime() ?? 0;
+                            const bStart = parseChallengeDate(b.start_date)?.getTime() ?? 0;
                             const aActive = isChallengeParticipationOpen(a, now);
                             const bActive = isChallengeParticipationOpen(b, now);
                             if (aActive && !bActive) return -1;
@@ -168,15 +171,18 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 if (publicRes.status === 'success') {
                     const data = publicRes.data?.challenges || publicRes.data || [];
                     const all = Array.isArray(data) ? data : [];
-                    combined = all.filter((challenge: any) => challenge.status === 'approved' || challenge.status === 'active');
+                    combined = all.filter((challenge: any) =>
+                        (challenge.status === 'approved' || challenge.status === 'active') &&
+                        !isChallengeOver(challenge, now)
+                    );
                 }
 
                 const activeList = combined.filter((challenge: any) => isChallengeParticipationOpen(challenge, now));
                 const upcomingList = combined.filter((challenge: any) => isChallengeUpcoming(challenge, now));
 
                 challengesToDisplay = [...activeList, ...upcomingList].sort((a: any, b: any) => {
-                    const aStart = new Date(a.start_date).getTime();
-                    const bStart = new Date(b.start_date).getTime();
+                    const aStart = parseChallengeDate(a.start_date)?.getTime() ?? 0;
+                    const bStart = parseChallengeDate(b.start_date)?.getTime() ?? 0;
                     const aActive = isChallengeParticipationOpen(a, now);
                     const bActive = isChallengeParticipationOpen(b, now);
                     if (aActive && !bActive) return -1;
@@ -201,7 +207,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
 
                         joinedChallenges.forEach((challenge: any) => {
                             if (
-                                new Date(challenge.end_date) < now &&
+                                isChallengeOver(challenge, now) &&
                                 challenge?.id &&
                                 !endedChallenges.some((existing: any) => existing.id === challenge.id)
                             ) {
@@ -212,7 +218,7 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
                 }
 
                 challengesToDisplay = endedChallenges.sort(
-                    (a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime()
+                    (a, b) => (parseChallengeDate(b.end_date)?.getTime() ?? 0) - (parseChallengeDate(a.end_date)?.getTime() ?? 0)
                 );
             } else if (targetTab === 'created') {
                 const [myRes, publicRes] = await Promise.all([

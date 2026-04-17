@@ -41,6 +41,7 @@ import {
 } from '@/lib/utils/challenge-post-visibility';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { safeRouterBack } from '@/lib/utils/navigation';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
@@ -142,7 +143,7 @@ export default function ChallengePostsScreen() {
 
   const fullscreenViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
-    minimumViewTime: 100,
+    minimumViewTime: 50,
   }).current;
 
   useRefetchOnReconnect(() => loadPosts(1, true));
@@ -625,13 +626,13 @@ export default function ChallengePostsScreen() {
         visible={showFullscreen}
         animationType="fade"
         transparent={false}
-        onRequestClose={() => setShowFullscreen(false)}
+        onRequestClose={() => { pauseAllVideos(); setShowFullscreen(false); }}
       >
         <SafeAreaView style={[styles.fullscreenContainer, { backgroundColor: C.background }]} edges={['top']}>
           <View style={styles.fullscreenHeader}>
             <TouchableOpacity
               style={styles.closeButton}
-              onPress={() => setShowFullscreen(false)}
+              onPress={() => { pauseAllVideos(); setShowFullscreen(false); }}
             >
               <Feather name="x" size={28} color="#fff" />
             </TouchableOpacity>
@@ -682,8 +683,8 @@ export default function ChallengePostsScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
-            onScrollBeginDrag={() => setIsFullscreenTransitioning(true)}
-            onMomentumScrollBegin={() => setIsFullscreenTransitioning(true)}
+            onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
+            onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
               setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));

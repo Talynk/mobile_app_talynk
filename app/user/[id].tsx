@@ -36,6 +36,7 @@ import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-fi
 import { useCache } from '@/lib/cache-context';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { registerVideoPauser, pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
@@ -531,8 +532,10 @@ export default function ExternalUserProfileScreen() {
 const ModalVideoPlayer = ({ source }: { source: string }) => {
   const isAppActive = useAppActive();
   const player = useVideoPlayer(source, (player) => {
-    player.play();
     player.loop = true;
+    player.staysActiveInBackground = false;
+    (player as any).preferredForwardBufferDuration = 10;
+    player.play();
   });
 
   useEffect(() => {
@@ -541,6 +544,20 @@ const ModalVideoPlayer = ({ source }: { source: string }) => {
       player.pause();
     } catch (_) {}
   }, [isAppActive, player]);
+
+  useEffect(() => {
+    if (!player) return;
+    const unregister = registerVideoPauser(() => {
+      try {
+        player.muted = true;
+        player.pause();
+      } catch (_) {}
+    });
+    return () => {
+      unregister();
+      try { player.pause(); } catch (_) {}
+    };
+  }, [player]);
 
   return <VideoView player={player} style={styles.overlayMedia} contentFit="contain" nativeControls={true} />;
 };
@@ -985,6 +1002,7 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
   );
 
   const handleClosePostModal = () => {
+    pauseAllVideos();
     setPostModalVisible(false);
     setSelectedPost(null);
   };
