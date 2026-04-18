@@ -576,13 +576,31 @@ export default function CreateChallengeModal({ visible, onClose, onCreated, edit
 
                         {formData.has_rewards && (
                             <View onLayout={saveFieldLayout('rewards')} style={styles.inputGroup}>
-                                <Text style={styles.label}>Rewards Details *</Text>
+                                <View style={styles.rewardsLabelRow}>
+                                    <Text style={styles.label}>Rewards details *</Text>
+                                    <Text style={styles.rewardsCharHint}>
+                                        {(formData.rewards || '').length.toLocaleString()} chars
+                                    </Text>
+                                </View>
+                                <Text style={styles.rewardsHelper}>
+                                    Describe prizes, tiers, rules, and delivery — long text is supported.
+                                </Text>
                                 <TextInput
-                                    style={[styles.input, fieldErrors.rewards && styles.inputError]}
-                                    placeholder="e.g. $500 Cash Prize"
+                                    style={[
+                                        styles.input,
+                                        styles.textArea,
+                                        styles.rewardsTextArea,
+                                        fieldErrors.rewards && styles.inputError,
+                                    ]}
+                                    placeholder="e.g. $500 cash, top 3 creators, paid within 14 days…"
                                     placeholderTextColor="#9ca3af"
                                     value={formData.rewards}
                                     onChangeText={(text) => updateField('rewards', text)}
+                                    multiline
+                                    scrollEnabled
+                                    textAlignVertical="top"
+                                    blurOnSubmit={false}
+                                    maxLength={12000}
                                 />
                                 {fieldErrors.rewards ? <Text style={styles.errorText}>{fieldErrors.rewards}</Text> : null}
                             </View>
@@ -1019,6 +1037,31 @@ const styles = StyleSheet.create({
     textArea: {
         minHeight: 100,
         textAlignVertical: 'top',
+    },
+    rewardsLabelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 4,
+    },
+    rewardsCharHint: {
+        fontSize: 12,
+        color: '#6b7280',
+        fontVariant: ['tabular-nums'],
+    },
+    rewardsHelper: {
+        fontSize: 12,
+        color: '#9ca3af',
+        lineHeight: 17,
+        marginBottom: 10,
+    },
+    rewardsTextArea: {
+        minHeight: 168,
+        maxHeight: 320,
+        paddingTop: 14,
+        paddingBottom: 14,
+        lineHeight: 22,
+        fontSize: 16,
     },
     row: {
         flexDirection: 'row',

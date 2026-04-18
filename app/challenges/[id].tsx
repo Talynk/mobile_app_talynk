@@ -38,6 +38,7 @@ import { useRealtime } from '@/lib/realtime-context';
 import websocketService from '@/lib/websocket-service';
 import {
   formatChallengeDateTime,
+  formatOrganizerPhoneForDetail,
   getChallengeDateInfo,
   getChallengeDisplayStatus,
   getCurrentTimeZoneLabel,
@@ -146,6 +147,15 @@ export default function ChallengeDetailScreen() {
   const { onChallengeLikesUpdated } = useRealtime();
   const localTimeZoneLabel = useMemo(() => getCurrentTimeZoneLabel(), []);
   const challengeEnded = useMemo(() => isChallengeOver(challenge), [challenge]);
+  const organizerPhoneDisplay = useMemo(() => {
+    if (!challenge) return null;
+    const raw =
+      challenge.organizer_contact ??
+      (challenge as any).organizer_phone ??
+      (challenge as any).organizerPhone ??
+      null;
+    return formatOrganizerPhoneForDetail(raw);
+  }, [challenge]);
   const [activeTab, setActiveTab] = useState<'posts' | 'participants' | 'winners'>('posts');
   const [allParticipants, setAllParticipants] = useState<any[]>([]);
   const [loadingAllParticipants, setLoadingAllParticipants] = useState(false);
@@ -1344,6 +1354,15 @@ export default function ChallengeDetailScreen() {
               <Text style={[styles.detailText, { color: C.text }]}>{challenge.contact_email || (challenge as any).contact_email}</Text>
             </View>
           )}
+
+          {organizerPhoneDisplay ? (
+            <View style={styles.detailBlock}>
+              <Text style={[styles.detailLabel, { color: C.detailLabel }]}>Organizer phone number</Text>
+              <Text style={[styles.detailText, { color: C.text }]} selectable>
+                {organizerPhoneDisplay}
+              </Text>
+            </View>
+          ) : null}
 
           {(challenge.eligibility_criteria || (challenge as any).eligibility_criteria) && (
             <View style={styles.detailBlock}>

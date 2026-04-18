@@ -310,3 +310,20 @@ export function getCurrentTimeZoneLabel(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
   }
 }
+
+/**
+ * Normalizes organizer phone for UI: single string +countrycode+digits, no hyphens or spaces.
+ */
+export function formatOrganizerPhoneForDetail(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  const compact = trimmed.replace(/^tel:/i, '').replace(/\s+/g, '').replace(/-/g, '');
+  if (!compact) return null;
+  if (compact.startsWith('+')) {
+    const afterPlus = compact.slice(1).replace(/\D/g, '');
+    return afterPlus ? `+${afterPlus}` : null;
+  }
+  const digits = compact.replace(/\D/g, '');
+  return digits ? `+${digits}` : null;
+}
