@@ -146,6 +146,7 @@ export default function FeedScreen() {
         'Please log in to like posts.',
         [
           { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },
           { text: 'Login', onPress: () => router.push({ pathname: '/auth/login' as any }) }
         ]
       );

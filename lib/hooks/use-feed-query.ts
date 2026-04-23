@@ -40,7 +40,7 @@ function extractApprovedPosts(raw: any): Post[] {
   return [];
 }
 
-function sortFollowingFallbackPosts(posts: Post[]) {
+function sortFeedPostsByLikesThenRecent(posts: Post[]) {
   return [...posts].sort((a, b) => {
     const aLikes = Number((a as any).likes ?? (a as any).like_count ?? 0);
     const bLikes = Number((b as any).likes ?? (b as any).like_count ?? 0);
@@ -48,8 +48,8 @@ function sortFollowingFallbackPosts(posts: Post[]) {
       return bLikes - aLikes;
     }
 
-    const aTime = new Date(a.createdAt || (a as any).created_at || 0).getTime();
-    const bTime = new Date(b.createdAt || (b as any).created_at || 0).getTime();
+    const aTime = new Date(a.createdAt || (a as any).created_at || (a as any).uploadDate || 0).getTime();
+    const bTime = new Date(b.createdAt || (b as any).created_at || (b as any).uploadDate || 0).getTime();
     return bTime - aTime;
   });
 }
@@ -80,7 +80,7 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
     });
   });
 
-  const sortedPosts = sortFollowingFallbackPosts(Array.from(merged.values()));
+  const sortedPosts = sortFeedPostsByLikesThenRecent(Array.from(merged.values()));
   primePostDetailsCache(sortedPosts);
 
   const start = (page - 1) * limit;
@@ -116,7 +116,7 @@ export function useFeedQuery(tab: FeedTab) {
           is_following_author: true,
         }));
         primePostDetailsCache(allPosts);
-        const hlsPosts = filterSecondarySurfacePosts(allPosts);
+        const hlsPosts = sortFeedPostsByLikesThenRecent(filterSecondarySurfacePosts(allPosts));
         if (__DEV__) {
           console.log(`🔵 [FEED v2-clean] following: extracted=${allPosts.length}, afterHLS=${hlsPosts.length}`);
         }
@@ -150,7 +150,7 @@ export function useFeedQuery(tab: FeedTab) {
         console.log(`🔵 [FEED v2-clean] ForYou: extracted ${allPosts.length} posts from response`);
       }
 
-      const hlsPosts = filterHlsReady(allPosts);
+      const hlsPosts = sortFeedPostsByLikesThenRecent(filterHlsReady(allPosts));
       if (__DEV__) {
         console.log(`🔵 [FEED v2-clean] ForYou: after HLS filter = ${hlsPosts.length} posts`);
       }

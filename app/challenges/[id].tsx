@@ -884,15 +884,64 @@ export default function ChallengeDetailScreen() {
     return sortChallengePostsByLikes(posts, likesDuringChallengeMap, hasChallengeSnapshotLikes);
   }, [posts, hasChallengeSnapshotLikes, likesDuringChallengeMap]);
 
+  const participantLikesInChallengeMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    const addLikes = (ownerId: string | null | undefined, likes: number) => {
+      if (!ownerId) return;
+      map[ownerId] = (map[ownerId] || 0) + Math.max(0, Number(likes || 0));
+    };
+
+    if (rawChallengePosts.length > 0) {
+      rawChallengePosts.forEach((challengePost: any) => {
+        const post = challengePost?.post || challengePost;
+        const ownerId =
+          post?.user?.id ||
+          post?.user_id ||
+          post?.userId ||
+          challengePost?.user_id ||
+          challengePost?.participant_user_id ||
+          null;
+        const postId = post?.id ?? challengePost?.post_id;
+        const snapshotLikes =
+          likesDuringChallengeMap[postId] ??
+          challengePost?.likes_during_challenge ??
+          challengePost?.likes_at_challenge_end ??
+          post?.likes ??
+          post?.like_count ??
+          0;
+        addLikes(ownerId ? String(ownerId) : null, Number(snapshotLikes));
+      });
+      return map;
+    }
+
+    sortedPosts.forEach((post: any) => {
+      const ownerId = post?.user?.id || post?.user_id || post?.userId || null;
+      const likes = hasChallengeSnapshotLikes
+        ? likesDuringChallengeMap[post.id] ?? 0
+        : Number(post?.likes ?? post?.like_count ?? 0);
+      addLikes(ownerId ? String(ownerId) : null, likes);
+    });
+
+    return map;
+  }, [hasChallengeSnapshotLikes, likesDuringChallengeMap, rawChallengePosts, sortedPosts]);
+
+  const getParticipantLikes = useCallback((participant: any) => {
+    const ownerId = String(participant?.user?.id || participant?.user_id || participant?.id || '');
+    if (ownerId && participantLikesInChallengeMap[ownerId] != null) {
+      return Number(participantLikesInChallengeMap[ownerId] || 0);
+    }
+    return Number(participant?.total_likes ?? 0);
+  }, [participantLikesInChallengeMap]);
+
   const sortedParticipants = useMemo(() => {
     if (!allParticipants.length) return allParticipants;
     return [...allParticipants].sort((a, b) => {
-      const likesA = Number(a.total_likes ?? 0);
-      const likesB = Number(b.total_likes ?? 0);
+      const likesA = getParticipantLikes(a);
+      const likesB = getParticipantLikes(b);
       if (likesB !== likesA) return likesB - likesA;
       return new Date(b.latest_submission_at || 0).getTime() - new Date(a.latest_submission_at || 0).getTime();
     });
-  }, [allParticipants]);
+  }, [allParticipants, getParticipantLikes]);
 
   const sortedWinners = useMemo(() => {
     if (!winners.length) return winners;
@@ -923,6 +972,7 @@ export default function ChallengeDetailScreen() {
     if (!user) {
       Alert.alert('Login Required', 'Please log in to like posts.', [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Up', onPress: () => router.push('/auth/register' as any) },
         { text: 'Log In', onPress: () => router.push('/auth/login' as any) },
       ]);
       return;
@@ -1178,7 +1228,7 @@ export default function ChallengeDetailScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.moreDetailsText}>More details</Text>
-                <MaterialIcons name="keyboard-arrow-down" size={18} color="#fff" />
+                <MaterialIcons name="keyboard-arrow-down" size={18} color="#86efac" />
               </TouchableOpacity>
             </View>
           )}
@@ -1613,7 +1663,7 @@ export default function ChallengeDetailScreen() {
 
     const participantUser = item.user || item;
     const postCount = Number(item.total_posts ?? item.post_count ?? 0);
-    const totalLikesInChallenge = Number(item.total_likes ?? 0);
+    const totalLikesInChallenge = getParticipantLikes(item);
     const latestSubmissionAt = item.latest_submission_at;
 
     return (
@@ -2323,7 +2373,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   moreDetailsText: {
-    color: '#fff',
+    color: '#86efac',
     fontSize: 13,
     fontWeight: '600',
   },

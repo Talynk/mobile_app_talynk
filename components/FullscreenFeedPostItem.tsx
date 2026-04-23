@@ -747,6 +747,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (!user) {
       Alert.alert('Login Required', 'Please log in to like posts.', [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },
         { text: 'Log In', onPress: () => router.push({ pathname: '/auth/login' as any }) },
       ]);
       return;
@@ -833,9 +834,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const adTitle = (item as any).title || (item as any).ad_title || '';
   const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
   const mediaContentFit = isAd ? 'contain' : 'cover';
-  const reservedBottomSpace = Math.max(insets.bottom + bottomOverlayOffset, 8);
-  const feedProgressBottomInset = reservedBottomSpace;
-  const feedOverlayBottomInset = reservedBottomSpace + 14;
+  // Keep overlay metadata pinned low on every device size, while ensuring
+  // the progress bar remains the final visible line at the very bottom.
+  const reservedBottomSpace = Math.max(bottomOverlayOffset, 0);
+  const feedProgressBottomInset = 0;
+  const feedOverlayBottomInset = 10 + reservedBottomSpace;
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
