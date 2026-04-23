@@ -1228,7 +1228,7 @@ export default function ChallengeDetailScreen() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.moreDetailsText}>More details</Text>
-                <MaterialIcons name="keyboard-arrow-down" size={18} color="#86efac" />
+                <MaterialIcons name="keyboard-arrow-down" size={18} color="#052e16" />
               </TouchableOpacity>
             </View>
           )}
@@ -2369,11 +2369,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 6,
     marginTop: 10,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: '#86efac',
     borderRadius: 12,
   },
   moreDetailsText: {
-    color: '#86efac',
+    color: '#052e16',
     fontSize: 13,
     fontWeight: '600',
   },
