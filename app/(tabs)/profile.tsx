@@ -975,9 +975,10 @@ export default function ProfileScreen() {
     if (!user) {
       Alert.alert(
         'Login Required',
-        'Please log in to like posts.',
+        'Please log in or sign up to like posts.',
         [
           { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign Up', onPress: () => router.push('/auth/register') },
           { text: 'Login', onPress: () => router.push('/auth/login') }
         ]
       );

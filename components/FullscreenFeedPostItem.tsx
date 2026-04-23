@@ -745,7 +745,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const handleLike = async () => {
     if (!user) {
-      Alert.alert('Login Required', 'Please log in to like posts.', [
+      Alert.alert('Login Required', 'Please log in or sign up to like posts.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },
         { text: 'Log In', onPress: () => router.push({ pathname: '/auth/login' as any }) },

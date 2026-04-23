@@ -143,7 +143,7 @@ export default function FeedScreen() {
     if (!user) {
       Alert.alert(
         'Login Required',
-        'Please log in to like posts.',
+        'Please log in or sign up to like posts.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },

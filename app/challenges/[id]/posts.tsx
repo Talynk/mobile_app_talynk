@@ -397,8 +397,9 @@ export default function ChallengePostsScreen() {
 
   const handleLike = async (postId: string) => {
     if (!user) {
-      Alert.alert('Login Required', 'Please log in to like posts.', [
+      Alert.alert('Login Required', 'Please log in or sign up to like posts.', [
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Up', onPress: () => router.push('/auth/register' as any) },
         { text: 'Log In', onPress: () => router.push('/auth/login' as any) },
       ]);
       return;

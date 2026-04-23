@@ -640,7 +640,7 @@ function ProfileFeedContent({
     if (!user) {
       Alert.alert(
         'Login Required',
-        'Please log in to like posts.',
+        'Please log in or sign up to like posts.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Login', onPress: () => router.push('/auth/login') }
