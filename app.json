@@ -19,7 +19,10 @@
       "bundleIdentifier": "com.ihirwe.talentix",
       "associatedDomains": [
         "applinks:links.talentix.net"
-      ]
+      ],
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +33,13 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO"
       ],
       "intentFilters": [
         {
@@ -121,7 +130,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "143104d8-fe0d-4691-a6e9-11a83cb2a1aa"
+        "projectId": "1a34bcea-2f8e-4be9-bde8-7ba5e34f42c6"
       }
     }
   }
