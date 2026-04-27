@@ -271,7 +271,7 @@ function ProfileFeedContent({
         if (explorePosts.length === 0) {
           const [categoriesRes, postsRes] = await Promise.all([
             categoriesApi.getAll(),
-            postsApi.getAll(1, 100),
+            postsApi.getAll(1, 50),
           ]);
           const categories = (categoriesRes.data as any)?.categories ?? [];
           const allPosts = (postsRes.data as any)?.posts ?? [];
@@ -344,7 +344,7 @@ function ProfileFeedContent({
         }
       } else if (challengeId) {
         // Show only this user's posts that were submitted to this competition
-        const res = await challengesApi.getPosts(challengeId, 1, 100);
+        const res = await challengesApi.getPosts(challengeId, 1, 50);
         if (res.status === 'success') {
           const raw = res.data?.posts ?? res.data ?? [];
           const list = Array.isArray(raw) ? raw : [];
@@ -918,8 +918,12 @@ function ProfileFeedContent({
           }
           onScrollToIndexFailed={(info) => {
             setTimeout(() => {
+              if (!posts.length) {
+                return;
+              }
+              const safeIndex = Math.max(0, Math.min(info.index, posts.length - 1));
               flatListRef.current?.scrollToIndex({
-                index: Math.min(info.index, posts.length - 1),
+                index: safeIndex,
                 animated: false
               });
             }, 100);

@@ -710,6 +710,25 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
+  // If an active video never renders first frame, remount once.
+  // This recovers rare "black screen with mute icon" stalls.
+  useEffect(() => {
+    if (!isVideo || !isActive || !shouldLoadVideo || videoReady || videoError || retryCount > 0) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (!isMountedRef.current || videoReady || videoError) {
+        return;
+      }
+      setRetryCount(1);
+      setCanMountVideoPlayer(true);
+      setVideoMountBoundaryKey((prev) => prev + 1);
+    }, 4000);
+
+    return () => clearTimeout(timeoutId);
+  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady]);
+
   const handleTapToPause = useCallback((e?: any) => {
     // Only pause/play when tapping the CENTER of the screen.
     // Ignore taps in the bottom 25% (progress bar + bottom overlay area).
@@ -939,18 +958,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
         <View style={[styles.rightActions, { bottom: feedOverlayBottomInset }]}>
           {!isAd && (
-            <TouchableOpacity style={styles.avatarContainer} onPress={handleUserPress}>
+            <View style={styles.avatarContainer}>
+              <TouchableOpacity onPress={handleUserPress}>
               <Avatar
                 user={item.user ? { ...item.user, profile_picture: item.user.profile_picture ?? undefined } : undefined}
                 size={48}
                 style={styles.userAvatar}
               />
-              {user && !isOwnPost && (
+              </TouchableOpacity>
+              {user && !isOwnPost ? (
                 <TouchableOpacity style={styles.followIconButton} onPress={handleFollow}>
                   <Feather name={isFollowing ? 'check' : 'plus'} size={16} color="#000" />
                 </TouchableOpacity>
-              )}
-            </TouchableOpacity>
+              ) : null}
+            </View>
           )}
 
           {!isAd && showBestButton && (
@@ -1054,11 +1075,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           <View
             style={[styles.videoProgressBarContainer, { bottom: feedProgressBottomInset }]}
             onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => false}
             onResponderGrant={handleProgressTouch}
-            onResponderMove={handleProgressTouch}
             onTouchStart={handleProgressTouch}
-            onTouchMove={handleProgressTouch}
           >
             <View style={styles.videoProgressBarTrack}>
               <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
@@ -1581,10 +1600,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 60, // Very large touch target — finger-friendly
+    height: 10,
     justifyContent: 'flex-end',
     paddingBottom: 0,
-    zIndex: 200, // Above everything including the Pressable
+    zIndex: 30,
   },
   videoProgressBarTrack: {
     height: 4,

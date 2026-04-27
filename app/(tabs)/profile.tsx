@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   ActivityIndicator,
   FlatList,
@@ -492,6 +493,9 @@ export default function ProfileScreen() {
   const [likesModalVisible, setLikesModalVisible] = useState(false);
   const [likesData, setLikesData] = useState<any[]>([]);
   const [loadingLikes, setLoadingLikes] = useState(false);
+  const [bioEditorVisible, setBioEditorVisible] = useState(false);
+  const [bioDraft, setBioDraft] = useState('');
+  const [bioSaving, setBioSaving] = useState(false);
 
   const insets = useSafeAreaInsets();
   const hasFocusedProfileRef = useRef(false);
@@ -969,6 +973,30 @@ export default function ProfileScreen() {
     setError(null);
     Promise.all([loadProfile(true), loadPosts(true)]).finally(() => setRefreshing(false));
   };
+
+  const openBioEditor = useCallback(() => {
+    setBioDraft((profile?.bio ?? '').slice(0, 150));
+    setBioEditorVisible(true);
+  }, [profile?.bio]);
+
+  const saveBio = useCallback(async () => {
+    if (bioSaving) return;
+    setBioSaving(true);
+    try {
+      const trimmedBio = bioDraft.trim().slice(0, 150);
+      const response = await userApi.updateProfile({ bio: trimmedBio });
+      if (response.status === 'success') {
+        setProfile((prev: any) => (prev ? { ...prev, bio: trimmedBio } : prev));
+        setBioEditorVisible(false);
+      } else {
+        Alert.alert('Unable to Save', response.message || 'Could not update your bio right now.');
+      }
+    } catch (error: any) {
+      Alert.alert('Unable to Save', error?.message || 'Could not update your bio right now.');
+    } finally {
+      setBioSaving(false);
+    }
+  }, [bioDraft, bioSaving]);
 
   // Optimistic like handler
   const handleLike = async (postId: string) => {
@@ -1510,7 +1538,18 @@ export default function ProfileScreen() {
                 style={styles.avatar}
               />
               <Text style={styles.username}>@{profile.username}</Text>
-              {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
+              <TouchableOpacity
+                style={styles.bioTouchable}
+                activeOpacity={0.85}
+                onPress={openBioEditor}
+              >
+                <Text style={styles.bio}>
+                  {profile.bio?.trim() ? profile.bio : 'No bio added, Tap to add'}
+                </Text>
+                <View style={styles.bioIconWrap}>
+                  <Feather name={profile.bio?.trim() ? 'edit-3' : 'plus'} size={14} color="#60a5fa" />
+                </View>
+              </TouchableOpacity>
 
               {/* Stats */}
               <View style={styles.statsContainer}>
@@ -2029,6 +2068,56 @@ export default function ProfileScreen() {
           setEditModalVisible(false);
         }}
       />
+
+      <Modal
+        visible={bioEditorVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBioEditorVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.bioModalOverlay}
+          activeOpacity={1}
+          onPress={() => !bioSaving && setBioEditorVisible(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => {}}
+            style={styles.bioModalCard}
+          >
+            <View style={styles.bioModalHeader}>
+              <Text style={styles.bioModalTitle}>Edit Bio</Text>
+              <TouchableOpacity
+                onPress={() => setBioEditorVisible(false)}
+                disabled={bioSaving}
+              >
+                <Feather name="x" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.bioModalHint}>Write something beautiful about yourself.</Text>
+            <TextInput
+              style={styles.bioModalInput}
+              value={bioDraft}
+              onChangeText={(value) => setBioDraft(value.slice(0, 150))}
+              placeholder="Add your bio..."
+              placeholderTextColor="#6b7280"
+              multiline
+              maxLength={150}
+              autoFocus
+            />
+            <Text style={styles.bioModalCounter}>{bioDraft.length}/150</Text>
+
+            <TouchableOpacity
+              style={[styles.bioModalSaveBtn, bioSaving && { opacity: 0.7 }]}
+              onPress={saveBio}
+              disabled={bioSaving}
+            >
+              <Text style={styles.bioModalSaveText}>{bioSaving ? 'Saving...' : 'Save Bio'}</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -2104,6 +2193,89 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 20,
+    lineHeight: 20,
+  },
+  bioTouchable: {
+    maxWidth: '92%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 20,
+    backgroundColor: 'rgba(96, 165, 250, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.25)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  bioIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(96, 165, 250, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bioModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  bioModalCard: {
+    backgroundColor: '#121217',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a35',
+    padding: 16,
+  },
+  bioModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  bioModalTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  bioModalHint: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  bioModalInput: {
+    minHeight: 96,
+    maxHeight: 140,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#30303c',
+    backgroundColor: '#1a1a22',
+    color: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    textAlignVertical: 'top',
+  },
+  bioModalCounter: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'right',
+    marginTop: 6,
+  },
+  bioModalSaveBtn: {
+    marginTop: 12,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#60a5fa',
+  },
+  bioModalSaveText: {
+    color: '#061528',
+    fontSize: 15,
+    fontWeight: '800',
   },
   statsContainer: {
     flexDirection: 'row',

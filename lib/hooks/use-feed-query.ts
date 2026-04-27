@@ -2,7 +2,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
-import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { useMemo } from 'react';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { normalizePost } from '@/lib/utils/normalize-post';
@@ -150,7 +150,7 @@ export function useFeedQuery(tab: FeedTab) {
         console.log(`🔵 [FEED v2-clean] ForYou: extracted ${allPosts.length} posts from response`);
       }
 
-      const hlsPosts = sortFeedPostsByLikesThenRecent(filterHlsReady(allPosts));
+      const hlsPosts = sortFeedPostsByLikesThenRecent(filterSecondarySurfacePosts(allPosts));
       if (__DEV__) {
         console.log(`🔵 [FEED v2-clean] ForYou: after HLS filter = ${hlsPosts.length} posts`);
       }

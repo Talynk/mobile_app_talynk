@@ -27,7 +27,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
-import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { timeAgo } from '@/lib/utils/time-ago';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-cache';
@@ -38,11 +37,9 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EXPLORE_PAGE_LIMIT = 24;
 
 function normalizeExplorePosts(items: any[]): Post[] {
-  return filterSecondarySurfacePosts(
-    items
-      .map((post) => normalizePost(post))
-      .filter((post: any) => !post?.isAd && !post?.challenge_id && !post?.challengeId)
-  );
+  return items
+    .map((post) => normalizePost(post))
+    .filter((post: any) => !post?.isAd);
 }
 
 const ExploreGridCard = React.memo(function ExploreGridCard({
@@ -329,8 +326,15 @@ export default function ExploreScreen() {
             continue;
           }
 
-          if (page >= totalPages || pagePosts.length < limit) {
+          if (page >= totalPages) {
             keepGoing = false;
+          } else if (!Number.isFinite(totalPages) || totalPages <= 1) {
+            // Fallback when API doesn't return reliable pagination.
+            if (pagePosts.length < limit) {
+              keepGoing = false;
+            } else {
+              page += 1;
+            }
           } else {
             page += 1;
           }
@@ -633,9 +637,9 @@ export default function ExploreScreen() {
           keyExtractor={(item) => item.id}
           numColumns={3}
           removeClippedSubviews={Platform.OS === 'android'}
-          initialNumToRender={12}
-          maxToRenderPerBatch={18}
-          windowSize={7}
+          initialNumToRender={9}
+          maxToRenderPerBatch={12}
+          windowSize={5}
           updateCellsBatchingPeriod={30}
           contentContainerStyle={styles.gridListContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

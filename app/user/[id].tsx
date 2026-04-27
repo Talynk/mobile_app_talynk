@@ -1109,9 +1109,9 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         keyExtractor={(item) => item.id}
         numColumns={3}
         removeClippedSubviews={Platform.OS === 'android'}
-        initialNumToRender={18}
-        maxToRenderPerBatch={24}
-        windowSize={9}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
         updateCellsBatchingPeriod={30}
         getItemLayout={(_data, index) => ({
           length: EXTERNAL_PROFILE_POST_ITEM_SIZE + 2,
@@ -1142,12 +1142,11 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                 <Text style={styles.fullName}>{profile.name}</Text>
               )}
               <Text style={styles.username}>@{profile?.username || 'unknown'}</Text>
-              {!!(profile as any)?.email && (
-                <Text style={styles.profileEmail}>{(profile as any).email}</Text>
-              )}
-              {profile?.bio ? (
-                <Text style={styles.bio}>{profile.bio}</Text>
-              ) : null}
+              <Text style={styles.bio}>
+                {profile?.bio?.trim()
+                  ? profile.bio
+                  : 'No bio added'}
+              </Text>
 
               <View style={styles.statsContainer}>
                 <TouchableOpacity style={styles.stat}>
@@ -1336,11 +1335,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '600',
     marginBottom: 6,
-  },
-  profileEmail: {
-    color: '#a1a1aa',
-    fontSize: 13,
-    marginBottom: 8,
   },
   bio: {
     color: '#999',

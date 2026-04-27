@@ -55,14 +55,16 @@
     <string>Allow Talentix to access your camera to record videos and take photos.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow Talentix to access your microphone to record audio with your videos.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Allow Talentix to save photos and videos to your library.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>Allow Talentix to save photos and videos to your library.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
     <key>RCTNewArchEnabled</key>
-    <true/>
+    <false/>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>

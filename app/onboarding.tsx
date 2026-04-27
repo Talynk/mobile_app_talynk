@@ -223,7 +223,10 @@ export default function OnboardingScreen() {
 
   const goToNext = () => {
     if (currentPage < pages.length - 1) {
-      flatListRef.current?.scrollToIndex({ index: currentPage + 1, animated: true });
+      const nextIndex = Math.max(0, Math.min(currentPage + 1, pages.length - 1));
+      if (pages.length > 0) {
+        flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+      }
     } else {
       completeOnboarding();
     }

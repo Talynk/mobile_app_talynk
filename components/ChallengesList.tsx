@@ -272,10 +272,6 @@ export default function ChallengesList({ onCreateChallenge, refreshTrigger, defa
             }
         } catch (error: any) {
             console.warn('[ChallengesList] Error fetching challenges:', error?.message);
-            setChallengeCache((prev) => ({
-                ...prev,
-                [targetTab]: [],
-            }));
             setLoadedTabs((prev) => ({
                 ...prev,
                 [targetTab]: true,

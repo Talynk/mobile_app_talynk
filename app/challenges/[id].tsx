@@ -337,7 +337,7 @@ export default function ChallengeDetailScreen() {
     setPostsWindowMessage(null);
 
     try {
-      const response = await challengesApi.getPosts(id as string, 1, 100);
+      const response = await challengesApi.getPosts(id as string, 1, 50);
 
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
@@ -1130,7 +1130,11 @@ export default function ChallengeDetailScreen() {
           setFullscreenIndex(index);
           setShowFullscreen(true);
           setTimeout(() => {
-            fullscreenListRef.current?.scrollToIndex({ index, animated: false });
+            if (!sortedPosts.length) {
+              return;
+            }
+            const safeIndex = Math.max(0, Math.min(index, sortedPosts.length - 1));
+            fullscreenListRef.current?.scrollToIndex({ index: safeIndex, animated: false });
           }, 100);
         }}
       >

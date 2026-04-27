@@ -6,21 +6,27 @@ import { Alert } from 'react-native';
  */
 export const isNetworkError = (error: any): boolean => {
   if (!error) return false;
+  const axiosError = error as AxiosError;
   
   // Axios network errors
   if (error.code === 'NETWORK_ERROR' || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
     return true;
   }
+
+  // HTTP responses are not connectivity failures (e.g. 4xx/5xx)
+  if (axiosError?.response) {
+    return false;
+  }
   
   // Error message patterns
-  const message = error.message || '';
+  const message = String(error.message || '').toLowerCase();
   if (
-    message.includes('Network Error') ||
-    message.includes('network') ||
+    message.includes('network request failed') ||
+    message.includes('network error') ||
     message.includes('timeout') ||
-    message.includes('ECONNREFUSED') ||
-    message.includes('ENOTFOUND') ||
-    message.includes('Failed to fetch')
+    message.includes('econnrefused') ||
+    message.includes('enotfound') ||
+    message.includes('failed to fetch')
   ) {
     return true;
   }

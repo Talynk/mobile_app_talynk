@@ -2896,13 +2896,19 @@ export default function CreatePostScreen() {
               }}
               onError={(error: any) => {
                 console.error('[VisionCamera] Mount/runtime error:', error);
+                const errorMessage = String(error?.message || '');
+                const isPolicyRestriction = /restricted by the operating system|device policy/i.test(errorMessage);
                 try {
-                  const Sentry = require('@sentry/react-native');
-                  Sentry.captureException(new Error(`VisionCamera error: ${error?.message || JSON.stringify(error)}`));
+                  if (!isPolicyRestriction) {
+                    const Sentry = require('@sentry/react-native');
+                    Sentry.captureException(new Error(`VisionCamera error: ${errorMessage || JSON.stringify(error)}`));
+                  }
                 } catch {}
                 Alert.alert(
                   'Camera Error',
-                  'The camera could not start on this device. Please try closing other apps or restart the app.',
+                  isPolicyRestriction
+                    ? 'Camera access is restricted by this device policy. Please use gallery upload or enable camera access in device settings.'
+                    : 'The camera could not start on this device. Please try closing other apps or restart the app.',
                   [{ text: 'Close Camera', onPress: cancelCamera }],
                 );
               }}
@@ -2925,13 +2931,19 @@ export default function CreatePostScreen() {
               }}
               onMountError={(error: any) => {
                 console.error('[Camera] Mount error:', error);
+                const errorMessage = String(error?.message || '');
+                const isDuplicateInstance = /any other instance running/i.test(errorMessage);
                 try {
-                  const Sentry = require('@sentry/react-native');
-                  Sentry.captureException(new Error(`Camera mount error: ${error?.message || JSON.stringify(error)}`));
+                  if (!isDuplicateInstance) {
+                    const Sentry = require('@sentry/react-native');
+                    Sentry.captureException(new Error(`Camera mount error: ${errorMessage || JSON.stringify(error)}`));
+                  }
                 } catch {}
                 Alert.alert(
                   'Camera Error',
-                  'The camera could not start on this device. Please try closing other apps or restart the app.',
+                  isDuplicateInstance
+                    ? 'Camera is already in use by another screen or app. Please close other camera screens and try again.'
+                    : 'The camera could not start on this device. Please try closing other apps or restart the app.',
                   [{ text: 'Close Camera', onPress: cancelCamera }],
                 );
               }}

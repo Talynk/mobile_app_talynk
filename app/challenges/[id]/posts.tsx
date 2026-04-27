@@ -370,6 +370,9 @@ export default function ChallengePostsScreen() {
     setFullscreenIndex(safeIdx);
     setShowFullscreen(true);
     setTimeout(() => {
+      if (!posts.length) {
+        return;
+      }
       fullscreenListRef.current?.scrollToIndex({ index: safeIdx, animated: false });
     }, 50);
   }, [open, openIndex, posts.length]);
@@ -391,7 +394,11 @@ export default function ChallengePostsScreen() {
     setFullscreenIndex(index);
     setShowFullscreen(true);
     setTimeout(() => {
-      fullscreenListRef.current?.scrollToIndex({ index, animated: false });
+      if (!posts.length) {
+        return;
+      }
+      const safeIndex = Math.max(0, Math.min(index, posts.length - 1));
+      fullscreenListRef.current?.scrollToIndex({ index: safeIndex, animated: false });
     }, 100);
   };
 
