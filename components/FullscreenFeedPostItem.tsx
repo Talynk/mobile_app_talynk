@@ -415,6 +415,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [videoProgress, setVideoProgress] = useState(0);
   const [retryCount, setRetryCount] = useState(0);
   const [showUnfollowModal, setShowUnfollowModal] = useState(false);
+  const [showFollowLoginModal, setShowFollowLoginModal] = useState(false);
   const [showAppealModal, setShowAppealModal] = useState(false);
   const isSuspendedPost = (item as any).status === 'suspended' || (item as any).is_suspended;
   const isDraftPost = (item as any).status === 'draft' || (item as any).status === 'Draft';
@@ -428,6 +429,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const thumbnailOpacity = useRef(new Animated.Value(1)).current;
   const playbackStatusRef = useRef<'idle' | 'loading' | 'readyToPlay' | 'error'>('idle');
   const lastPlaybackTimeRef = useRef(0);
+  // Animated value that drives the progress bar fill + thumb visually.
+  // During drag we update this directly (no setState → no re-render lag).
+  // When not dragging it mirrors the videoProgress state.
+  const scrubProgress = useRef(new Animated.Value(0)).current;
+  const isDraggingRef = useRef(false);
+  const dragSeekPageXRef = useRef(0);
+  const screenWidthRef = useRef(screenWidth);
+  screenWidthRef.current = screenWidth;
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
@@ -697,6 +706,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [isActive, isPlaying, videoReady, thumbnailOpacity]);
 
+  // Mirror videoProgress → scrubProgress Animated.Value while not dragging.
+  // During a drag we write scrubProgress directly so this is suppressed.
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      scrubProgress.setValue(videoProgress);
+    }
+  }, [videoProgress, scrubProgress]);
+
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {
     if (retryCount < 3) {
@@ -710,21 +727,29 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
-  // If an active video never renders first frame, remount once.
-  // This recovers rare "black screen with mute icon" stalls.
+  // If an active video never renders first frame, aggressively remount up to 3 times.
+  // Critical for recovering black screens on iPhone X and low-memory Android devices.
+  // Each retry uses exponential backoff: 2s, 3s, 5s.
   useEffect(() => {
-    if (!isVideo || !isActive || !shouldLoadVideo || videoReady || videoError || retryCount > 0) {
+    if (!isVideo || !isActive || !shouldLoadVideo || videoReady || videoError || retryCount >= 3) {
       return;
     }
+
+    const delays = [2000, 3000, 5000];
+    const delay = delays[retryCount] ?? 2000;
 
     const timeoutId = setTimeout(() => {
       if (!isMountedRef.current || videoReady || videoError) {
         return;
       }
-      setRetryCount(1);
-      setCanMountVideoPlayer(true);
+      setRetryCount((prev) => prev + 1);
+      // Only bump the boundary key. React's key reconciliation unmounts the
+      // entire VideoMountBoundary + NativeFeedVideo tree atomically so the
+      // native player is fully released before the new one is created.
+      // DO NOT toggle canMountVideoPlayer — doing so races against expo-video's
+      // SharedObject release and causes "Cannot use shared object that was already released".
       setVideoMountBoundaryKey((prev) => prev + 1);
-    }, 4000);
+    }, delay);
 
     return () => clearTimeout(timeoutId);
   }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady]);
@@ -792,7 +817,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const handleFollow = () => {
     if (!user) {
-      router.push({ pathname: '/auth/login' as any });
+      setShowFollowLoginModal(true);
       return;
     }
     if (isOwnPost) {
@@ -827,13 +852,37 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const seekRef = useRef((_x: number) => {});
   seekRef.current = handleProgressBarSeek;
 
-  // Raw touch handlers — bypass React Native gesture system entirely.
-  // PanResponder couldn't reliably intercept touches from the parent Pressable.
-  const handleProgressTouch = useCallback((e: any) => {
-    e.stopPropagation();
-    const pageX = e.nativeEvent?.pageX ?? 0;
-    seekRef.current(pageX);
-  }, []);
+  // PanResponder for smooth scrubbing.
+  // IMPORTANT: during onPanResponderMove we ONLY update the Animated.Value
+  // (native driver, zero JS re-render). seekTo() is called only on release so
+  // the video jumps to the correct position without causing per-frame lag.
+  const progressBarPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onShouldBlockNativeResponder: () => true,
+      onPanResponderGrant: (e) => {
+        isDraggingRef.current = true;
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.pageX / screenWidthRef.current));
+        scrubProgress.setValue(ratio);
+        dragSeekPageXRef.current = e.nativeEvent.pageX;
+      },
+      onPanResponderMove: (e) => {
+        // Visual-only update — avoids setState + seekTo on every pixel moved.
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.pageX / screenWidthRef.current));
+        scrubProgress.setValue(ratio);
+        dragSeekPageXRef.current = e.nativeEvent.pageX;
+      },
+      onPanResponderRelease: () => {
+        isDraggingRef.current = false;
+        seekRef.current(dragSeekPageXRef.current);
+      },
+      onPanResponderTerminate: () => {
+        isDraggingRef.current = false;
+        seekRef.current(dragSeekPageXRef.current);
+      },
+    }),
+  ).current;
 
   const handleUserPress = () => {
     if (item.user?.id) {
@@ -856,8 +905,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   // Keep overlay metadata pinned low on every device size, while ensuring
   // the progress bar remains the final visible line at the very bottom.
   const reservedBottomSpace = Math.max(bottomOverlayOffset, 0);
+  // Progress bar sits flush at the screen bottom (bottom: 0).
+  // Thumb is 10px tall → occupies 0-10px from screen bottom.
+  // Container touch area is 28px → 0-28px from screen bottom.
+  //
+  // feedOverlayBottomInset drives rightActions + bottomInfo.
+  // actionButton has marginBottom:12 on the last item (flag/report),
+  // so flag visible-bottom = feedOverlayBottomInset + 12.
+  // We need that > 28 (touch zone) so: 30 + 12 = 42 > 28 ✓
+  // This calculation uses no safe-area adjustments so it is pixel-identical
+  // on every phone regardless of screen height.
   const feedProgressBottomInset = 0;
-  const feedOverlayBottomInset = 10 + reservedBottomSpace;
+  const feedOverlayBottomInset = 30 + reservedBottomSpace;
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
@@ -885,7 +944,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       contentFit={mediaContentFit}
                       isMuted={isMuted}
                       shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}
-                      onFirstFrameRender={() => setVideoReady(true)}
+                      onFirstFrameRender={() => {
+                        setVideoReady(true);
+                        // Kick-start playback asynchronously — calling play() synchronously
+                        // inside the native callback can race with player teardown on iOS.
+                        setTimeout(() => {
+                          const controller = videoControllerRef.current;
+                          if (controller && playerValidRef.current && isMountedRef.current) {
+                            try { controller.setMuted(isMuted); controller.play(); } catch (_) {}
+                          }
+                        }, 0);
+                      }}
                       onStatusChange={handleNativeStatusChange}
                       onPlayingChange={handleNativePlayingChange}
                       onTimeUpdate={handleNativeTimeUpdate}
@@ -1059,7 +1128,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               <Text style={styles.categoryText}>#{getCategoryDisplayName(typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name)}</Text>
             </TouchableOpacity>
           )}
-          {!isAd && user && !isOwnPost && (
+          {!isAd && !isOwnPost && (
             <TouchableOpacity
               style={[styles.followButton, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }]}
               onPress={handleFollow}
@@ -1074,13 +1143,42 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         {isVideo && isActive && (
           <View
             style={[styles.videoProgressBarContainer, { bottom: feedProgressBottomInset }]}
-            onStartShouldSetResponder={() => true}
-            onMoveShouldSetResponder={() => false}
-            onResponderGrant={handleProgressTouch}
-            onTouchStart={handleProgressTouch}
+            {...progressBarPanResponder.panHandlers}
           >
-            <View style={styles.videoProgressBarTrack}>
-              <View style={[styles.videoProgressBarFill, { width: `${Math.min(videoProgress * 100, 100)}%` }]} />
+            {/* Inner row: track (4px) + thumb (14px) share the same 14px height
+                so the thumb is perfectly centered on the track. */}
+            <View style={styles.progressBarInner}>
+              <View style={styles.videoProgressBarTrack}>
+                <Animated.View
+                  style={[
+                    styles.videoProgressBarFill,
+                    {
+                      width: scrubProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: ['0%', '100%'],
+                        extrapolate: 'clamp',
+                      }),
+                    },
+                  ]}
+                />
+              </View>
+              {/* Thumb: translateX driven by Animated.Value for zero-lag drag */}
+              <Animated.View
+                style={[
+                  styles.videoProgressBarThumb,
+                  {
+                    transform: [
+                      {
+                        translateX: scrubProgress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, screenWidth - 10],
+                          extrapolate: 'clamp',
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
             </View>
           </View>
         )}
@@ -1091,6 +1189,42 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         onConfirm={handleUnfollowConfirm}
         onCancel={() => setShowUnfollowModal(false)}
       />
+
+      {/* Login/Sign Up prompt when non-logged user taps Follow */}
+      <Modal visible={showFollowLoginModal} transparent animationType="fade" onRequestClose={() => setShowFollowLoginModal(false)}>
+        <Pressable style={styles.bestModalOverlay} onPress={() => setShowFollowLoginModal(false)}>
+          <View style={styles.followLoginModal}>
+            <View style={styles.followLoginIconWrap}>
+              <Feather name="user-plus" size={32} color="#60a5fa" />
+            </View>
+            <Text style={styles.followLoginTitle}>Follow {item.user?.username || 'this creator'}?</Text>
+            <Text style={styles.followLoginSubtitle}>
+              Create a free account or log in to follow creators and never miss their posts.
+            </Text>
+            <TouchableOpacity
+              style={styles.followLoginPrimaryBtn}
+              onPress={() => {
+                setShowFollowLoginModal(false);
+                router.push({ pathname: '/auth/register' as any });
+              }}
+            >
+              <Text style={styles.followLoginPrimaryBtnText}>Sign Up — It's Free</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.followLoginSecondaryBtn}
+              onPress={() => {
+                setShowFollowLoginModal(false);
+                router.push({ pathname: '/auth/login' as any });
+              }}
+            >
+              <Text style={styles.followLoginSecondaryBtnText}>Log In</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowFollowLoginModal(false)}>
+              <Text style={styles.followLoginDismissText}>Not now</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal visible={showBestModal} transparent animationType="fade">
         <Pressable style={styles.bestModalOverlay} onPress={() => setShowBestModal(false)}>
@@ -1433,6 +1567,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  followLoginModal: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    padding: 28,
+    alignItems: 'center',
+  },
+  followLoginIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(96, 165, 250, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  followLoginTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  followLoginSubtitle: {
+    color: '#9ca3af',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  followLoginPrimaryBtn: {
+    width: '100%',
+    backgroundColor: '#60a5fa',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  followLoginPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  followLoginSecondaryBtn: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  followLoginSecondaryBtnText: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  followLoginDismissText: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '400',
+  },
   likeAnimationOverlay: {
     position: 'absolute',
     top: '50%',
@@ -1600,20 +1800,43 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 10,
+    // 28px touch zone — large enough to grab easily, small enough to never
+    // overlap the flag/report button whose touch area starts at 42px from bottom.
+    height: 28,
     justifyContent: 'flex-end',
     paddingBottom: 0,
     zIndex: 30,
   },
+  progressBarInner: {
+    // 10px = thumb diameter. 3px track is centred inside (3.5px from top/bottom).
+    // Flush at the very bottom of the container → thumb occupies 0-10px from screen bottom.
+    height: 10,
+    justifyContent: 'center',
+  },
   videoProgressBarTrack: {
-    height: 4,
+    height: 3,
     backgroundColor: 'rgba(255, 255, 255, 0.3)',
     borderRadius: 2,
   },
   videoProgressBarFill: {
     height: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
     borderRadius: 2,
+  },
+  videoProgressBarThumb: {
+    // top:0 + height:10 → centre at 5px from inner top, aligns with 3px track centre (3.5px ≈ 4px).
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.4,
+    shadowRadius: 2,
+    elevation: 3,
   },
   draftOverlayContainer: {
     position: 'absolute',

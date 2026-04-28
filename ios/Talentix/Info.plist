@@ -28,7 +28,7 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>talentix</string>
-          <string>com.ihirwe.talentix</string>
+          <string>com.strongminds.talentix</string>
         </array>
       </dict>
       <dict>

@@ -28,12 +28,12 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
     <View style={{
       flexDirection: 'row',
       backgroundColor: bg,
-      height: 60 + insets.bottom,
+      height: 52 + insets.bottom,
       paddingBottom: insets.bottom,
       alignItems: 'center',
       justifyContent: 'space-between',
       borderTopWidth: 0.5,
-      borderTopColor: '#333333',
+      borderTopColor: '#222222',
     }}>
       {state.routes.map((route: any, idx: number) => {
         const isFocused = state.index === idx;
@@ -77,7 +77,7 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
             key={route.key}
             onPress={onPress}
             activeOpacity={0.8}
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 50, position: 'relative' }}
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center', height: 44, position: 'relative' }}
           >
             {React.cloneElement(icon, { 
               color: isFocused ? active : inactive,

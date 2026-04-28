@@ -326,9 +326,13 @@ export default function FeedScreen() {
     const targetUserId = item.user?.id || '';
     const optimisticFollowStatus = targetUserId ? userFollowStatus[targetUserId] : undefined;
     const cachedFollowStatus = targetUserId ? followedUsers.has(targetUserId) : false;
-    const isFollowing = activeTab === 'following'
-      ? true
-      : (optimisticFollowStatus ?? (cachedFollowStatus ? true : item.is_following_author === true));
+    // Prioritize explicit user action (optimistic) first,
+    // then check the followedUsers cache (synced from server) before falling
+    // back to the per-post is_following_author flag. This ensures the status
+    // stays consistent when switching between the For You and Following tabs.
+    const isFollowing = optimisticFollowStatus !== undefined
+      ? optimisticFollowStatus
+      : (cachedFollowStatus || (activeTab === 'following' ? true : item.is_following_author === true));
 
     return (
       <FullscreenFeedPostItem

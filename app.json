@@ -16,7 +16,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ihirwe.talentix",
+      "bundleIdentifier": "com.strongminds.talentix",
       "associatedDomains": [
         "applinks:links.talentix.net"
       ],
@@ -29,7 +29,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.ihirwe.talentix",
+      "package": "com.strongminds.talentix",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
