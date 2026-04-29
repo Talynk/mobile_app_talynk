@@ -119,6 +119,9 @@
           ]
         }
       ],
+      [
+        "@sentry/react-native/expo"
+      ],
       "react-native-compressor",
       "react-native-vision-camera"
     ],

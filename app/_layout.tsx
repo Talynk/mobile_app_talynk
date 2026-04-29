@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { Stack, router } from 'expo-router';
+import { Stack, router, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useCallback, useState } from 'react';
 import 'react-native-reanimated';
@@ -46,6 +46,64 @@ SplashScreen.preventAutoHideAsync();
 
 // Defer Sentry init and avoid importing Sentry in dev so Expo Dev Launcher never sees React context created early (Android: "App react context shouldn't be created before").
 let sentryInitialized = false;
+let sentryBootPhase: 'startup' | 'fonts' | 'navigation' | 'ready' = 'startup';
+function captureSentryBootBreadcrumb(message: string) {
+  if (__DEV__) return;
+  try {
+    const Sentry = require('@sentry/react-native');
+    Sentry.addBreadcrumb({
+      category: 'boot',
+      level: 'info',
+      message,
+      data: { phase: sentryBootPhase },
+    });
+  } catch (_) {}
+}
+
+function installGlobalSentryHandlers() {
+  if (__DEV__) return;
+  const Sentry = require('@sentry/react-native');
+
+  // Capture JS fatal + non-fatal crashes that may bypass React error boundaries.
+  const errorUtils = (global as any).ErrorUtils;
+  if (errorUtils?.getGlobalHandler && errorUtils?.setGlobalHandler) {
+    const previousHandler = errorUtils.getGlobalHandler();
+    errorUtils.setGlobalHandler((error: unknown, isFatal?: boolean) => {
+      Sentry.captureException(error, {
+        level: isFatal ? 'fatal' : 'error',
+        tags: {
+          isFatal: String(Boolean(isFatal)),
+          bootPhase: sentryBootPhase,
+        },
+      });
+      captureSentryBootBreadcrumb(`Global handler caught ${isFatal ? 'fatal' : 'non-fatal'} error`);
+
+      if (previousHandler) {
+        previousHandler(error, isFatal);
+      }
+    });
+  }
+
+  // Capture unhandled promise rejections.
+  const onUnhandledRejection = (event: any) => {
+    const reason = event?.reason ?? event;
+    Sentry.captureException(reason, {
+      level: 'error',
+      tags: { unhandledRejection: 'true', bootPhase: sentryBootPhase },
+    });
+  };
+
+  if (typeof globalThis !== 'undefined') {
+    const existing = (globalThis as any).__talynkUnhandledRejectionHandlerInstalled;
+    if (!existing && (globalThis as any).addEventListener) {
+      try {
+        (globalThis as any).addEventListener('unhandledrejection', onUnhandledRejection);
+        (globalThis as any).__talynkUnhandledRejectionHandlerInstalled = true;
+      } catch (_) {}
+    }
+  }
+}
+
 function initSentryOnce() {
   if (__DEV__ || sentryInitialized) return;
   sentryInitialized = true;
@@ -53,31 +111,32 @@ function initSentryOnce() {
   Sentry.init({
     dsn: 'https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304',
     sendDefaultPii: true,
+    attachStacktrace: true,
+    maxBreadcrumbs: 200,
+    enableAutoSessionTracking: true,
+    enableNativeCrashHandling: true,
+    enableAppHangTracking: true,
+    enableAutoPerformanceTracing: true,
+    tracesSampleRate: 1.0,
+    profilesSampleRate: 1.0,
     beforeSend(event: { message?: string; environment?: string }, hint?: { originalException?: unknown }) {
       const ex = hint?.originalException as Error | undefined;
       const msg = (event.message || ex?.message || '').toString();
-      if (/ExpoAsset\.downloadAsync|Unable to download asset from url|Metro|8081\/assets/.test(msg)) return null;
+      // Drop only known Dev Launcher initialization noise.
       if (/App react context shouldn't be created before|DevLauncherAppLoader/.test(msg)) return null;
-      if (event.environment === 'development' && /ExpoAsset|MaterialIcons\.ttf|Ionicons\.ttf/.test(msg)) return null;
-      if (/AbortError|Aborted|ECONNABORTED|timeout of \d+ms exceeded/i.test(msg)) return null;
       return event;
     },
-    ignoreErrors: [
-      'ExpoAsset.downloadAsync',
-      'Unable to download asset from url',
-      'App react context shouldn\'t be created before',
-      'AbortError',
-      'Aborted',
-      'AbortError: Aborted',
-      'timeout of 0ms exceeded',
-      'ECONNABORTED',
-    ],
+    ignoreErrors: ['App react context shouldn\'t be created before'],
   });
+  installGlobalSentryHandlers();
+  Sentry.setTag('bootPhase', sentryBootPhase);
+  captureSentryBootBreadcrumb('Sentry initialized');
 }
 
 function RootLayoutInner() {
   useFrameworkReady();
   useEffect(() => {
+    sentryBootPhase = 'startup';
     initSentryOnce();
   }, []);
   // --- SENTRY TEST (temporary): Uncomment below, run app once, check dashboard, then remove ---
@@ -99,6 +158,8 @@ function RootLayoutInner() {
 
   useEffect(() => {
     if (loaded) {
+      sentryBootPhase = 'fonts';
+      captureSentryBootBreadcrumb('Fonts loaded, splash animation starting');
       // Start spin animation
       Animated.loop(
         Animated.timing(spinAnim, {
@@ -112,6 +173,8 @@ function RootLayoutInner() {
       setTimeout(() => {
         setShowSplash(false);
         SplashScreen.hideAsync();
+        sentryBootPhase = 'navigation';
+        captureSentryBootBreadcrumb('Splash hidden, moving to navigation');
       }, 2500);
     }
   }, [loaded]);
@@ -142,6 +205,7 @@ function RootLayoutInner() {
 function RootLayoutNav() {
   const theme = DarkTheme;
   const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     initializeStore().catch(() => {});
@@ -152,6 +216,20 @@ function RootLayoutNav() {
       console.warn('Failed to ask for notification permissions on startup', err);
     });
   }, []);
+
+  useEffect(() => {
+    if (__DEV__) return;
+    try {
+      const Sentry = require('@sentry/react-native');
+      sentryBootPhase = 'ready';
+      Sentry.setTag('bootPhase', sentryBootPhase);
+      Sentry.addBreadcrumb({
+        category: 'navigation',
+        level: 'info',
+        message: `route:${pathname || 'unknown'}`,
+      });
+    } catch (_) {}
+  }, [pathname]);
 
   useEffect(() => {
     AsyncStorage.getItem('talynk_has_seen_onboarding')
