@@ -51,6 +51,7 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
+import { openFullscreenWithSafeScroll } from '@/lib/utils/fabric-diagnostics';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -366,15 +367,15 @@ export default function ChallengePostsScreen() {
     if (!posts.length) return;
     const idx = Number(openIndex || 0);
     const safeIdx = Number.isFinite(idx) ? Math.max(0, Math.min(posts.length - 1, idx)) : 0;
-    warmFeedWindow(posts, safeIdx);
-    setFullscreenIndex(safeIdx);
-    setShowFullscreen(true);
-    setTimeout(() => {
-      if (!posts.length) {
-        return;
-      }
-      fullscreenListRef.current?.scrollToIndex({ index: safeIdx, animated: false });
-    }, 50);
+    openFullscreenWithSafeScroll({
+      setVisible: setShowFullscreen,
+      setIndex: setFullscreenIndex,
+      ref: fullscreenListRef,
+      index: safeIdx,
+      itemCount: posts.length,
+      context: 'challenge_posts:auto_open',
+      prewarm: () => warmFeedWindow(posts, safeIdx),
+    });
   }, [open, openIndex, posts.length]);
 
   const loadMorePosts = () => {
@@ -390,16 +391,15 @@ export default function ChallengePostsScreen() {
   };
 
   const handlePostPress = (index: number) => {
-    warmFeedWindow(posts, index);
-    setFullscreenIndex(index);
-    setShowFullscreen(true);
-    setTimeout(() => {
-      if (!posts.length) {
-        return;
-      }
-      const safeIndex = Math.max(0, Math.min(index, posts.length - 1));
-      fullscreenListRef.current?.scrollToIndex({ index: safeIndex, animated: false });
-    }, 100);
+    openFullscreenWithSafeScroll({
+      setVisible: setShowFullscreen,
+      setIndex: setFullscreenIndex,
+      ref: fullscreenListRef,
+      index,
+      itemCount: posts.length,
+      context: 'challenge_posts:handlePostPress',
+      prewarm: () => warmFeedWindow(posts, index),
+    });
   };
 
   const handleLike = async (postId: string) => {

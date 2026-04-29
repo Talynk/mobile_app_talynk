@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
+import { safeScrollToIndex } from '@/lib/utils/fabric-diagnostics';
 
 const ONBOARDING_KEY = 'talynk_has_seen_onboarding';
 
@@ -225,7 +226,13 @@ export default function OnboardingScreen() {
     if (currentPage < pages.length - 1) {
       const nextIndex = Math.max(0, Math.min(currentPage + 1, pages.length - 1));
       if (pages.length > 0) {
-        flatListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
+        safeScrollToIndex({
+          ref: flatListRef,
+          index: nextIndex,
+          itemCount: pages.length,
+          animated: true,
+          context: 'onboarding:goToNext',
+        });
       }
     } else {
       completeOnboarding();

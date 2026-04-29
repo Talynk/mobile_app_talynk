@@ -62,6 +62,7 @@ import {
   VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS,
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
+import { safeScrollToIndex } from '@/lib/utils/fabric-diagnostics';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -219,7 +220,13 @@ function ProfileFeedContent({
     }
 
     const timer = setTimeout(() => {
-      flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
+      safeScrollToIndex({
+        ref: flatListRef,
+        index: initialIndex,
+        itemCount: posts.length,
+        animated: false,
+        context: 'profile_feed:initial_scroll',
+      });
       setCurrentIndex(initialIndex);
       setInitialScrollDone(true);
     }, 0);
@@ -504,7 +511,13 @@ function ProfileFeedContent({
               const initialIndex = sortedPosts.findIndex((p: Post) => p.id === initialPostId);
               if (initialIndex >= 0) {
                 setTimeout(() => {
-                  flatListRef.current?.scrollToIndex({ index: initialIndex, animated: false });
+                  safeScrollToIndex({
+                    ref: flatListRef,
+                    index: initialIndex,
+                    itemCount: sortedPosts.length,
+                    animated: false,
+                    context: 'profile_feed:load_posts_initial_scroll',
+                  });
                   setCurrentIndex(initialIndex);
                   setInitialScrollDone(true);
                 }, 0);
@@ -918,13 +931,12 @@ function ProfileFeedContent({
           }
           onScrollToIndexFailed={(info) => {
             setTimeout(() => {
-              if (!posts.length) {
-                return;
-              }
-              const safeIndex = Math.max(0, Math.min(info.index, posts.length - 1));
-              flatListRef.current?.scrollToIndex({
-                index: safeIndex,
-                animated: false
+              safeScrollToIndex({
+                ref: flatListRef,
+                index: info.index,
+                itemCount: posts.length,
+                animated: false,
+                context: 'profile_feed:onScrollToIndexFailed',
               });
             }, 100);
           }}

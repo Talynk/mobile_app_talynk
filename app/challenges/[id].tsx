@@ -68,6 +68,7 @@ import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { openFullscreenWithSafeScroll } from '@/lib/utils/fabric-diagnostics';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -1126,16 +1127,15 @@ export default function ChallengeDetailScreen() {
         style={styles.gridPostCard}
         activeOpacity={0.9}
         onPress={() => {
-          warmFeedWindow(sortedPosts, index);
-          setFullscreenIndex(index);
-          setShowFullscreen(true);
-          setTimeout(() => {
-            if (!sortedPosts.length) {
-              return;
-            }
-            const safeIndex = Math.max(0, Math.min(index, sortedPosts.length - 1));
-            fullscreenListRef.current?.scrollToIndex({ index: safeIndex, animated: false });
-          }, 100);
+          openFullscreenWithSafeScroll({
+            setVisible: setShowFullscreen,
+            setIndex: setFullscreenIndex,
+            ref: fullscreenListRef,
+            index,
+            itemCount: sortedPosts.length,
+            context: 'challenge_detail:grid_post_press',
+            prewarm: () => warmFeedWindow(sortedPosts, index),
+          });
         }}
       >
         {staticThumbnailUrl ? (

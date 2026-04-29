@@ -38,6 +38,7 @@ import { useAppActive } from '@/lib/hooks/use-app-active';
 import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibility';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
+import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const formatNumber = (num: number): string => {
@@ -574,6 +575,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, []);
 
   const handleNativePlayerMountError = useCallback(() => {
+    addFabricBreadcrumb('feed_video_mount_error', {
+      postId: item.id,
+      index,
+      shouldLoadVideo,
+      retryCount: videoMountRetryCountRef.current,
+      isActive,
+      appActive: isAppActive,
+    });
     handleNativePlayerInvalid();
     if (isMountedRef.current) {
       setCanMountVideoPlayer(false);
@@ -586,7 +595,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       videoMountRetryTimeoutRef.current = null;
     }
 
-    if (!shouldLoadVideo || videoMountRetryCountRef.current >= 1) {
+    if (!shouldLoadVideo || videoMountRetryCountRef.current >= 2) {
+      captureFabricError(
+        new Error('Feed video mount retries exhausted'),
+        'feed_video_mount_error',
+        {
+          postId: item.id,
+          index,
+          shouldLoadVideo,
+          retryCount: videoMountRetryCountRef.current,
+          isActive,
+          appActive: isAppActive,
+        },
+        'warning',
+      );
       return;
     }
 
@@ -598,7 +620,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setVideoMountBoundaryKey((prev) => prev + 1);
       setCanMountVideoPlayer(true);
     }, 450);
-  }, [handleNativePlayerInvalid, shouldLoadVideo]);
+  }, [handleNativePlayerInvalid, shouldLoadVideo, item.id, index, isActive, isAppActive]);
 
   const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
     if (isMountedRef.current) {
@@ -616,6 +638,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     if (event?.error) {
+      captureFabricError(event.error, 'feed_video_status_error', {
+        postId: item.id,
+        index,
+        status: event?.status || 'unknown',
+        shouldLoadVideo,
+        isActive,
+        appActive: isAppActive,
+      });
       setIsPlaying(false);
       return;
     }
@@ -624,7 +654,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setVideoError(false);
       setDecoderErrorDetected(false);
     }
-  }, []);
+  }, [item.id, index, shouldLoadVideo, isActive, isAppActive]);
 
   const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
     if (!isMountedRef.current) {
