@@ -1,10 +1,10 @@
+import 'react-native-reanimated';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack, router, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useCallback, useState } from 'react';
-import 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,6 +30,7 @@ import { NotificationBadgeProvider } from '@/lib/notification-badge-context';
 import { useAuth } from '@/lib/auth-context';
 import { UploadNotificationService } from '@/lib/notification-service';
 import { initGlobalVideoPauseListener } from '@/lib/hooks/use-video-pause-on-blur';
+import { IOS_STARTUP_FLAGS } from '@/lib/utils/ios-startup-flags';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -48,9 +49,8 @@ SplashScreen.preventAutoHideAsync();
 let sentryInitialized = false;
 let sentryBootPhase: 'startup' | 'fonts' | 'navigation' | 'ready' = 'startup';
 // Emergency iOS launch-safe mode for preview/internal builds.
-// This keeps the app open on unstable devices (e.g. iPhone X) while we isolate
-// native startup crashes. Re-enable step-by-step after confirmation.
-const IOS_LAUNCH_SAFE_MODE = Platform.OS === 'ios';
+// Controlled via a dedicated flag file for one-by-one rollout.
+const IOS_LAUNCH_SAFE_MODE = Platform.OS === 'ios' && IOS_STARTUP_FLAGS.launchSafeMode;
 function captureSentryBootBreadcrumb(message: string) {
   if (__DEV__) return;
   try {
@@ -215,7 +215,7 @@ function RootLayoutNav() {
     initializeStore().catch(() => {});
     initGlobalVideoPauseListener();
 
-    if (IOS_LAUNCH_SAFE_MODE) {
+    if (IOS_LAUNCH_SAFE_MODE || (Platform.OS === 'ios' && !IOS_STARTUP_FLAGS.enableStartupNotificationPermissionPrompt)) {
       captureSentryBootBreadcrumb('iOS launch-safe mode enabled: deferred notification permission prompt');
       return;
     }
