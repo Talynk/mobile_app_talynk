@@ -47,6 +47,10 @@ SplashScreen.preventAutoHideAsync();
 // Defer Sentry init and avoid importing Sentry in dev so Expo Dev Launcher never sees React context created early (Android: "App react context shouldn't be created before").
 let sentryInitialized = false;
 let sentryBootPhase: 'startup' | 'fonts' | 'navigation' | 'ready' = 'startup';
+// Emergency iOS launch-safe mode for preview/internal builds.
+// This keeps the app open on unstable devices (e.g. iPhone X) while we isolate
+// native startup crashes. Re-enable step-by-step after confirmation.
+const IOS_LAUNCH_SAFE_MODE = Platform.OS === 'ios';
 function captureSentryBootBreadcrumb(message: string) {
   if (__DEV__) return;
   try {
@@ -210,8 +214,13 @@ function RootLayoutNav() {
   useEffect(() => {
     initializeStore().catch(() => {});
     initGlobalVideoPauseListener();
-    
-    // Request notification permissions on app start if not already granted
+
+    if (IOS_LAUNCH_SAFE_MODE) {
+      captureSentryBootBreadcrumb('iOS launch-safe mode enabled: deferred notification permission prompt');
+      return;
+    }
+
+    // Request notification permissions on startup (Android / non-safe mode only).
     UploadNotificationService.getInstance().requestPermissions().catch(err => {
       console.warn('Failed to ask for notification permissions on startup', err);
     });
@@ -251,7 +260,25 @@ function RootLayoutNav() {
 
   // Start video cache: iOS uses expo-video-cache (startVideoCacheServer.ios.ts); Android no-op (startVideoCacheServer.android.ts). Android bundle never references expo-video-cache.
   useEffect(() => {
-    require('@/lib/utils/startVideoCacheServer').start();
+    if (IOS_LAUNCH_SAFE_MODE) {
+      captureSentryBootBreadcrumb('iOS launch-safe mode enabled: skipping startup video cache server');
+      return;
+    }
+    try {
+      require('@/lib/utils/startVideoCacheServer').start();
+      captureSentryBootBreadcrumb('startup video cache server started');
+    } catch (error) {
+      captureSentryBootBreadcrumb('startup video cache server failed');
+      if (!__DEV__) {
+        try {
+          const Sentry = require('@sentry/react-native');
+          Sentry.captureException(error, {
+            tags: { context: 'startup_video_cache_server' },
+            level: 'error',
+          });
+        } catch (_) {}
+      }
+    }
   }, []);
 
   // Memory management: Clear caches when app goes to background
