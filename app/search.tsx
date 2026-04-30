@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { getPostMediaUrl } from '@/lib/utils/file-url';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { Avatar } from '@/components/Avatar';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { getPostDetailCached, getPostDetailsCached, primePostDetailsCache } from '@/lib/post-details-cache';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -71,6 +72,7 @@ export default function SearchScreen() {
         setPostsResults(posts);
         // Combine for display - users first, then posts
         setSearchResults([...users, ...posts]);
+        void hydrateSearchPlaybackPosts(posts);
       } else if (activeTab === 'people') {
         const res = await userApi.search(searchQuery);
         if (res.status === 'success') {
@@ -87,6 +89,7 @@ export default function SearchScreen() {
           const posts = filterSecondarySurfacePosts((res.data as any).posts || (Array.isArray(res.data) ? res.data : [])) as Post[];
           setPostsResults(posts);
           setSearchResults(posts);
+          void hydrateSearchPlaybackPosts(posts);
         } else {
           setPostsResults([]);
           setSearchResults([]);
@@ -107,6 +110,49 @@ export default function SearchScreen() {
       setLoading(false);
     }
   };
+
+  const hydrateSearchPlaybackPosts = useCallback(async (posts: Post[]) => {
+    if (!Array.isArray(posts) || posts.length === 0) return;
+    try {
+      const topPosts = posts.slice(0, 20);
+      const topIds = topPosts.map((p) => p.id).filter(Boolean);
+      const detailsMap = await getPostDetailsCached(topIds, { requireNetwork: true });
+      if (detailsMap.size > 0) {
+        const merged = topPosts.map((post) => detailsMap.get(post.id) || post);
+        primePostDetailsCache(merged);
+      } else {
+        primePostDetailsCache(topPosts);
+      }
+    } catch {
+      primePostDetailsCache(posts.slice(0, 20));
+    }
+  }, []);
+
+  const openSearchPostsFeed = useCallback(async (post: Post, sourcePosts: Post[]) => {
+    const orderedPosts = Array.isArray(sourcePosts) && sourcePosts.length > 0 ? sourcePosts : [post];
+    let clickedPost: Post = post;
+    try {
+      const fullPost = await getPostDetailCached(post.id, { requireNetwork: true });
+      if (fullPost) {
+        clickedPost = fullPost as Post;
+      }
+    } catch {
+      // Best-effort only
+    }
+
+    const mergedPosts = orderedPosts.map((p) => (p.id === clickedPost.id ? clickedPost : p));
+    primePostDetailsCache(mergedPosts.slice(0, 40));
+
+    router.push({
+      pathname: '/profile-feed/[userId]',
+      params: {
+        userId: 'explore',
+        status: 'active',
+        initialPostId: clickedPost.id,
+        postsData: JSON.stringify(mergedPosts.slice(0, 80)),
+      },
+    });
+  }, []);
 
   useEffect(() => {
     if (searchQuery.trim().length > 0) {
@@ -283,7 +329,12 @@ export default function SearchScreen() {
             if (item.username || item.profile_picture) {
               return renderUserResult({ item: item as User });
             } else {
-              return <SearchPostItem item={item as Post} />;
+              return (
+                <SearchPostItem
+                  item={item as Post}
+                  onPress={() => openSearchPostsFeed(item as Post, postsResults)}
+                />
+              );
             }
           }}
           keyExtractor={(item, index) => item.id || `item-${index}`}
@@ -302,7 +353,14 @@ export default function SearchScreen() {
         <FlatList
           key={activeTab}
           data={searchResults}
-          renderItem={activeTab === 'videos' ? ({ item }) => <SearchPostItem item={item as Post} /> : renderUserResult}
+          renderItem={activeTab === 'videos'
+            ? ({ item }) => (
+              <SearchPostItem
+                item={item as Post}
+                onPress={() => openSearchPostsFeed(item as Post, postsResults)}
+              />
+            )
+            : renderUserResult}
           keyExtractor={(item) => item.id}
           numColumns={activeTab === 'videos' ? 3 : 1}
           contentContainerStyle={styles.resultsContainer}
@@ -321,7 +379,7 @@ export default function SearchScreen() {
   );
 }
 
-const SearchPostItem = ({ item }: { item: Post }) => {
+const SearchPostItem = ({ item, onPress }: { item: Post; onPress: () => void }) => {
   const mediaUrl = getPostMediaUrl(item) || '';
   const isVideo = !!(item.video_url || item.videoUrl);
   const thumbnailUrl = item.thumbnail_url || item.thumbnailUrl || '';
@@ -329,13 +387,7 @@ const SearchPostItem = ({ item }: { item: Post }) => {
   return (
     <TouchableOpacity
       style={styles.postResult}
-      onPress={() => router.push({
-        pathname: '/post/[id]',
-        params: {
-          id: item.id,
-          postData: JSON.stringify(item)
-        }
-      })}
+      onPress={onPress}
     >
       <Image
         source={{ uri: isVideo && thumbnailUrl ? thumbnailUrl : mediaUrl }}
