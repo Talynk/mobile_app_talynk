@@ -156,7 +156,10 @@ export default function OnboardingScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active' && guidePlayer) {
-        try { guidePlayer.pause(); } catch { }
+        try {
+          guidePlayer.muted = true;
+          guidePlayer.pause();
+        } catch { }
         setGuidePlaying(false);
       }
     });
@@ -168,6 +171,7 @@ export default function OnboardingScreen() {
     if (!guidePlayer) return;
     return registerVideoPauser(() => {
       try {
+        guidePlayer.muted = true;
         guidePlayer.pause();
       } catch { }
       setGuidePlaying(false);

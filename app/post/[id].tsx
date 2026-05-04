@@ -321,7 +321,8 @@ export default function PostDetailScreen() {
     (player) => {
       if (player) {
         player.loop = false;
-        player.muted = isMuted;
+        // CRITICAL: Always start muted. Unmute after mount via effect.
+        player.muted = true;
         player.staysActiveInBackground = false;
         (player as any).preferredForwardBufferDuration = 10;
       }
@@ -363,14 +364,20 @@ export default function PostDetailScreen() {
   useFocusEffect(
     useCallback(() => {
       if (videoPlayer) {
-        try { videoPlayer.play(); } catch { }
+        try {
+          videoPlayer.muted = isMuted;
+          videoPlayer.play();
+        } catch { }
       }
       return () => {
         if (videoPlayer) {
-          try { videoPlayer.pause(); } catch { }
+          try {
+            videoPlayer.muted = true;
+            videoPlayer.pause();
+          } catch { }
         }
       };
-    }, [videoPlayer])
+    }, [videoPlayer, isMuted])
   );
 
   // Auto-play when screen loads
@@ -381,10 +388,11 @@ export default function PostDetailScreen() {
     } catch { }
   }, [videoPlayer]);
 
-  // Pause when app goes to background
+  // Pause AND mute when app goes to background
   useEffect(() => {
     if (!videoPlayer || isAppActive) return;
     try {
+      videoPlayer.muted = true;
       videoPlayer.pause();
     } catch { }
   }, [isAppActive, videoPlayer]);
@@ -417,10 +425,13 @@ export default function PostDetailScreen() {
     Animated.timing(muteOpacity, { toValue: 0, duration: 800, delay: 300, useNativeDriver: true }).start();
   };
 
+  const isDraggingPostRef = useRef(false);
+
   // Progress tracking: poll currentTime/duration every 250ms
   useEffect(() => {
     if (!videoPlayer) return;
     const interval = setInterval(() => {
+      if (isDraggingPostRef.current) return; // Don't override during drag
       try {
         const ct = videoPlayer.currentTime || 0;
         const dur = videoPlayer.duration || 0;
@@ -449,10 +460,24 @@ export default function PostDetailScreen() {
   seekRef.current = handleProgressBarSeek;
   const progressBarPan = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e) => seekRef.current(e.nativeEvent.locationX),
-      onPanResponderMove: (e) => seekRef.current(e.nativeEvent.locationX),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (e) => {
+        isDraggingPostRef.current = true;
+        seekRef.current(e.nativeEvent.pageX);
+      },
+      onPanResponderMove: (e) => {
+        seekRef.current(e.nativeEvent.pageX);
+      },
+      onPanResponderRelease: () => {
+        isDraggingPostRef.current = false;
+      },
+      onPanResponderTerminate: () => {
+        isDraggingPostRef.current = false;
+      },
     })
   ).current;
 
@@ -491,6 +516,14 @@ export default function PostDetailScreen() {
               ]}>
                 {followLoading ? '...' : (isFollowing ? 'Following' : 'Follow')}
               </Text>
+            </TouchableOpacity>
+          )}
+          {!user && post.user?.id && (
+            <TouchableOpacity
+              style={[styles.followButton, { backgroundColor: '#60a5fa' }]}
+              onPress={() => router.push('/auth/login')}
+            >
+              <Text style={[styles.followButtonText, { color: '#000' }]}>Follow</Text>
             </TouchableOpacity>
           )}
         </View>

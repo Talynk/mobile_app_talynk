@@ -16,7 +16,7 @@ import {
   useWindowDimensions,
   Platform,
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { challengesApi, followsApi } from '@/lib/api';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -141,6 +141,15 @@ export default function ChallengePostsScreen() {
       setFullscreenIndex(idx);
     }
   }).current;
+
+  // CRITICAL: Pause all videos when navigating away from this screen
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        pauseAllVideos();
+      };
+    }, [])
+  );
 
   const fullscreenViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,

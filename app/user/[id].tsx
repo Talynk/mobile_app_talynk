@@ -15,7 +15,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { useLocalSearchParams, router } from 'expo-router';
+import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, followsApi, postsApi } from '@/lib/api';
@@ -533,16 +533,20 @@ const ModalVideoPlayer = ({ source }: { source: string }) => {
   const isAppActive = useAppActive();
   const player = useVideoPlayer(source, (player) => {
     player.loop = true;
+    player.muted = true; // Start muted, unmute after mount
     player.staysActiveInBackground = false;
     (player as any).preferredForwardBufferDuration = 10;
     player.play();
   });
 
   useEffect(() => {
-    if (!player || isAppActive) return;
-    try {
-      player.pause();
-    } catch (_) {}
+    if (!player) return;
+    if (!isAppActive) {
+      try {
+        player.muted = true;
+        player.pause();
+      } catch (_) {}
+    }
   }, [isAppActive, player]);
 
   useEffect(() => {
@@ -632,6 +636,15 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       setPostsError(null);
     }
   }, [id]);
+
+  // CRITICAL: Pause all videos when navigating away from this screen
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        pauseAllVideos();
+      };
+    }, [])
+  );
 
   const prefetchRenderableThumbnails = useCallback((items: Post[]) => {
     const urls = items

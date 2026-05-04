@@ -581,7 +581,9 @@ export default function ChallengeDetailScreen() {
     useCallback(() => {
       if (!hasHandledInitialFocusRef.current) {
         hasHandledInitialFocusRef.current = true;
-        return;
+        return () => {
+          pauseAllVideos();
+        };
       }
 
       fetchChallenge({ showLoader: false });
@@ -593,6 +595,9 @@ export default function ChallengeDetailScreen() {
       } else {
         fetchPosts();
       }
+      return () => {
+        pauseAllVideos();
+      };
     }, [activeTab, fetchYourPostCount, id])
   );
 

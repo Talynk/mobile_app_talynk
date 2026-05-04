@@ -534,6 +534,7 @@ export default function CreatePostScreen() {
     if (!previewPlayer || isAppActive) return;
 
     try {
+      previewPlayer.muted = true;
       previewPlayer.pause();
       setIsVideoPlaying(false);
     } catch (_) {}
@@ -543,6 +544,7 @@ export default function CreatePostScreen() {
     if (!previewPlayer) return;
     return registerVideoPauser(() => {
       try {
+        previewPlayer.muted = true;
         previewPlayer.pause();
       } catch (_) {}
       setIsVideoPlaying(false);

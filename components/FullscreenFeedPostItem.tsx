@@ -169,10 +169,17 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
 
       try {
         instance.loop = true;
-        instance.muted = shouldPlay ? isMuted : true;
+        // CRITICAL: Always start MUTED. The shouldPlay effect will unmute
+        // when appropriate. This prevents preloaded videos from ever
+        // leaking audio during player initialization.
+        instance.muted = true;
         instance.staysActiveInBackground = false;
         instance.timeUpdateEventInterval = 0.25;
         (instance as any).preferredForwardBufferDuration = 8;
+        // Don't auto-play — wait for the shouldPlay effect
+        if (!shouldPlay) {
+          instance.pause();
+        }
       } catch (e) {
         console.warn('[FeedVideo] Error configuring player:', e);
       }
@@ -190,6 +197,10 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
             try {
               player.muted = true;
               player.pause();
+              // Nuclear fallback: set volume to 0
+              if ((player as any).volume !== undefined) {
+                (player as any).volume = 0;
+              }
             } catch (_) {}
           })
         : undefined;
@@ -200,6 +211,9 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
           try {
             player.muted = true;
             player.pause();
+            if ((player as any).volume !== undefined) {
+              (player as any).volume = 0;
+            }
           } catch (_) {}
         }
         onPlayerInvalid();
@@ -210,10 +224,20 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       if (!player) return;
 
       try {
-        player.muted = shouldPlay ? isMuted : true;
         if (shouldPlay) {
+          // Unmute then play (order matters for smooth transition)
+          player.muted = isMuted;
+          if ((player as any).volume !== undefined) {
+            (player as any).volume = isMuted ? 0 : 1;
+          }
           player.play();
         } else {
+          // MUTE FIRST, then pause. This ordering prevents any brief
+          // audio blip during the transition.
+          player.muted = true;
+          if ((player as any).volume !== undefined) {
+            (player as any).volume = 0;
+          }
           player.pause();
         }
       } catch (_) {}
@@ -486,10 +510,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     };
   }, []);
 
-  // CRITICAL: Immediately mute and pause audio when scrolling away from this post.
-  // Without this, audio bleeds between posts during scroll.
+  // CRITICAL: Immediately mute and pause audio when scrolling away, minimizing
+  // the app, or suspending playback. Checks ALL conditions that should stop audio.
   useEffect(() => {
-    if (!isActive || suspendPlayback) {
+    const shouldBeSilent = !isActive || suspendPlayback || !isAppActive;
+    if (shouldBeSilent) {
       const controller = videoControllerRef.current;
       if (controller) {
         try {
@@ -498,7 +523,28 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         } catch (_) {}
       }
     }
-  }, [isActive, suspendPlayback]);
+  }, [isActive, suspendPlayback, isAppActive]);
+
+  // SAFETY NET: Poll every 500ms to catch any player that escaped the effects
+  // (e.g., native auto-play, race conditions during rapid scrolling).
+  // If this post should NOT be playing, forcefully kill its audio.
+  useEffect(() => {
+    const shouldBePlaying = isActive && !suspendPlayback && isAppActive && !pausedByUser && !decoderErrorDetected;
+    if (shouldBePlaying) return; // Active post — no need to police
+
+    const interval = setInterval(() => {
+      const controller = videoControllerRef.current;
+      if (!controller) return;
+      try {
+        if (controller.isPlaying()) {
+          controller.setMuted(true);
+          controller.pause();
+        }
+      } catch (_) {}
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [isActive, suspendPlayback, isAppActive, pausedByUser, decoderErrorDetected]);
 
   useEffect(() => {
     if (!videoPlayerSource) {
@@ -665,7 +711,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const duration = payload.duration || 0;
     lastPlaybackTimeRef.current = currentTime;
 
-    if (duration > 0) {
+    // Don't update progress while user is dragging the progress bar
+    if (duration > 0 && !isDraggingRef.current) {
       setVideoProgress(currentTime / duration);
     }
   }, []);
@@ -674,7 +721,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (!isMountedRef.current) {
       return;
     }
-    setVideoProgress(0);
+    if (!isDraggingRef.current) {
+      setVideoProgress(0);
+    }
     setVideoReady(true);
   }, []);
 
@@ -704,6 +753,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (!isActive || !isPlayerValid || pausedByUser || suspendPlayback) return;
 
     const interval = setInterval(() => {
+      // Don't update progress while user is dragging the progress bar
+      if (isDraggingRef.current) return;
       const controller = videoControllerRef.current;
       if (!controller || !playerValidRef.current) return;
       try {
@@ -888,9 +939,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   // the video jumps to the correct position without causing per-frame lag.
   const progressBarPanResponder = useRef(
     PanResponder.create({
+      // Capture phase — intercept touches BEFORE the parent Pressable
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onShouldBlockNativeResponder: () => true,
+      onPanResponderTerminationRequest: () => false, // Don't let parent steal the touch
       onPanResponderGrant: (e) => {
         isDraggingRef.current = true;
         const ratio = Math.max(0, Math.min(1, e.nativeEvent.pageX / screenWidthRef.current));
