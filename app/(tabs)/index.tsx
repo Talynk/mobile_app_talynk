@@ -347,12 +347,12 @@ export default function FeedScreen() {
         isLiked={isLiked}
         isFollowing={isFollowing}
         isActive={isActive}
-        suspendPlayback={isFeedTransitioning}
+        suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
         shouldPreload={shouldPreload}
         availableHeight={availableHeight}
       />
     );
-  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
 
   React.useEffect(() => {
     if (activeTab !== 'following' || !user) {

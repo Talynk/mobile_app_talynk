@@ -1887,7 +1887,7 @@ export default function ChallengeDetailScreen() {
                   isLiked={likedPosts.includes(item.id)}
                   isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
-                  suspendPlayback={isFullscreenTransitioning}
+                  suspendPlayback={isFullscreenTransitioning || commentsModalVisible || reportModalVisible}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenAvailableHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}

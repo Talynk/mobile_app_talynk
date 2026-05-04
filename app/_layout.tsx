@@ -6,7 +6,7 @@ import { Stack, router, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useCallback, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet } from 'react-native';
+import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { QueryClientProvider } from '@tanstack/react-query';

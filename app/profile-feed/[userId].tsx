@@ -858,7 +858,7 @@ function ProfileFeedContent({
                 isLiked={likedPosts.includes(item.id)}
                 isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                 isActive={isActive}
-                suspendPlayback={isFeedTransitioning}
+                suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
                 shouldPreload={shouldPreload}
                 availableHeight={availableHeight}
                 showReportButton={!isOwnProfile}

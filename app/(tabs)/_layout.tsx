@@ -4,8 +4,7 @@ import { View, TouchableOpacity, useColorScheme, Text, StyleSheet } from 'react-
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 
-import RealtimeProvider from '@/lib/realtime-context';
-import { NotificationBadgeProvider, useNotificationBadge } from '@/lib/notification-badge-context';
+import { useNotificationBadge } from '@/lib/notification-badge-context';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 
 function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
@@ -104,22 +103,18 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
 export default function TabLayout() {
   return (
     <View style={{ flex: 1, backgroundColor: '#000000' }}>
-      <RealtimeProvider>
-        <NotificationBadgeProvider>
-          <Tabs
-            tabBar={props => <CustomTabBar {...props} />}
-            screenOptions={{
-              headerShown: false,
-            }}
-          >
-            <Tabs.Screen name="index" />
-            <Tabs.Screen name="explore" />
-            <Tabs.Screen name="create" />
-            <Tabs.Screen name="notifications" />
-            <Tabs.Screen name="profile" />
-          </Tabs>
-        </NotificationBadgeProvider>
-      </RealtimeProvider>
+      <Tabs
+        tabBar={props => <CustomTabBar {...props} />}
+        screenOptions={{
+          headerShown: false,
+        }}
+      >
+        <Tabs.Screen name="index" />
+        <Tabs.Screen name="explore" />
+        <Tabs.Screen name="create" />
+        <Tabs.Screen name="notifications" />
+        <Tabs.Screen name="profile" />
+      </Tabs>
     </View>
   );
 }

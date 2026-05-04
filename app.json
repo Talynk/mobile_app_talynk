@@ -120,7 +120,11 @@
         }
       ],
       [
-        "@sentry/react-native/expo"
+        "@sentry/react-native/expo",
+        {
+          "organization": "strongminds",
+          "project": "talentix"
+        }
       ],
       "react-native-compressor",
       "react-native-vision-camera"

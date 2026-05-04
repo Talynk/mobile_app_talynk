@@ -315,6 +315,12 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         try {
           if (player) {
             player.muted = muted;
+            // CRITICAL: Also sync volume — multiple code paths set volume=0
+            // during suspend/pause. Without restoring volume here, the player
+            // stays silent even when muted=false.
+            if ((player as any).volume !== undefined) {
+              (player as any).volume = muted ? 0 : 1;
+            }
           }
         } catch (_) {}
       },
@@ -462,6 +468,38 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const dragSeekPageXRef = useRef(0);
   const screenWidthRef = useRef(screenWidth);
   screenWidthRef.current = screenWidth;
+
+  // Resume playback after any modal/popup dismisses.
+  // Native players can auto-pause when a Modal/Alert overlays them, but React
+  // state doesn't change so no effect re-runs to call play() again.
+  const resumePlayback = useCallback(() => {
+    if (!isActive || suspendPlayback || !isAppActive || decoderErrorDetected || pausedByUser) return;
+    const controller = videoControllerRef.current;
+    if (!controller || !playerValidRef.current) return;
+    // Small delay lets modal animation finish and the native player settle.
+    setTimeout(() => {
+      if (!isMountedRef.current) return;
+      const ctrl = videoControllerRef.current;
+      if (!ctrl || !playerValidRef.current) return;
+      try {
+        ctrl.setMuted(isMuted);
+        ctrl.play();
+      } catch (_) {}
+    }, 150);
+  }, [isActive, suspendPlayback, isAppActive, decoderErrorDetected, pausedByUser, isMuted]);
+
+  // Watch all internal modal states — resume playback when they ALL close.
+  const anyInternalModalOpen = showUnfollowModal || showFollowLoginModal || showBestModal || showAppealModal;
+  const prevModalOpenRef = useRef(false);
+  useEffect(() => {
+    if (anyInternalModalOpen) {
+      prevModalOpenRef.current = true;
+    } else if (prevModalOpenRef.current) {
+      // A modal just closed
+      prevModalOpenRef.current = false;
+      resumePlayback();
+    }
+  }, [anyInternalModalOpen, resumePlayback]);
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
@@ -871,7 +909,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const handleLike = async () => {
     if (!user) {
       Alert.alert('Login Required', 'Please log in or sign up to like posts.', [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel', onPress: () => resumePlayback() },
         { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },
         { text: 'Log In', onPress: () => router.push({ pathname: '/auth/login' as any }) },
       ]);
@@ -1271,7 +1309,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       <UnfollowConfirmModal
         visible={showUnfollowModal}
         username={item.user?.username || 'user'}
-        onConfirm={handleUnfollowConfirm}
+        onConfirm={() => { handleUnfollowConfirm(); resumePlayback(); }}
         onCancel={() => setShowUnfollowModal(false)}
       />
 
@@ -1378,6 +1416,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         onClose={() => setShowAppealModal(false)}
         onAppealed={() => setShowAppealModal(false)}
       />
+
     </View>
   );
 };
