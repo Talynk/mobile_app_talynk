@@ -19,7 +19,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Modal, FlatList, Dimensions } from 'react-native';
 import { authApi, countriesApi } from '@/lib/api';
-import { Country } from '@/types';
+import { Country, DetectedCountry } from '@/types';
+import { getMinimumAge, getAgeRestrictionMessage, getMaxDobForAge } from '@/lib/utils/country-age-restrictions';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCountryCallingCode, type CountryCode } from 'libphonenumber-js/min';
@@ -79,7 +80,11 @@ function getAgeInYears(dateOfBirth: Date): number {
   return age;
 }
 
-function getDobFriendlyError(dateOfBirthValue: string): string | null {
+function getDobFriendlyError(
+  dateOfBirthValue: string,
+  countryCode?: string | null,
+  countryName?: string | null,
+): string | null {
   if (!dateOfBirthValue) {
     return 'Please choose your date of birth to continue.';
   }
@@ -101,9 +106,13 @@ function getDobFriendlyError(dateOfBirthValue: string): string | null {
     return 'Please select a realistic date of birth.';
   }
 
+  const minimumAge = getMinimumAge(countryCode);
   const age = getAgeInYears(dobOnly);
-  if (age < 18) {
-    return 'You must be 18+ to create an account at this time.';
+  if (age < minimumAge) {
+    if (countryName) {
+      return getAgeRestrictionMessage(countryName, minimumAge);
+    }
+    return `You must be at least ${minimumAge} years old to create an account.`;
   }
 
   return null;
@@ -189,6 +198,8 @@ export default function RegisterScreen() {
   const [step, setStep] = useState(1);
   const [countryModalOpen, setCountryModalOpen] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
+  const [detectedCountry, setDetectedCountry] = useState<DetectedCountry | null>(null);
+  const [countryOverridden, setCountryOverridden] = useState(false);
   const [countries, setCountries] = useState<Country[]>([]);
   const [filteredCountries, setFilteredCountries] = useState<Country[]>([]);
   const [countrySearchQuery, setCountrySearchQuery] = useState('');
@@ -204,19 +215,21 @@ export default function RegisterScreen() {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [showDobPicker, setShowDobPicker] = useState(false);
   const [dobPickerTemp, setDobPickerTemp] = useState<Date>(() => {
+    // Default to 20 years ago — a reasonable starting point for scrolling
     const d = new Date();
-    d.setFullYear(d.getFullYear() - 18);
+    d.setFullYear(d.getFullYear() - 20);
     return d;
   });
   const [ageGateLocked, setAgeGateLocked] = useState(false);
   const otpInputRefs = useRef<any[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
   const formYRef = useRef(0);
-  const maxDobDate = useMemo(() => {
-    const d = new Date();
-    d.setFullYear(d.getFullYear() - 18);
-    return d;
-  }, []);
+  // Ref to track date picker scroll without re-rendering (fixes iOS spinner snap-back)
+  const dobPickerScrollRef = useRef<Date>(new Date(2006, 4, 6));
+  // Dynamic minimum age based on the selected country
+  const countryMinAge = useMemo(() => getMinimumAge(selectedCountry?.code ?? detectedCountry?.code), [selectedCountry?.code, detectedCountry?.code]);
+  // Picker only prevents future dates — age restriction is enforced at submission time
+  const maxDobDate = useMemo(() => new Date(), []);
   const minDobDate = useMemo(() => new Date(1900, 0, 1), []);
 
   // Clear any persisted auth errors when component mounts (fixes "Invalid credentials" showing before user submits)
@@ -254,9 +267,9 @@ export default function RegisterScreen() {
         }
         setCountries(list);
         setFilteredCountries(list);
-        if (list.length > 0 && !selectedCountry) {
-          const rwanda = list.find((c: Country) => c.name === 'Rwanda' || c.code === '+250');
-          setSelectedCountry(rwanda ?? list[0]);
+        // Only auto-select if no detected country has already been set
+        if (list.length > 0 && !selectedCountry && !detectedCountry) {
+          // Don't auto-select any country — wait for IP detection from OTP
         }
       } catch (_) {
         setCountries([]);
@@ -305,6 +318,27 @@ export default function RegisterScreen() {
     void loadAgeGateLock();
   }, [email]);
 
+  // Re-evaluate age gate when the country (and thus minimum age) changes.
+  // If the user already entered a DOB that passes the new lower minimum, unlock.
+  useEffect(() => {
+    if (!ageGateLocked || !dateOfBirth) return;
+    const dob = parseDateOnly(dateOfBirth);
+    if (!dob) return;
+    const age = getAgeInYears(dob);
+    if (age >= countryMinAge) {
+      // DOB is now valid under the new country's rules — unlock
+      setAgeGateLocked(false);
+      AsyncStorage.removeItem(AGE_GATE_LOCK_KEY).catch(() => {});
+      setFieldErrors((prev) => {
+        if (!prev.date_of_birth) return prev;
+        const next = { ...prev };
+        delete next.date_of_birth;
+        return next;
+      });
+      setWarning(null);
+    }
+  }, [countryMinAge]);
+
   // Simple countdown for OTP cooldown
   useEffect(() => {
     if (otpCooldownSeconds <= 0) {
@@ -345,7 +379,7 @@ export default function RegisterScreen() {
     setAgeGateLocked(true);
   };
 
-  const getDobValidationError = () => getDobFriendlyError(dateOfBirth);
+  const getDobValidationError = () => getDobFriendlyError(dateOfBirth, selectedCountry?.code ?? detectedCountry?.code, selectedCountry?.name ?? detectedCountry?.name);
 
   const handleRequestOtp = async (): Promise<boolean> => {
     clearError();
@@ -368,18 +402,47 @@ export default function RegisterScreen() {
         setOtpRequested(true);
         setWarning(null);
         setSuccess('We sent a verification code to your email. Enter it below to verify.');
-        const remaining = (response.data as any)?.remainingSeconds;
+        const remaining = response.data?.remainingSeconds;
         if (typeof remaining === 'number' && remaining > 0) {
           setOtpCooldownSeconds(remaining);
         } else {
           setOtpCooldownSeconds(60);
         }
+
+        // ── IP-based country detection: auto-fill country ──
+        const detected = response.data?.detected_country;
+        if (detected && !countryOverridden) {
+          setDetectedCountry(detected);
+          // Map backend detected_country to our Country shape for form fields
+          const asCountry: Country = {
+            id: detected.id,
+            name: detected.name,
+            code: detected.code,
+            dial_code: detected.phone_code ? `+${detected.phone_code.replace(/^\+/, '')}` : undefined,
+            flag_emoji: detected.flag_emoji ?? undefined,
+          };
+          setSelectedCountry(asCountry);
+        }
+
         return true;
       } else {
         setOtpRequested(false);
-        const remaining = (response.data as any)?.remainingSeconds;
+        const remaining = response.data?.remainingSeconds;
         if (typeof remaining === 'number' && remaining > 0) {
           setOtpCooldownSeconds(remaining);
+        }
+        // Still capture detected country even on "error" (e.g. rate-limited)
+        const detected = response.data?.detected_country;
+        if (detected && !countryOverridden && !detectedCountry) {
+          setDetectedCountry(detected);
+          const asCountry: Country = {
+            id: detected.id,
+            name: detected.name,
+            code: detected.code,
+            dial_code: detected.phone_code ? `+${detected.phone_code.replace(/^\+/, '')}` : undefined,
+            flag_emoji: detected.flag_emoji ?? undefined,
+          };
+          setSelectedCountry(asCountry);
         }
         setWarning(response.message || 'Could not send verification code. Please try again.');
         return false;
@@ -542,12 +605,17 @@ export default function RegisterScreen() {
       errors.email = 'Please verify your email with the code we sent';
     }
     if (ageGateLocked) {
-      errors.date_of_birth = 'Registration is blocked because your age does not meet the 18+ requirement.';
+      const minAge = countryMinAge;
+      const cName = selectedCountry?.name ?? detectedCountry?.name;
+      errors.date_of_birth = cName
+        ? `Registration is blocked. ${getAgeRestrictionMessage(cName, minAge)}`
+        : `Registration is blocked because your age does not meet the ${minAge}+ requirement.`;
     } else {
       const dobError = getDobValidationError();
       if (dobError) {
         errors.date_of_birth = dobError;
-        if (dobError.includes('18+')) {
+        // Lock if underage for any minimum age
+        if (dobError.includes('years old') || dobError.includes('at least')) {
           await lockAgeGate();
         }
       }
@@ -617,9 +685,12 @@ export default function RegisterScreen() {
           const msg = 'That date looks invalid. Please pick a valid date of birth.';
           setFieldErrors((prev) => ({ ...prev, date_of_birth: msg }));
           setWarning(msg);
-        } else if (backendMessage === 'You must be at least 18 years old to register') {
+        } else if (backendMessage.includes('at least') && backendMessage.includes('years old')) {
           await lockAgeGate();
-          const msg = 'You must be 18+ to create an account at this time.';
+          const cName = selectedCountry?.name ?? detectedCountry?.name;
+          const msg = cName
+            ? getAgeRestrictionMessage(cName, countryMinAge)
+            : `You must be at least ${countryMinAge} years old to create an account.`;
           setFieldErrors((prev) => ({
             ...prev,
             date_of_birth: msg,
@@ -658,7 +729,12 @@ export default function RegisterScreen() {
       return null;
     }
     if (s === 4) {
-      if (ageGateLocked) return 'Registration is blocked because your age does not meet the 18+ requirement.';
+      if (ageGateLocked) {
+        const cName = selectedCountry?.name ?? detectedCountry?.name;
+        return cName
+          ? `Registration is blocked. ${getAgeRestrictionMessage(cName, countryMinAge)}`
+          : `Registration is blocked because your age does not meet the ${countryMinAge}+ requirement.`;
+      }
       if (!name.trim()) return 'Please enter your full name';
       if (!username.trim()) return 'Please enter a username';
       if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
@@ -677,13 +753,18 @@ export default function RegisterScreen() {
   const handleNext = async () => {
     if (step === 4 && !ageGateLocked) {
       const dob = parseDateOnly(dateOfBirth);
-      if (dob && getAgeInYears(dob) < 18) {
+      const minAge = countryMinAge;
+      if (dob && getAgeInYears(dob) < minAge) {
         await lockAgeGate();
+        const cName = selectedCountry?.name ?? detectedCountry?.name;
+        const msg = cName
+          ? getAgeRestrictionMessage(cName, minAge)
+          : `You must be at least ${minAge} years old to create an account.`;
         setFieldErrors((prev) => ({
           ...prev,
-          date_of_birth: 'You must be 18+ to create an account at this time.',
+          date_of_birth: msg,
         }));
-        setWarning('Registration is blocked for under-18 users.');
+        setWarning(msg);
         return;
       }
     }
@@ -1145,7 +1226,9 @@ export default function RegisterScreen() {
 
               <Text style={[styles.label, { color: C.text }]}>Country</Text>
               <TouchableOpacity
-                onPress={() => setCountryModalOpen(true)}
+                onPress={() => {
+                  setCountryModalOpen(true);
+                }}
                 activeOpacity={0.7}
                 style={[styles.input, { backgroundColor: C.input, borderColor: C.inputBorder, flexDirection: 'row', alignItems: 'center' }]}
               >
@@ -1161,6 +1244,15 @@ export default function RegisterScreen() {
                   <Text style={{ color: C.placeholder }}>Select country</Text>
                 )}
               </TouchableOpacity>
+              {detectedCountry && !countryOverridden ? (
+                <Text style={[styles.helperText, { color: '#60a5fa', marginTop: 2 }]}>
+                  📍 Detected from your location
+                </Text>
+              ) : countryOverridden ? (
+                <Text style={[styles.helperText, { color: C.textSecondary, marginTop: 2 }]}>
+                  You changed this from the detected country ({detectedCountry?.name})
+                </Text>
+              ) : null}
               {fieldErrors.country ? (
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.country}</Text>
               ) : null}
@@ -1169,7 +1261,13 @@ export default function RegisterScreen() {
               <TouchableOpacity
                 onPress={() => {
                   if (!isFormBusy && !ageGateLocked) {
-                    setDobPickerTemp(parseDateOnly(dateOfBirth) || maxDobDate);
+                    let temp = parseDateOnly(dateOfBirth);
+                    if (!temp) {
+                      temp = new Date();
+                      temp.setFullYear(temp.getFullYear() - 20);
+                    }
+                    setDobPickerTemp(temp);
+                    dobPickerScrollRef.current = temp;
                     setShowDobPicker(true);
                   }
                 }}
@@ -1194,14 +1292,17 @@ export default function RegisterScreen() {
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.date_of_birth}</Text>
               ) : (
                 <Text style={[styles.helperText, { color: C.textSecondary }]}>
-                  You must be at least 18 years old to create an account.
+                  You must be at least {countryMinAge} years old to create an account{selectedCountry?.name ? ` in ${selectedCountry.name}` : ''}.
                 </Text>
               )}
               {ageGateLocked && (
                 <View style={[styles.alert, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}>
                   <Ionicons name="lock-closed" size={18} color={'#fecaca'} style={{ marginRight: 8 }} />
                   <Text style={[styles.alertText, { color: C.text }]}>
-                    Age gate locked. This registration cannot continue because the selected date indicates under 18.
+                    {selectedCountry?.name
+                      ? getAgeRestrictionMessage(selectedCountry.name, countryMinAge)
+                      : `You must be at least ${countryMinAge} years old to create an account.`}
+                    {' '}Registration cannot continue.
                   </Text>
                 </View>
               )}
@@ -1349,8 +1450,9 @@ export default function RegisterScreen() {
                 maximumDate={maxDobDate}
                 minimumDate={minDobDate}
                 onChange={(_event, selectedDate) => {
+                  // Only update the ref — no state update, no re-render, no snap-back
                   if (selectedDate) {
-                    setDobPickerTemp(selectedDate);
+                    dobPickerScrollRef.current = selectedDate;
                   }
                 }}
               />
@@ -1364,7 +1466,10 @@ export default function RegisterScreen() {
                 <TouchableOpacity
                   style={[styles.navButtonPrimary, { backgroundColor: C.primary }]}
                   onPress={() => {
-                    setDateOfBirth(formatDateOnly(dobPickerTemp));
+                    // Commit the scrolled value from the ref
+                    const picked = dobPickerScrollRef.current;
+                    setDobPickerTemp(picked);
+                    setDateOfBirth(formatDateOnly(picked));
                     setShowDobPicker(false);
                     setFieldErrors((prev) => {
                       if (!prev.date_of_birth) return prev;
@@ -1391,6 +1496,7 @@ export default function RegisterScreen() {
             onChange={(event, selectedDate) => {
               setShowDobPicker(false);
               if (event.type === 'set' && selectedDate) {
+                dobPickerScrollRef.current = selectedDate;
                 setDobPickerTemp(selectedDate);
                 setDateOfBirth(formatDateOnly(selectedDate));
                 setFieldErrors((prev) => {
@@ -1473,6 +1579,12 @@ export default function RegisterScreen() {
                   style={styles.countryRow}
                   onPress={() => {
                     setSelectedCountry(item as Country);
+                    // Track that user manually overrode the detected country
+                    if (detectedCountry && (item as Country).code !== detectedCountry.code) {
+                      setCountryOverridden(true);
+                    } else {
+                      setCountryOverridden(false);
+                    }
                     setCountryModalOpen(false);
                     setCountrySearchQuery('');
                   }}

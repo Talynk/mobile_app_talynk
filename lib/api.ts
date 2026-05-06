@@ -8,6 +8,8 @@ import {
   LoginResponseData,
   RegisterFormData,
   Country,
+  DetectedCountry,
+  OtpDetectedCountryData,
   RegisterOtpVerifyData,
   RegisterCompletePayload,
   PasswordResetVerifyData,
@@ -124,7 +126,7 @@ export const authApi = {
   // New OTP-based registration flow
   requestRegistrationOtp: async (
     email: string
-  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+  ): Promise<ApiResponse<OtpDetectedCountryData>> => {
     try {
       let response;
       try {
@@ -132,19 +134,35 @@ export const authApi = {
       } catch {
         response = await apiClient.post('/api/auth/register/request-otp', { email });
       }
-      return response.data;
+      // Normalise: backend now includes detected_country in data
+      const body = response.data;
+      const rawData = body?.data ?? {};
+      return {
+        status: body?.status ?? 'success',
+        message: body?.message ?? '',
+        data: {
+          detected_country: rawData.detected_country ?? null,
+          detection_source: rawData.detection_source ?? null,
+          remainingSeconds: rawData.remainingSeconds,
+        },
+      };
     } catch (error: any) {
       const message =
         error.response?.data?.message ||
         error.message ||
         'Failed to request verification code';
 
-      const remainingSeconds = error.response?.data?.data?.remainingSeconds;
+      const errData = error.response?.data?.data;
+      const remainingSeconds = errData?.remainingSeconds;
 
       return {
         status: 'error',
         message,
-        data: { remainingSeconds },
+        data: {
+          detected_country: errData?.detected_country ?? null,
+          detection_source: errData?.detection_source ?? null,
+          remainingSeconds,
+        },
       };
     }
   },
@@ -205,21 +223,36 @@ export const authApi = {
   // Password reset (OTP-based) flow
   requestPasswordResetOtp: async (
     email: string
-  ): Promise<ApiResponse<{ remainingSeconds?: number }>> => {
+  ): Promise<ApiResponse<OtpDetectedCountryData>> => {
     try {
       const response = await apiClient.post('/api/auth/password-reset/request-otp', { email });
-      return response.data;
+      const body = response.data;
+      const rawData = body?.data ?? {};
+      return {
+        status: body?.status ?? 'success',
+        message: body?.message ?? '',
+        data: {
+          detected_country: rawData.detected_country ?? null,
+          detection_source: rawData.detection_source ?? null,
+          remainingSeconds: rawData.remainingSeconds,
+        },
+      };
     } catch (error: any) {
       const apiData = error.response?.data;
       const message =
         apiData?.message || error.message || 'Failed to request password reset code';
 
-      const remainingSeconds = apiData?.data?.remainingSeconds;
+      const errData = apiData?.data;
+      const remainingSeconds = errData?.remainingSeconds;
 
       return {
         status: 'error',
         message,
-        data: { remainingSeconds },
+        data: {
+          detected_country: errData?.detected_country ?? null,
+          detection_source: errData?.detection_source ?? null,
+          remainingSeconds,
+        },
       };
     }
   },

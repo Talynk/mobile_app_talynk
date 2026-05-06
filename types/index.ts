@@ -56,6 +56,22 @@ export interface Country {
   flag_emoji?: string;
 }
 
+/** Country payload returned by IP detection in OTP responses. */
+export interface DetectedCountry {
+  id: number;
+  code: string;
+  name: string;
+  phone_code: string | null;
+  flag_emoji: string | null;
+}
+
+/** Shape of `data` in OTP request success responses that include IP detection. */
+export interface OtpDetectedCountryData {
+  detected_country: DetectedCountry | null;
+  detection_source: 'cloudflare' | 'geoip-lite' | null;
+  remainingSeconds?: number;
+}
+
 export interface Post {
   id: string;
   title?: string;

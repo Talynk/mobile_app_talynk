@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { followsApi, postsApi, userApi } from '@/lib/api';
+import { followsApi, postsApi, feedApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { Post } from '@/types';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
@@ -132,8 +132,28 @@ export function useFeedQuery(tab: FeedTab) {
         return { posts: hlsPosts, nextCursor: hasNext ? String(page + 1) : null };
       }
 
-      // FOR YOU: single call to GET /api/posts/all with large limit
+      // FOR YOU feed
       const page = pageParam ? Number(pageParam) : 1;
+
+      // Guest users: use public feed endpoint (supports IP-based country personalization)
+      if (!isAuthenticated) {
+        if (__DEV__) {
+          console.log(`🔵 [FEED v2-clean] ForYou (guest): calling feedApi.getPublic(cursor=${pageParam})`);
+        }
+        const raw = await feedApi.getPublic(pageParam as string | undefined, 10);
+        const rawPosts = Array.isArray(raw?.data?.posts) ? raw.data.posts : [];
+        // Public feed DTO uses different field names (playback_url, stream_type,
+        // caption, created_at) — normalizePost maps them to what the player expects.
+        const allPosts: Post[] = rawPosts.map((p: any) => normalizePost(p));
+        primePostDetailsCache(allPosts);
+        const hlsPosts = sortFeedPostsByLikesThenRecent(filterSecondarySurfacePosts(allPosts));
+        if (__DEV__) {
+          console.log(`🔵 [FEED v2-clean] ForYou (guest): ${hlsPosts.length} posts, country_personalization=${raw?.data?.country_personalization ?? 'none'}`);
+        }
+        return { posts: hlsPosts, nextCursor: raw?.data?.nextCursor ?? null };
+      }
+
+      // Authenticated users: full feed with ads
       if (__DEV__) {
         console.log(`🔵 [FEED v2-clean] ForYou: calling postsApi.getAll(page=${page}, limit=50)`);
       }
