@@ -21,7 +21,6 @@ import { Modal, FlatList, Dimensions } from 'react-native';
 import { authApi, countriesApi } from '@/lib/api';
 import { Country, DetectedCountry } from '@/types';
 import { getMinimumAge, getAgeRestrictionMessage, getMaxDobForAge } from '@/lib/utils/country-age-restrictions';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCountryCallingCode, type CountryCode } from 'libphonenumber-js/min';
 
@@ -172,6 +171,135 @@ function getCountryDialCode(country: Partial<Country> | null | undefined): strin
   return '';
 }
 
+function DOBPickerModal({
+  visible,
+  initialDate,
+  minYear = 1900,
+  onDone,
+  onCancel,
+  colors,
+}: {
+  visible: boolean;
+  initialDate: Date;
+  minYear?: number;
+  onDone: (date: Date) => void;
+  onCancel: () => void;
+  colors: { card: string; border: string; text: string; primary: string; textSecondary?: string };
+}) {
+  const today = new Date();
+  const [year, setYear] = useState(initialDate.getFullYear());
+  const [month, setMonth] = useState(initialDate.getMonth() + 1);
+  const [day, setDay] = useState(initialDate.getDate());
+
+  useEffect(() => {
+    if (visible) {
+      setYear(initialDate.getFullYear());
+      setMonth(initialDate.getMonth() + 1);
+      setDay(initialDate.getDate());
+    }
+  }, [visible, initialDate]);
+
+  const years = useMemo(() => {
+    const list: number[] = [];
+    for (let y = today.getFullYear(); y >= minYear; y -= 1) {
+      list.push(y);
+    }
+    return list;
+  }, [minYear, today]);
+
+  const months = useMemo(() => Array.from({ length: 12 }, (_, i) => i + 1), []);
+
+  const daysInMonth = useMemo(() => new Date(year, month, 0).getDate(), [year, month]);
+  const days = useMemo(() => Array.from({ length: daysInMonth }, (_, i) => i + 1), [daysInMonth]);
+
+  useEffect(() => {
+    if (day > daysInMonth) {
+      setDay(daysInMonth);
+    }
+  }, [day, daysInMonth]);
+
+  const selectedDate = new Date(year, month - 1, day);
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const selectedOnly = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+  const isFuture = selectedOnly > todayOnly;
+
+  const renderColumn = (
+    data: number[],
+    selected: number,
+    setter: (v: number) => void,
+    label: string,
+  ) => (
+    <View style={styles.dobColumn}>
+      <Text style={[styles.dobColumnLabel, { color: colors.textSecondary || colors.text }]}>{label}</Text>
+      <FlatList
+        data={data}
+        keyExtractor={(item) => String(item)}
+        style={styles.dobColumnList}
+        showsVerticalScrollIndicator
+        initialNumToRender={20}
+        maxToRenderPerBatch={30}
+        windowSize={7}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            onPress={() => setter(item)}
+            style={[
+              styles.dobOptionItem,
+              { backgroundColor: item === selected ? colors.primary : 'transparent' },
+            ]}
+          >
+            <Text
+              style={[
+                styles.dobOptionText,
+                { color: item === selected ? '#000' : colors.text },
+              ]}
+            >
+              {label === 'Year' ? String(item) : String(item).padStart(2, '0')}
+            </Text>
+          </TouchableOpacity>
+        )}
+      />
+    </View>
+  );
+
+  if (!visible) return null;
+
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onCancel}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.modalTitle, { color: colors.text }]}>Select date of birth</Text>
+          <View style={styles.dobColumnsContainer}>
+            {renderColumn(days, day, setDay, 'Day')}
+            {renderColumn(months, month, setMonth, 'Month')}
+            {renderColumn(years, year, setYear, 'Year')}
+          </View>
+          {isFuture ? (
+            <Text style={styles.dobFutureWarning}>Future dates are not allowed.</Text>
+          ) : null}
+          <View style={styles.wizardNav}>
+            <TouchableOpacity
+              style={[styles.navButton, { borderColor: colors.border }]}
+              onPress={onCancel}
+            >
+              <Text style={{ color: colors.text }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.navButtonPrimary,
+                { backgroundColor: isFuture ? THEME.buttonDisabled : colors.primary },
+              ]}
+              disabled={isFuture}
+              onPress={() => onDone(selectedDate)}
+            >
+              <Text style={{ color: '#000', fontWeight: '600' }}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function RegisterScreen() {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -214,23 +342,18 @@ export default function RegisterScreen() {
   const [otpDigits, setOtpDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [showDobPicker, setShowDobPicker] = useState(false);
-  const [dobPickerTemp, setDobPickerTemp] = useState<Date>(() => {
-    // Default to 20 years ago — a reasonable starting point for scrolling
+  const [dobPickerInitDate, setDobPickerInitDate] = useState<Date>(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() - 20);
     return d;
   });
   const [ageGateLocked, setAgeGateLocked] = useState(false);
+  const [fixedHeaderHeight, setFixedHeaderHeight] = useState(0);
   const otpInputRefs = useRef<any[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
   const formYRef = useRef(0);
-  // Ref to track date picker scroll without re-rendering (fixes iOS spinner snap-back)
-  const dobPickerScrollRef = useRef<Date>(new Date(2006, 4, 6));
   // Dynamic minimum age based on the selected country
   const countryMinAge = useMemo(() => getMinimumAge(selectedCountry?.code ?? detectedCountry?.code), [selectedCountry?.code, detectedCountry?.code]);
-  // Picker only prevents future dates — age restriction is enforced at submission time
-  const maxDobDate = useMemo(() => new Date(), []);
-  const minDobDate = useMemo(() => new Date(1900, 0, 1), []);
 
   // Clear any persisted auth errors when component mounts (fixes "Invalid credentials" showing before user submits)
   useEffect(() => {
@@ -816,13 +939,9 @@ export default function RegisterScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <StatusBar style="light" backgroundColor="#000000" />
-      <ScrollView
-        ref={scrollViewRef}
-        style={{ backgroundColor: C.background }}
-        contentContainerStyle={styles.scrollContainer}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        showsVerticalScrollIndicator={false}
+      <View
+        style={[styles.fixedHeaderContainer, { backgroundColor: C.background, borderBottomColor: C.border }]}
+        onLayout={(e) => setFixedHeaderHeight(e.nativeEvent.layout.height)}
       >
         {/* Back button */}
         <View style={[{ flexDirection: 'row', alignItems: 'center', marginTop: insets.top + 4 }]}>
@@ -864,7 +983,15 @@ export default function RegisterScreen() {
           <Text style={[styles.title, { color: C.text }]}>Create your account</Text>
           <Text style={[styles.subtitle, { color: C.textSecondary }]}>Sign up to join Talentix.</Text>
         </View>
-
+      </View>
+      <ScrollView
+        ref={scrollViewRef}
+        style={{ backgroundColor: C.background }}
+        contentContainerStyle={[styles.scrollContainer, { paddingTop: fixedHeaderHeight + 12 }]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Alerts */}
         {error && (
           <View style={[styles.alert, { backgroundColor: C.errorBg, borderColor: C.errorBorder }]}> 
@@ -1266,8 +1393,7 @@ export default function RegisterScreen() {
                       temp = new Date();
                       temp.setFullYear(temp.getFullYear() - 20);
                     }
-                    setDobPickerTemp(temp);
-                    dobPickerScrollRef.current = temp;
+                    setDobPickerInitDate(temp);
                     setShowDobPicker(true);
                   }
                 }}
@@ -1433,83 +1559,24 @@ export default function RegisterScreen() {
         </View>
       </ScrollView>
 
-      {Platform.OS === 'ios' ? (
-        <Modal
-          transparent
-          visible={showDobPicker}
-          animationType="fade"
-          onRequestClose={() => setShowDobPicker(false)}
-        >
-          <View style={styles.modalBackdrop}>
-            <View style={[styles.modalCard, { backgroundColor: C.card, borderColor: C.border }]}>
-              <Text style={[styles.modalTitle, { color: C.text }]}>Select date of birth</Text>
-              <DateTimePicker
-                value={dobPickerTemp}
-                mode="date"
-                display="spinner"
-                maximumDate={maxDobDate}
-                minimumDate={minDobDate}
-                onChange={(_event, selectedDate) => {
-                  // Only update the ref — no state update, no re-render, no snap-back
-                  if (selectedDate) {
-                    dobPickerScrollRef.current = selectedDate;
-                  }
-                }}
-              />
-              <View style={styles.wizardNav}>
-                <TouchableOpacity
-                  style={[styles.navButton, { borderColor: C.border }]}
-                  onPress={() => setShowDobPicker(false)}
-                >
-                  <Text style={{ color: C.text }}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.navButtonPrimary, { backgroundColor: C.primary }]}
-                  onPress={() => {
-                    // Commit the scrolled value from the ref
-                    const picked = dobPickerScrollRef.current;
-                    setDobPickerTemp(picked);
-                    setDateOfBirth(formatDateOnly(picked));
-                    setShowDobPicker(false);
-                    setFieldErrors((prev) => {
-                      if (!prev.date_of_birth) return prev;
-                      const next = { ...prev };
-                      delete next.date_of_birth;
-                      return next;
-                    });
-                  }}
-                >
-                  <Text style={{ color: '#000', fontWeight: '600' }}>Done</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : (
-        showDobPicker && (
-          <DateTimePicker
-            value={dobPickerTemp}
-            mode="date"
-            display="spinner"
-            maximumDate={maxDobDate}
-            minimumDate={minDobDate}
-            onChange={(event, selectedDate) => {
-              setShowDobPicker(false);
-              if (event.type === 'set' && selectedDate) {
-                dobPickerScrollRef.current = selectedDate;
-                setDobPickerTemp(selectedDate);
-                setDateOfBirth(formatDateOnly(selectedDate));
-                setFieldErrors((prev) => {
-                  if (!prev.date_of_birth) return prev;
-                  const next = { ...prev };
-                  delete next.date_of_birth;
-                  return next;
-                });
-              }
-            }}
-          />
-        )
-      )}
+      <DOBPickerModal
+        visible={showDobPicker}
+        initialDate={dobPickerInitDate}
+        minYear={1900}
+        onCancel={() => setShowDobPicker(false)}
+        onDone={(picked) => {
+          setDobPickerInitDate(picked);
+          setDateOfBirth(formatDateOnly(picked));
+          setShowDobPicker(false);
+          setFieldErrors((prev) => {
+            if (!prev.date_of_birth) return prev;
+            const next = { ...prev };
+            delete next.date_of_birth;
+            return next;
+          });
+        }}
+        colors={{ card: C.card, border: C.border, text: C.text, primary: C.primary, textSecondary: C.textSecondary }}
+      />
 
       {/* Success Overlay */}
       {showSuccessOverlay && (
@@ -1624,6 +1691,15 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  fixedHeaderContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    borderBottomWidth: 1,
+    paddingBottom: 8,
   },
   stepper: {
     flexDirection: 'row',
@@ -1810,6 +1886,46 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 12,
+  },
+  dobColumnsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  dobColumn: {
+    flex: 1,
+  },
+  dobColumnLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  dobColumnList: {
+    maxHeight: 220,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    borderRadius: 10,
+    paddingVertical: 4,
+  },
+  dobOptionItem: {
+    marginHorizontal: 6,
+    marginVertical: 2,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dobOptionText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  dobFutureWarning: {
+    color: '#fecaca',
+    marginTop: 6,
+    marginBottom: 2,
+    fontSize: 13,
+    fontWeight: '500',
   },
   countryRow: {
     paddingVertical: 12,
