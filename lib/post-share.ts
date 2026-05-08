@@ -1,5 +1,7 @@
 import { Share } from 'react-native';
 import { Post } from '@/types';
+import { postsApi } from '@/lib/api';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 // Replace these placeholders with your production smart-link domain and store URLs.
 export const TALENTIX_SHARE_LINK_BASE_URL =
@@ -28,5 +30,24 @@ export function buildPostSharePayload(post: Post | null | undefined) {
 
 export async function sharePost(post: Post | null | undefined) {
   const payload = buildPostSharePayload(post);
-  return Share.share(payload);
+  const result = await Share.share(payload);
+  const postId = post?.id ? String(post.id) : '';
+
+  // iOS exposes a dismissed action; Android resolves without a reliable dismissal signal.
+  const wasDismissed = result.action === Share.dismissedAction;
+  if (!postId || wasDismissed) {
+    return result;
+  }
+
+  const response = await postsApi.share(postId);
+  if (response.status === 'success') {
+    feedTelemetry.trackShareSuccess({ postId });
+  } else {
+    feedTelemetry.trackShareFail({
+      postId,
+      message: response.message || 'share endpoint failed',
+    });
+  }
+
+  return result;
 }

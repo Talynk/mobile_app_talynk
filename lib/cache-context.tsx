@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { syncFollowingFeedAfterFollowChange } from "@/lib/following-feed-cache";
+import { syncFollowStateAcrossFeedCaches, syncFollowingFeedAfterFollowChange } from "@/lib/following-feed-cache";
 
 interface UserPreferences {
   theme: "light" | "dark";
@@ -21,6 +21,7 @@ interface CacheContextType {
   updatePreferences: (updates: Partial<UserPreferences>) => Promise<void>;
   likedPosts: Set<string>;
   followedUsers: Set<string>;
+  followedUsersReady: boolean;
   postLikeCounts: Map<string, number>;
   updateLikedPosts: (postId: string, isLiked: boolean) => void;
   updateFollowedUsers: (userId: string, isFollowing: boolean) => void;
@@ -53,6 +54,7 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
     useState<UserPreferences>(defaultPreferences);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [followedUsers, setFollowedUsers] = useState<Set<string>>(new Set());
+  const [followedUsersReady, setFollowedUsersReady] = useState(false);
   const [postLikeCounts, setPostLikeCounts] = useState<Map<string, number>>(
     new Map()
   );
@@ -68,8 +70,11 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
       const viewerUserId = viewer?.id;
 
       if (!viewerUserId) {
-        setFollowedUsers(new Set());
+        const emptySet = new Set<string>();
+        setFollowedUsers(emptySet);
+        syncFollowStateAcrossFeedCaches(emptySet);
         await AsyncStorage.removeItem("followed_users");
+        setFollowedUsersReady(true);
         return;
       }
 
@@ -97,9 +102,12 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
       }
 
       setFollowedUsers(next);
+      syncFollowStateAcrossFeedCaches(next);
       await persistFollowedUsers(next);
+      setFollowedUsersReady(true);
     } catch (error) {
       console.warn("Error syncing followed users:", error);
+      setFollowedUsersReady(true);
     }
   };
 
@@ -135,7 +143,11 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
 
         if (followedData) {
           const arr = JSON.parse(followedData);
-          if (Array.isArray(arr)) setFollowedUsers(new Set(arr));
+          if (Array.isArray(arr)) {
+            const next = new Set(arr);
+            setFollowedUsers(next);
+            syncFollowStateAcrossFeedCaches(next);
+          }
         }
 
         if (likeCountsData) {
@@ -146,6 +158,7 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
         await syncFollowedUsersFromServer();
       } catch (e) {
         console.error("Error loading cache:", e);
+        setFollowedUsersReady(true);
       }
     })();
   }, []);
@@ -217,6 +230,7 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
     setFollowedUsers((prev) => {
       const updated = new Set(prev);
       isFollowing ? updated.add(userId) : updated.delete(userId);
+      syncFollowStateAcrossFeedCaches(updated);
 
       (async () => {
         await AsyncStorage.setItem(
@@ -322,6 +336,7 @@ export const CacheProvider: React.FC<{ children: React.ReactNode }> = ({
         updatePreferences,
         likedPosts,
         followedUsers,
+        followedUsersReady,
         postLikeCounts,
         updateLikedPosts,
         updateFollowedUsers,

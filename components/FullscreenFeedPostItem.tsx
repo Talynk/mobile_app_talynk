@@ -368,6 +368,7 @@ export interface FullscreenFeedPostItemProps {
   onUnfollow: (userId: string) => void;
   isLiked: boolean;
   isFollowing: boolean;
+  isFollowStateReady?: boolean;
   isActive: boolean;
   suspendPlayback?: boolean;
   shouldPreload: boolean;
@@ -394,6 +395,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   onPublishPress,
   isLiked,
   isFollowing,
+  isFollowStateReady = true,
   isActive,
   suspendPlayback = false,
   shouldPreload,
@@ -1253,11 +1255,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           )}
           {!isAd && !isOwnPost && (
             <TouchableOpacity
-              style={[styles.followButton, { backgroundColor: isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }]}
+              style={[styles.followButton, { backgroundColor: !isFollowStateReady ? 'rgba(255,255,255,0.12)' : isFollowing ? 'rgba(255,255,255,0.2)' : '#60a5fa' }]}
               onPress={handleFollow}
+              disabled={!isFollowStateReady}
             >
               <Text style={[styles.followButtonText, { color: isFollowing ? '#fff' : '#000' }]}>
-                {isFollowing ? 'Following' : 'Follow'}
+                {!isFollowStateReady ? '...' : isFollowing ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
           )}
@@ -1432,6 +1435,7 @@ function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPo
     prev.shouldPreload === next.shouldPreload &&
     prev.isLiked === next.isLiked &&
     prev.isFollowing === next.isFollowing &&
+    (prev.isFollowStateReady ?? true) === (next.isFollowStateReady ?? true) &&
     (prev.suspendPlayback ?? false) === (next.suspendPlayback ?? false) &&
     prev.availableHeight === next.availableHeight &&
     (prev.showReportButton ?? true) === (next.showReportButton ?? true) &&

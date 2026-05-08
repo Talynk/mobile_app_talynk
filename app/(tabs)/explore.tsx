@@ -32,6 +32,7 @@ import { normalizePost } from '@/lib/utils/normalize-post';
 import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-cache';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
+import { createFeedRefreshSeed } from '@/lib/feed-config';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EXPLORE_PAGE_LIMIT = 24;
@@ -270,6 +271,7 @@ export default function ExploreScreen() {
 
   const loadGridPosts = async (_page?: number, _forceRefresh?: boolean) => {
     const loadVersion = ++exploreLoadVersionRef.current;
+    const refreshSeed = createFeedRefreshSeed();
 
     try {
       setGridLoading(true);
@@ -289,7 +291,11 @@ export default function ExploreScreen() {
         let isFallback = false;
 
         if (useCursorFallback) {
-          const response = await feedApi.getPublic(nextCursor || undefined, 20);
+          const response = await feedApi.getPublic({
+            cursor: nextCursor || undefined,
+            limit: 20,
+            refresh: refreshSeed,
+          });
           if (response.status !== 'success') {
             if (__DEV__) {
               console.log(`🟡 [Explore] public fallback failed: ${response.message}`);

@@ -55,7 +55,7 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
-import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { filterChallengeSurfacePosts, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
@@ -343,7 +343,7 @@ export default function ChallengeDetailScreen() {
       if (response?.status === 'success') {
         const rawItems = response.data?.rawItems || [];
         const postsList = response.data?.posts || [];
-        const normalizedPosts = filterSecondarySurfacePosts(await prepareRenderableChallengePosts(
+        const normalizedPosts = filterChallengeSurfacePosts(await prepareRenderableChallengePosts(
           Array.isArray(postsList) ? postsList : [],
           { preserveUnavailableVideos: true },
         ));
@@ -367,7 +367,7 @@ export default function ChallengeDetailScreen() {
         if (shouldUseFallback) {
           const fallbackData = await getFallbackChallengeData(options);
           const fallbackPostsToUse =
-            fallbackData.posts.length >= normalizedPosts.length ? filterSecondarySurfacePosts(fallbackData.posts) : normalizedPosts;
+            fallbackData.posts.length >= normalizedPosts.length ? filterChallengeSurfacePosts(fallbackData.posts) : normalizedPosts;
           const likesMapToUse =
             fallbackPostsToUse === fallbackData.posts ? fallbackData.likesMap : likesMapFromResponse;
 

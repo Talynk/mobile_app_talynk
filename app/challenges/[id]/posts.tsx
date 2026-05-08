@@ -39,7 +39,7 @@ import {
   getChallengeVideoStatusLabel,
   prepareRenderableChallengePosts,
 } from '@/lib/utils/challenge-post-visibility';
-import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { filterChallengeSurfacePosts, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
@@ -223,7 +223,7 @@ export default function ChallengePostsScreen() {
           if (postId) map[postId] = likes;
         });
 
-        const list = filterSecondarySurfacePosts(await prepareRenderableChallengePosts(response.data?.posts || [], {
+        const list = filterChallengeSurfacePosts(await prepareRenderableChallengePosts(response.data?.posts || [], {
           preserveUnavailableVideos: true,
         }));
         const postsList = sortChallengePosts(list, map, ended);
@@ -242,7 +242,7 @@ export default function ChallengePostsScreen() {
 
         if (shouldUseFallback) {
           const fallbackData = await loadFallbackChallengePosts(String(id));
-          const filteredFallbackPosts = filterSecondarySurfacePosts(filterFallbackPosts(fallbackData.posts));
+          const filteredFallbackPosts = filterChallengeSurfacePosts(filterFallbackPosts(fallbackData.posts));
           const sortedFallbackPosts = sortChallengePosts(
             filteredFallbackPosts as Post[],
             fallbackData.likesMap,

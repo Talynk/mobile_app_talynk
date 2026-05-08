@@ -27,6 +27,7 @@ export function getVideoSource(url: string): VideoSource {
       if (proxied) {
         return {
           uri: proxied,
+          useCaching: true,
           ...(contentType ? { contentType } : {}),
         };
       }
@@ -38,6 +39,7 @@ export function getVideoSource(url: string): VideoSource {
 
   return {
     uri: url,
+    useCaching: true,
     ...(contentType ? { contentType } : {}),
   };
 }

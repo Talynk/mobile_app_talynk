@@ -89,3 +89,8 @@ export function filterSecondarySurfacePosts<T extends { type?: string }>(posts: 
     if (!Array.isArray(posts)) return posts;
     return filterHlsReady(posts).filter((post) => !shouldHideOutsideForYou(post));
 }
+
+export function filterChallengeSurfacePosts<T extends { type?: string }>(posts: T[]): T[] {
+    if (!Array.isArray(posts)) return posts;
+    return posts.filter((post) => !shouldHideOutsideForYou(post));
+}

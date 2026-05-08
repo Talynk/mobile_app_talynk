@@ -1,0 +1,167 @@
+{
+  "info": {
+    "name": "Video Approval System",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": {
+                "email": "admin@example.com",
+                "password": "admin123",
+                "role": "admin"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Get All Users",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/admin/users",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Manage Account",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/admin/accounts/manage",
+            "body": {
+              "mode": "raw",
+              "raw": {
+                "username": "user123",
+                "action": "freezed"
+              }
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Register Approver",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/admin/approvers",
+            "body": {
+              "mode": "raw",
+              "raw": {
+                "username": "approver1",
+                "email": "approver1@example.com",
+                "password": "approver123"
+              }
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Approver",
+      "item": [
+        {
+          "name": "Get Pending Posts",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/approver/posts/pending",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Approve Post",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/approver/posts/{{postId}}/approve",
+            "body": {
+              "mode": "raw",
+              "raw": {
+                "notes": "Content meets community guidelines"
+              }
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        {
+          "name": "Generate Report",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/approver/reports",
+            "body": {
+              "mode": "raw",
+              "raw": {
+                "reportType": "daily",
+                "format": "pdf",
+                "metrics": ["approvals", "rejections", "response_time"]
+              }
+            },
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{approverToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+} 

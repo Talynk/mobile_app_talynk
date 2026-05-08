@@ -15,6 +15,7 @@ import {
   PasswordResetVerifyData,
 } from '../types';
 import { normalizePost } from './utils/normalize-post';
+import { getDeviceFingerprint } from './device-fingerprint';
 
 async function retryApiRequest<T>(
   request: () => Promise<T>,
@@ -384,18 +385,73 @@ export const categoriesApi = {
 };
 
 // Feed API (optimized endpoints with cursor pagination)
+export type FeedRequestOptions = {
+  cursor?: string | null;
+  limit?: number;
+  refresh?: number;
+};
+
+function buildFeedParams(options: FeedRequestOptions = {}) {
+  const params = new URLSearchParams();
+  params.set('limit', String(options.limit ?? 10));
+  if (options.cursor) params.set('cursor', options.cursor);
+  if (typeof options.refresh === 'number') params.set('refresh', String(options.refresh));
+  return params;
+}
+
 export const feedApi = {
-  getPublic: async (cursor?: string, limit = 10) => {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (cursor) params.set('cursor', cursor);
-    const res = await apiClient.get(`/api/feed/public?${params}`);
+  getPublic: async (options: FeedRequestOptions = {}) => {
+    const params = buildFeedParams(options);
+    const fingerprint = await getDeviceFingerprint();
+    const res = await apiClient.get(`/api/feed/public?${params}`, {
+      headers: {
+        'X-Device-Fingerprint': fingerprint,
+      },
+    });
     return res.data;
   },
-  getPersonalized: async (cursor?: string, limit = 10) => {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (cursor) params.set('cursor', cursor);
+  getPersonalized: async (options: FeedRequestOptions = {}) => {
+    const params = buildFeedParams(options);
     const res = await apiClient.get(`/api/feed/personalized?${params}`);
     return res.data;
+  },
+  getRecommendations: async (options: FeedRequestOptions = {}) => {
+    const params = buildFeedParams(options);
+    const res = await apiClient.get(`/api/recommendations/feed?${params}`);
+    return res.data;
+  },
+  resetSeen: async (): Promise<ApiResponse<Record<string, never>>> => {
+    try {
+      const response = await apiClient.post('/api/feed/seen/reset');
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to reset feed history',
+        data: {},
+      };
+    }
+  },
+  resetSeenGuest: async (): Promise<ApiResponse<Record<string, never>>> => {
+    try {
+      const fingerprint = await getDeviceFingerprint();
+      const response = await apiClient.post(
+        '/api/feed/seen/reset-guest',
+        {},
+        {
+          headers: {
+            'X-Device-Fingerprint': fingerprint,
+          },
+        }
+      );
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to reset guest feed history',
+        data: {},
+      };
+    }
   },
 };
 
@@ -1032,6 +1088,18 @@ export const postsApi = {
       return {
         status: 'error',
         message: error.response?.data?.message || 'Failed to retry processing',
+        data: {},
+      };
+    }
+  },
+  share: async (postId: string): Promise<ApiResponse<{ shareCount?: number }>> => {
+    try {
+      const response = await apiClient.post(`/api/posts/${encodeURIComponent(postId)}/share`);
+      return response.data;
+    } catch (error: any) {
+      return {
+        status: 'error',
+        message: error.response?.data?.message || 'Failed to record share',
         data: {},
       };
     }
@@ -2252,7 +2320,6 @@ export const likesApi = {
       }
     }
   },
-
   getLikers: async (postId: string, page: number = 1, limit: number = 50): Promise<ApiResponse<{ users: User[]; pagination: any; post: { id: string; totalLikes: number } }>> => {
     try {
       const response = await apiClient.get(`/api/likes/posts/${postId}/users?page=${page}&limit=${limit}`);

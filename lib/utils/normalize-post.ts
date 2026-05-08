@@ -196,7 +196,7 @@ export function normalizePost(post: any): Post {
     views: post?.views ?? post?.view_count ?? 0,
     view_count: post?.view_count ?? post?.views ?? 0,
     is_featured: post?.is_featured ?? post?.isFeatured ?? false,
-    isAd: !!post?.isAd,
+    isAd: post?.isAd === true || post?.is_ad === true,
     challenge: primaryChallenge || post?.challenge || post?.competition,
     challenge_id: challengeId || undefined,
     challengeId: challengeId || undefined,

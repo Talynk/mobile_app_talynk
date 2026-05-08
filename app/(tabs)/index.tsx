@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   StatusBar,
-  Share,
   Animated,
   Alert,
   FlatList,
@@ -16,12 +15,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
-import { likesApi, followsApi } from '@/lib/api';
+import { likesApi, followsApi, feedApi } from '@/lib/api';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
-import { setPostLikeCounts, addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
+import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFeedQuery } from '@/lib/hooks/use-feed-query';
@@ -30,8 +29,6 @@ import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
 import ChallengesList from '@/components/ChallengesList';
 import CreateChallengeModal from '@/components/CreateChallengeModal';
-
-import { getPostMediaUrl } from '@/lib/utils/file-url';
 import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
@@ -47,6 +44,13 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import {
+  createFeedRefreshSeed,
+  createNextFeedRefreshSeed,
+  FEED_DEFAULT_PAGE_SIZE,
+  FEED_INTEGRATION_CONFIG,
+} from '@/lib/feed-config';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -75,12 +79,14 @@ export default function FeedScreen() {
   const [challengesRefreshTrigger, setChallengesRefreshTrigger] = useState(0);
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const [feedViewportHeight, setFeedViewportHeight] = useState(0);
+  const [forYouRefreshSeed, setForYouRefreshSeed] = useState(() => createFeedRefreshSeed());
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const flatListRef = useRef<FlatList<Post>>(null);
   const followingAutoloadAttemptedRef = useRef(false);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
-  const { followedUsers, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
+  const { followedUsers, followedUsersReady, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
@@ -97,7 +103,17 @@ export default function FeedScreen() {
     isLoading,
     refetch,
     isRefetching,
-  } = useFeedQuery(feedTab);
+  } = useFeedQuery(feedTab, activeTab === 'challenges'
+    ? {}
+    : feedTab === 'foryou'
+      ? { refreshSeed: forYouRefreshSeed, limit: FEED_DEFAULT_PAGE_SIZE }
+      : {});
+
+  React.useEffect(() => {
+    if (pullRefreshing && !isLoading && !isRefetching) {
+      setPullRefreshing(false);
+    }
+  }, [isLoading, isRefetching, pullRefreshing]);
 
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
@@ -270,6 +286,33 @@ export default function FeedScreen() {
     }
   }, [posts]);
 
+  const handleRefresh = useCallback(async () => {
+    if (activeTab !== 'foryou') {
+      setPullRefreshing(true);
+      await refetch();
+      return;
+    }
+
+    const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
+    setPullRefreshing(true);
+    feedTelemetry.trackPullToRefresh({ endpoint: user ? 'personalized' : 'public', refresh: nextRefreshSeed });
+
+    if (FEED_INTEGRATION_CONFIG.enableSeenResetOnPullToRefresh) {
+      const resetResponse = user
+        ? await feedApi.resetSeen()
+        : await feedApi.resetSeenGuest();
+
+      if (resetResponse.status === 'success') {
+        feedTelemetry.trackSeenResetCalled({
+          endpoint: user ? 'auth' : 'guest',
+          refresh: nextRefreshSeed,
+        });
+      }
+    }
+
+    setForYouRefreshSeed(nextRefreshSeed);
+  }, [activeTab, forYouRefreshSeed, refetch, user]);
+
   const handleReport = useCallback((postId: string) => {
     if (!user) {
       router.push({ pathname: '/auth/login' as any });
@@ -318,6 +361,39 @@ export default function FeedScreen() {
   }, [shimmerAnim]);
   const shimmerOpacity = shimmerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
 
+  const renderSkeletonItem = useCallback((key: string | number) => (
+    <View key={key} style={[styles.skeletonItem, { height: availableHeight }]}>
+      <Animated.View style={[styles.skeletonMedia, { opacity: shimmerOpacity }]} />
+      <View style={styles.skeletonActions}>
+        <Animated.View style={[styles.skeletonAvatar, { opacity: shimmerOpacity }]} />
+        <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
+        <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
+        <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
+      </View>
+      <View style={styles.skeletonBottomInfo}>
+        <Animated.View style={[styles.skeletonUsername, { opacity: shimmerOpacity }]} />
+        <Animated.View style={[styles.skeletonCaption, { opacity: shimmerOpacity }]} />
+      </View>
+    </View>
+  ), [availableHeight, shimmerOpacity]);
+
+  const renderScrollableSkeletonFeed = useCallback((count = 12) => (
+    <FlatList
+      data={Array.from({ length: count }, (_, index) => index)}
+      keyExtractor={(item) => `skeleton-${item}`}
+      renderItem={({ item }) => renderSkeletonItem(item)}
+      pagingEnabled={Platform.OS === 'ios'}
+      snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
+      snapToAlignment="start"
+      disableIntervalMomentum
+      decelerationRate="fast"
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+      alwaysBounceVertical={false}
+      scrollEnabled
+    />
+  ), [availableHeight, renderSkeletonItem]);
+
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
     const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused || isActive });
@@ -346,6 +422,7 @@ export default function FeedScreen() {
         onUnfollow={handleUnfollow}
         isLiked={isLiked}
         isFollowing={isFollowing}
+        isFollowStateReady={!user || followedUsersReady || activeTab === 'following' || item.is_following_author === true}
         isActive={isActive}
         suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
         shouldPreload={shouldPreload}
@@ -448,21 +525,7 @@ export default function FeedScreen() {
         >
           {!isFeedViewportReady || (isLoading && posts.length === 0) ? (
             <View style={styles.loadingContainer}>
-              {[1, 2, 3].map((i) => (
-                <View key={i} style={[styles.skeletonItem, { height: availableHeight }]}>
-                  <Animated.View style={[styles.skeletonMedia, { opacity: shimmerOpacity }]} />
-                  <View style={styles.skeletonActions}>
-                    <Animated.View style={[styles.skeletonAvatar, { opacity: shimmerOpacity }]} />
-                    <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
-                    <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
-                    <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
-                  </View>
-                  <View style={styles.skeletonBottomInfo}>
-                    <Animated.View style={[styles.skeletonUsername, { opacity: shimmerOpacity }]} />
-                    <Animated.View style={[styles.skeletonCaption, { opacity: shimmerOpacity }]} />
-                  </View>
-                </View>
-              ))}
+              {[1, 2, 3].map((i) => renderSkeletonItem(i))}
             </View>
           ) : (
             <FlatList
@@ -492,8 +555,10 @@ export default function FeedScreen() {
               alwaysBounceVertical={false}
               refreshControl={
                 <RefreshControl
-                  refreshing={isRefetching}
-                  onRefresh={() => refetch()}
+                  refreshing={pullRefreshing || isRefetching}
+                  onRefresh={() => {
+                    void handleRefresh();
+                  }}
                   tintColor="#60a5fa"
                 />
               }
@@ -526,49 +591,31 @@ export default function FeedScreen() {
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
               ListEmptyComponent={
-                isRefetching || isLoading ? (
+                isOffline ? (
+                  renderScrollableSkeletonFeed()
+                ) : isRefetching || isLoading ? (
                   <View style={[styles.loadingContainer, { height: availableHeight }]}>
-                    {[1, 2].map((i) => (
-                      <View key={i} style={[styles.skeletonItem, { height: availableHeight }]}>
-                        <Animated.View style={[styles.skeletonMedia, { opacity: shimmerOpacity }]} />
-                        <View style={styles.skeletonActions}>
-                          <Animated.View style={[styles.skeletonAvatar, { opacity: shimmerOpacity }]} />
-                          <Animated.View style={[styles.skeletonActionButton, { opacity: shimmerOpacity }]} />
-                        </View>
-                      </View>
-                    ))}
+                    {[1, 2].map((i) => renderSkeletonItem(i))}
                   </View>
-                ) : (
+                ) : activeTab === 'following' && !user ? (
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
-                  <Feather name={activeTab === 'following' ? "user-plus" : "video"} size={64} color="#666" />
+                  <Feather name="user-plus" size={64} color="#666" />
                   <Text style={styles.emptyText}>
-                    {isOffline
-                      ? 'No internet connection'
-                      : activeTab === 'following' && !user
-                        ? 'Sign in to see posts from people you follow'
-                        : activeTab === 'following'
-                          ? 'No posts here yet'
-                          : 'No posts available'}
+                    Sign in to see posts from people you follow
                   </Text>
                   <Text style={styles.emptySubtext}>
-                    {isOffline
-                      ? 'Please reconnect to load posts.'
-                      : activeTab === 'following' && !user
-                        ? 'Sign in to see posts from people you follow'
-                        : activeTab === 'following'
-                          ? 'Follow people to see their posts here'
-                          : 'Pull down to refresh or check back later'}
+                    Sign in to see posts from people you follow
                   </Text>
-                  {activeTab === 'following' && !user && !isOffline && (
-                    <TouchableOpacity
-                      style={styles.emptyLoginButton}
-                      onPress={() => router.push('/auth/login' as any)}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.emptyLoginButtonText}>Log in / Sign up</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={styles.emptyLoginButton}
+                    onPress={() => router.push('/auth/login' as any)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.emptyLoginButtonText}>Log in / Sign up</Text>
+                  </TouchableOpacity>
                 </View>
+                ) : (
+                  renderScrollableSkeletonFeed(8)
                 )
               }
             />

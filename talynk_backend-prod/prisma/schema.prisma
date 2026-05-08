@@ -1,0 +1,796 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_LOCAL")
+}
+
+model User {
+  id                    String   @id @default(uuid()) @db.Uuid
+  username              String?  @unique @db.VarChar(255)
+  display_name          String?  @db.VarChar(255)
+  email                 String?  @unique @db.VarChar(255)
+  email_verified        Boolean  @default(false)
+  phone1                String?  @db.VarChar(15)
+  phone2                String?  @db.VarChar(15)
+  date_of_birth         DateTime
+  posts_count           Int      @default(0)
+  total_profile_views   Int      @default(0)
+  user_facial_image     Bytes?
+  selected_category     String?  @db.VarChar(255)
+  password              String?  @db.VarChar(255) // Made optional for OTP flow
+  notification          Boolean  @default(true)
+  recent_searches       Json?
+  likes                 Int      @default(0)
+  subscribers           Int      @default(0)
+  remember_me           Boolean  @default(false)
+  status                String   @default("active") @db.VarChar(255)
+  suspended_at          DateTime?
+  suspension_reason      String?  @db.Text
+  role                  String   @default("user") @db.VarChar(255)
+  profile_picture       String?  @db.VarChar(255)
+  bio                   String?  @db.Text // User biography/bio
+  last_login            DateTime?
+  last_active_date      DateTime @default(now())
+  follower_count        Int      @default(0)
+  interests             String[] @default([])
+  country_id            Int?     // Reference to country
+  createdAt             DateTime?
+  updatedAt             DateTime?
+
+  // Relations
+  posts                 Post[]
+  comments              Comment[]
+  postLikes             PostLike[]
+  notifications         Notification[]
+  notificationActors    Notification[] @relation("NotificationActor")
+  recentSearches        RecentSearch[]
+  following             Follow[] @relation("UserFollowing")
+  followers             Follow[] @relation("UserFollowers")
+  subscriptions         Subscription[]
+  shares                Share[]
+  views                 View[]
+  reports               PostReport[]
+  appeals               PostAppeal[]
+  preferences           UserPreference[]
+  country               Country? @relation(fields: [country_id], references: [id])
+  otps                   Otp[]
+  organizedChallenges   Challenge[] @relation("ChallengeOrganizer")
+  challengeParticipants ChallengeParticipant[]
+  challengePosts        ChallengePost[]
+  userDevices           UserDevice[]
+  userSessions          UserSession[]
+  userIssues            UserIssue[]
+  creatorAffinitiesReceived UserCreatorAffinity[] @relation("UserAffinityCreator")
+  creatorAffinitiesMade      UserCreatorAffinity[] @relation("UserAffinityUser")
+
+  @@map("users")
+}
+
+model Country {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  code        String   @unique @db.VarChar(3) // ISO 3166-1 alpha-3 code
+  // International calling code, including '+' and multi-digit values
+  phone_code  String?  @db.VarChar(20)
+  flag_emoji  String?  @db.VarChar(10) // Flag emoji
+  is_active   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       User[]
+
+  @@map("countries")
+}
+
+model AppSetting {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique @db.VarChar(100)
+  value       String   @db.Text
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model Post {
+  id                    String   @id @default(uuid()) @db.Uuid
+  title                 String   @db.VarChar(255)
+  description           String?  @db.Text
+  video_url             String?  @db.VarChar(255)
+  hls_url               String?  @db.VarChar(500)  // HLS master playlist URL
+  thumbnail_url         String?  @db.VarChar(500)  // Server-generated thumbnail URL
+  video_duration        Int?                        // Video duration in seconds
+  video_width           Int?                        // Video width in pixels
+  video_height          Int?                        // Video height in pixels
+  processing_status     String?  @db.VarChar(50)   // pending, processing, completed, failed
+  processing_error      String?  @db.Text          // Error message if processing failed
+  status                PostStatus @default(active)
+  user_id               String?  @db.Uuid
+  approver_id           String?  @db.Uuid
+  admin_id              String?  @db.Uuid
+  approved_at           DateTime?
+  views                 Int      @default(0)
+  likes                 Int      @default(0)
+  shares                Int      @default(0)
+  comment_count         Int      @default(0)
+  category_id           Int?
+  is_featured           Boolean  @default(false)
+  is_frozen             Boolean  @default(false)
+  report_count          Int      @default(0)
+  featured_at           DateTime?
+  frozen_at             DateTime?
+  suspended_at          DateTime?
+  suspension_reason     String?  @db.Text
+  suspended_by          String?  @db.Uuid
+  uploadDate            DateTime @default(now())
+  type                  String   @default("text") @db.VarChar(50)
+  content               String?  @db.Text
+  is_ad                 Boolean  @default(false)  // Admin-created ad; shown in feed interleave only
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @default(now())
+  impression_count      Int      @default(0)
+  engagement_score      Float    @default(0)
+  last_engagement_at    DateTime?
+
+  // Relations
+  user                  User?    @relation(fields: [user_id], references: [id])
+  approver              Approver? @relation(fields: [approver_id], references: [id])
+  admin                 Admin?   @relation(fields: [admin_id], references: [id])
+  suspendingAdmin       Admin?   @relation("PostSuspendedBy", fields: [suspended_by], references: [id])
+  category              Category? @relation(fields: [category_id], references: [id])
+  comments              Comment[]
+  postLikes             PostLike[]
+  postShares            Share[]
+  postViews             View[]
+  reports               PostReport[]
+  appeals               PostAppeal[]
+  featuredPosts         FeaturedPost[]
+  challengePosts        ChallengePost[]
+  notifications         Notification[]
+
+  @@index([createdAt(sort: Desc)])
+  @@index([user_id])
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([impression_count])
+  @@index([engagement_score(sort: Desc)])
+  @@map("posts")
+}
+
+model UserCreatorAffinity {
+  id                String   @id @default(uuid()) @db.Uuid
+  user_id           String   @db.Uuid
+  creator_id        String   @db.Uuid
+  affinity_score    Float    @default(0.0)
+  interaction_count Int      @default(0)
+  last_interaction  DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user    User @relation("UserAffinityUser", fields: [user_id], references: [id], onDelete: Cascade)
+  creator User @relation("UserAffinityCreator", fields: [creator_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, creator_id])
+  @@index([user_id, affinity_score(sort: Desc)])
+  @@map("user_creator_affinity")
+}
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?  @db.Text
+  status      CategoryStatus @default(active)
+  parent_id   Int?     // Reference to parent category
+  level       Int      @default(1) // 1 for main categories, 2 for subcategories
+  sort_order  Int      @default(0) // For ordering categories
+
+  // Relations
+  posts       Post[]
+  userPreferences UserPreference[]
+  parent      Category? @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+
+  @@unique([name, parent_id])
+  @@map("categories")
+}
+
+model Comment {
+  id               String   @id @default(uuid()) @db.Uuid
+  commentor_id     String   @db.Uuid
+  comment_date     DateTime @default(now())
+  post_id          String   @db.Uuid
+  comment_text     String?  @db.Text
+  comment_reports  Int      @default(0)
+
+  // Relations
+  user             User     @relation(fields: [commentor_id], references: [id])
+  post             Post     @relation(fields: [post_id], references: [id])
+
+  @@index([post_id])
+  @@index([commentor_id, comment_date(sort: Desc)])
+  @@map("comments")
+}
+
+model PostLike {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  post_id   String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, post_id], name: "unique_user_post_like")
+  @@index([post_id, user_id])
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([post_id, createdAt(sort: Desc)])
+  @@map("post_likes")
+}
+
+model View {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid // Optional for anonymous views
+  post_id   String   @db.Uuid
+  ip_address String? @db.VarChar(45) // For anonymous tracking
+  user_agent String? @db.Text // For analytics
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, post_id], name: "unique_user_post_view")
+  @@unique([ip_address, post_id], name: "unique_ip_post_view")
+  @@index([post_id, createdAt(sort: Desc)])
+  @@map("views")
+}
+
+model Follow {
+  id           String   @id @default(uuid()) @db.Uuid
+  followerId   String   @db.Uuid
+  followingId  String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  // Relations
+  follower     User     @relation("UserFollowing", fields: [followerId], references: [id])
+  following    User     @relation("UserFollowers", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@index([followingId, followerId])
+  @@map("follows")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userID    String   @db.VarChar(255)
+  message   String?  @db.Text
+  type      String?  @db.VarChar(255)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  // Navigation fields for frontend routing
+  actorId   String?  @db.Uuid  // User who performed the action (liker, commenter, follower, etc.)
+  postId    String?  @db.Uuid  // Post ID (for like, comment, view_milestone notifications)
+  commentId Int?                // Comment ID (for comment notifications)
+  challengeId String? @db.Uuid // Challenge ID (for challenge notifications)
+
+  // Relations
+  user      User     @relation(fields: [userID], references: [username])
+  actor     User?    @relation("NotificationActor", fields: [actorId], references: [id])
+  post      Post?    @relation(fields: [postId], references: [id])
+
+  @@map("notifications")
+}
+
+model SupportEmail {
+  id              String   @id @default(uuid()) @db.Uuid
+  providerEmailId String   @unique @db.VarChar(255)
+  from            String   @db.Text
+  to              String   @db.Text
+  subject         String?  @db.Text
+  text            String?  @db.Text
+  html            String?  @db.Text
+  headers         Json?
+  isRead          Boolean  @default(false)
+  category        String?  @db.VarChar(100)
+  receivedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([receivedAt(sort: Desc)])
+  @@index([isRead, receivedAt(sort: Desc)])
+  @@map("support_emails")
+}
+
+model RecentSearch {
+  id        Int      @id @default(autoincrement())
+  userID    String   @db.VarChar(255)
+  searchTerm String? @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userID], references: [username])
+
+  @@map("recent_searches")
+}
+
+model Subscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  plan      String?  @db.VarChar(255)
+  status    String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id])
+
+  @@map("subscriptions")
+}
+
+model Share {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  post_id   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id])
+  post      Post     @relation(fields: [post_id], references: [id])
+
+  @@map("shares")
+}
+
+
+model Admin {
+  id        String   @id @default(uuid()) @db.Uuid
+  username  String   @unique @db.VarChar(255)
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  status    String   @default("active") @db.VarChar(255)
+  last_login DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  // Relations
+  posts     Post[]
+  suspendedPosts Post[] @relation("PostSuspendedBy")
+  reports   PostReport[]
+  appeals   PostAppeal[]
+  featuredPosts FeaturedPost[]
+  approvedChallenges    Challenge[] @relation("ChallengeApprover")
+
+  @@map("admins")
+}
+
+model Approver {
+  id               String   @id @default(uuid()) @db.Uuid
+  username         String?  @unique @db.VarChar(255)
+  email            String   @unique @db.VarChar(255)
+  password         String?  @db.VarChar(255)
+  first_name       String?  @db.VarChar(255)
+  last_name        String?  @db.VarChar(255)
+  phone_number     String?  @db.VarChar(255)
+  onboarding_token String?  @unique @db.VarChar(255)
+  password_set     Boolean  @default(false)
+  status           String   @default("pending") @db.VarChar(255)
+  last_login       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now())
+
+  // Relations
+  posts            Post[]
+
+  @@map("approvers")
+}
+
+model Ad {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String?  @db.VarChar(255)
+  content   String?  @db.Text
+  image_url String?  @db.VarChar(255)
+  status    String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  @@map("ads")
+}
+
+model AccountManagement {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid
+  balance   Decimal? @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  @@map("account_management")
+}
+
+model PostReport {
+  id          String   @id @default(uuid()) @db.Uuid
+  post_id     String   @db.Uuid
+  user_id     String   @db.Uuid
+  reason      ReportReason
+  description String?  @db.Text
+  status      ReportStatus @default(pending)
+  reviewed_by String?  @db.Uuid
+  reviewed_at DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+
+  // Relations
+  post        Post     @relation(fields: [post_id], references: [id])
+  user        User     @relation(fields: [user_id], references: [id])
+  reviewer    Admin?   @relation(fields: [reviewed_by], references: [id])
+
+  @@unique([post_id, user_id])
+  @@map("post_reports")
+}
+
+model PostAppeal {
+  id              String   @id @default(uuid()) @db.Uuid
+  post_id         String   @db.Uuid
+  user_id         String   @db.Uuid
+  appeal_reason   String   @db.Text
+  additional_info String?  @db.Text
+  status          AppealStatus @default(pending)
+  reviewed_by     String?  @db.Uuid
+  reviewed_at     DateTime?
+  admin_notes     String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  // Relations
+  post            Post     @relation(fields: [post_id], references: [id])
+  user            User     @relation(fields: [user_id], references: [id])
+  reviewer        Admin?   @relation(fields: [reviewed_by], references: [id])
+
+  @@map("post_appeals")
+}
+
+model UserPreference {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String   @db.Uuid
+  category_id     Int
+  preference_score Float   @default(0.0)
+  interaction_count Int    @default(0)
+  last_interaction DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  // Relations
+  user            User     @relation(fields: [user_id], references: [id])
+  category        Category @relation(fields: [category_id], references: [id])
+
+  @@unique([user_id, category_id])
+  @@map("user_preferences")
+}
+
+model FeaturedPost {
+  id          String   @id @default(uuid()) @db.Uuid
+  post_id     String   @db.Uuid
+  featured_by String   @db.Uuid
+  reason      String?  @db.Text
+  expires_at  DateTime?
+  is_active   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+
+  // Relations
+  post        Post     @relation(fields: [post_id], references: [id])
+  admin       Admin    @relation(fields: [featured_by], references: [id])
+
+  @@map("featured_posts")
+}
+
+enum PostStatus {
+  draft
+  active
+  suspended
+}
+
+enum CategoryStatus {
+  active
+  inactive
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE_CONTENT
+  COPYRIGHT_VIOLATION
+  FALSE_INFORMATION
+  VIOLENCE
+  HATE_SPEECH
+  OTHER
+}
+
+enum ReportStatus {
+  pending
+  reviewed
+  resolved
+  dismissed
+}
+
+enum AppealStatus {
+  pending
+  approved
+  rejected
+}
+
+enum AdminNotificationSeverity {
+  info
+  warning
+  critical
+  action_required
+}
+
+model AdminNotification {
+  id                String                    @id @default(uuid()) @db.Uuid
+  severity          AdminNotificationSeverity
+  category          String                    @db.VarChar(100)  // appeal, report, support, security, queue, system
+  title             String                    @db.VarChar(500)
+  message           String                    @db.Text
+  actionUrl         String?                   @db.VarChar(500)
+  metadata          Json?
+  readAt            DateTime?
+  consolidatedCount Int                       @default(1)
+  consolidatedKey   String?                   @db.VarChar(255)  // e.g. report:postId, appeal:appealId
+  createdAt         DateTime                  @default(now())
+
+  @@index([severity])
+  @@index([category])
+  @@index([createdAt(sort: Desc)])
+  @@index([readAt])
+  @@index([consolidatedKey, createdAt(sort: Desc)])
+  @@map("admin_notifications")
+}
+
+model Otp {
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String   @db.VarChar(255)
+  code        String   @db.VarChar(6)
+  type        OtpType  @default(EMAIL_VERIFICATION)
+  expires_at  DateTime
+  verified    Boolean  @default(false)
+  user_id     String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@index([email, type, verified])
+  @@map("otps")
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  LOGIN
+  PASSWORD_CHANGE
+  ACCOUNT_DELETION
+}
+
+enum ChallengeStatus {
+  pending
+  approved
+  rejected
+  active
+  stopped
+  ended
+}
+
+model Challenge {
+  id                    String   @id @default(uuid()) @db.Uuid
+  name                  String   @db.VarChar(255)
+  description           String?  @db.Text
+  has_rewards           Boolean  @default(false)
+  rewards               String?  @db.Text
+  organizer_id          String   @db.Uuid
+  organizer_name        String   @db.VarChar(255)
+  organizer_contact     String   @db.VarChar(255)
+  contact_email        String?  @db.VarChar(255)   // Contact email for the challenge (used when main user email not available); required on create
+  start_date            DateTime
+  end_date              DateTime
+  min_content_per_account Int    @default(1)
+  max_content_per_account Int    @default(5)  // Max posts per participant (1..10); enforced on submit/link
+  scoring_criteria      String?  @db.Text
+  eligibility_criteria String?  @db.Text  // Who can participate (asked when creating challenge)
+  what_you_do           String?  @db.Text  // What participants do in the challenge (asked when creating)
+  status                ChallengeStatus @default(pending)
+  approved_by           String?  @db.Uuid
+  approved_at           DateTime?
+  rejection_reason      String?  @db.Text
+  winners_confirmed_at  DateTime?
+  winners_confirmed_by  String?  @db.Uuid
+  max_winners           Int?     // Optional cap on number of winners to surface
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  organizer             User     @relation("ChallengeOrganizer", fields: [organizer_id], references: [id])
+  approver              Admin?   @relation("ChallengeApprover", fields: [approved_by], references: [id])
+  participants          ChallengeParticipant[]
+  posts                 ChallengePost[]
+
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  id          String   @id @default(uuid()) @db.Uuid
+  challenge_id String  @db.Uuid
+  user_id     String   @db.Uuid
+  joined_at   DateTime @default(now())
+
+  // Relations
+  challenge   Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([challenge_id, user_id], name: "unique_challenge_participant")
+  @@map("challenge_participants")
+}
+
+model ChallengePost {
+  id                    String   @id @default(uuid()) @db.Uuid
+  challenge_id          String   @db.Uuid
+  post_id               String   @db.Uuid
+  user_id               String   @db.Uuid
+  submitted_at          DateTime @default(now())
+  likes_at_challenge_end Int?    // Snapshot of post likes when challenge ended (for ranking & transparency)
+  winner_rank           Int?    // Admin-defined winner position (1 = 1st); null = use like-based order
+
+  // Relations
+  challenge             Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  post                  Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([challenge_id, post_id], name: "unique_challenge_post")
+  @@map("challenge_posts")
+}
+
+// ---- Activity logging & audit ----
+
+model DeviceFingerprint {
+  id               String   @id @default(uuid()) @db.Uuid
+  fingerprint_hash String   @unique @db.VarChar(64)
+  first_seen_at    DateTime @default(now())
+  last_seen_at     DateTime @updatedAt
+  user_agent       String?  @db.Text
+  os               String?  @db.VarChar(100)
+  browser          String?  @db.VarChar(100)
+  locale           String?  @db.VarChar(20)
+  extra            Json?
+  activity_logs    ActivityLog[]
+  audit_logs       AuditLog[]
+  user_devices     UserDevice[]
+  userSessions     UserSession[]
+
+  @@index([fingerprint_hash])
+  @@index([last_seen_at(sort: Desc)])
+  @@map("device_fingerprints")
+}
+
+model UserDevice {
+  id                    String   @id @default(uuid()) @db.Uuid
+  user_id               String   @db.Uuid
+  device_fingerprint_id String   @db.Uuid
+  label                 String?  @db.VarChar(255)
+  trusted               Boolean  @default(false)
+  first_used_at         DateTime @default(now())
+  last_used_at         DateTime @updatedAt
+
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device_fingerprint    DeviceFingerprint @relation(fields: [device_fingerprint_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_fingerprint_id], name: "unique_user_device")
+  @@index([user_id])
+  @@index([device_fingerprint_id])
+  @@map("user_devices")
+}
+
+model ActivityLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  trace_id              String   @db.VarChar(64)
+  user_id               String?  @db.Uuid
+  session_id            String?  @db.VarChar(255)
+  device_fingerprint_id String?  @db.Uuid
+  route                 String   @db.VarChar(500)
+  method                String   @db.VarChar(10)
+  status_code           Int?
+  success               Boolean
+  error_code            String?  @db.VarChar(100)
+  error_message         String?  @db.Text
+  ip                    String?  @db.VarChar(45)
+  user_agent            String?  @db.Text
+  location              String?  @db.VarChar(255)
+  source                String   @default("api") @db.VarChar(50)
+  action_type           String?  @db.VarChar(100)
+  meta                  Json?
+  flags                 Json?
+  created_at            DateTime @default(now())
+
+  device_fingerprint    DeviceFingerprint? @relation(fields: [device_fingerprint_id], references: [id], onDelete: SetNull)
+
+  @@index([trace_id])
+  @@index([created_at(sort: Desc)])
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([device_fingerprint_id, created_at(sort: Desc)])
+  @@index([route, created_at(sort: Desc)])
+  @@index([ip, created_at(sort: Desc)])
+  @@index([success, created_at(sort: Desc)])
+  @@index([source])
+  @@index([action_type])
+  @@map("activity_logs")
+}
+
+model AuditLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  actor_admin_id        String?  @db.Uuid
+  actor_user_id         String?  @db.Uuid
+  action_type           String   @db.VarChar(100)
+  resource_type         String?  @db.VarChar(100)
+  resource_id           String?  @db.VarChar(255)
+  ip                    String?  @db.VarChar(45)
+  device_fingerprint_id String?  @db.Uuid
+  details               Json?
+  flags                 Json?
+  created_at            DateTime @default(now())
+
+  device_fingerprint    DeviceFingerprint? @relation(fields: [device_fingerprint_id], references: [id], onDelete: SetNull)
+
+  @@index([action_type])
+  @@index([actor_admin_id, created_at(sort: Desc)])
+  @@index([actor_user_id, created_at(sort: Desc)])
+  @@index([resource_type, resource_id])
+  @@index([created_at(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model UserIssue {
+  id             String   @id @default(uuid()) @db.Uuid
+  user_id        String?  @db.Uuid
+  email          String   @db.VarChar(255)
+  subject        String   @db.VarChar(255)
+  message        String   @db.Text
+  category       String?  @db.VarChar(50)
+  status         String   @default("NEW") @db.VarChar(50)
+  metadata       Json?
+  admin_response String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user      User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("user_issues")
+}
+
+model UserSession {
+  id                    String   @id @default(uuid()) @db.Uuid
+  user_id               String   @db.Uuid
+  device_fingerprint_id String?  @db.Uuid
+  user_agent            String?  @db.Text
+  ip_address            String?  @db.VarChar(45)
+  created_at            DateTime @default(now())
+  last_active_at        DateTime @default(now())
+  revoked_at            DateTime?
+  revoked_by            String?  @db.Uuid
+
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device_fingerprint    DeviceFingerprint? @relation(fields: [device_fingerprint_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([device_fingerprint_id, created_at(sort: Desc)])
+  @@index([revoked_at])
+  @@map("user_sessions")
+}

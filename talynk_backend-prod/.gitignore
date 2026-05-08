@@ -1,0 +1,31 @@
+node_modules/
+.env
+.DS_Store
+coverage/
+dist/
+logs/
+*.log
+uploads/
+tmp/
+*.sql
+!prisma/migrations/**/migration.sql
+*.sql.gz
+*.dump
+/src/generated/prisma
+*.md
+
+*.sh
+.md
+
+*.example
+*.env
+export.env
+
+# Exclude video processor (separate repository)
+talynk-video-processor/
+
+#excluded mobile app repository
+mobile-app/
+
+
+essentials/

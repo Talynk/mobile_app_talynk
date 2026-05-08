@@ -90,6 +90,8 @@ export interface Post {
   hlsReady?: boolean; // true when HLS is available
   hls_url?: string; // HLS master playlist (.m3u8)
   thumbnail_url?: string; // Server-generated thumbnail for instant display
+  thumbnailUrl?: string;
+  thumbnail?: string;
   video_duration?: number; // Duration in seconds
   processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
   // END HLS STREAMING FIELDS
@@ -120,6 +122,7 @@ export interface Post {
   is_frozen?: boolean;
   /** True when this feed item is an ad (from GET /api/posts/all). Same playback fields as posts; render with "Ad" label and different CTA. */
   isAd?: boolean;
+  is_ad?: boolean;
   report_count?: number;
   featured_at?: string | null;
   frozen_at?: string | null;

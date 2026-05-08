@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: talynk-pv
+  labels:
+    app: talynk
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+  - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: talynk-hostpath
+  hostPath:
+    path: /var/lib/talynk/storage
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: talynk-pvc
+  namespace: talynk
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: talynk-hostpath
+  selector:
+    matchLabels:
+      app: talynk

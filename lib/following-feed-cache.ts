@@ -133,6 +133,26 @@ export function markUserFollowStateAcrossFeedCaches(targetUserId: string, isFoll
   });
 }
 
+export function syncFollowStateAcrossFeedCaches(followedUserIds: Set<string>) {
+  queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) => {
+    if (!old?.pages) {
+      return old;
+    }
+
+    return {
+      ...old,
+      pages: old.pages.map((page: any) => ({
+        ...page,
+        posts: page.posts.map((post: any) =>
+          post.user?.id
+            ? { ...post, is_following_author: followedUserIds.has(post.user.id) }
+            : post
+        ),
+      })),
+    };
+  });
+}
+
 export async function prefetchFollowingFeed(viewerUserId: string) {
   await queryClient.fetchInfiniteQuery({
     queryKey: getFollowingFeedQueryKey(viewerUserId),
