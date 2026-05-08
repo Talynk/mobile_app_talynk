@@ -24,7 +24,6 @@ import { useAuth } from '@/lib/auth-context';
 import { useAppSelector } from '@/lib/store/hooks';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRealtime } from '@/lib/realtime-context';
 import { useRealtimePost } from '@/lib/hooks/use-realtime-post';
 import { getPostMediaUrl, getThumbnailUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { getVideoSource } from '@/lib/utils/video-source';
@@ -412,7 +411,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { sendLikeAction } = useRealtime();
   const likedPosts = useAppSelector((s) => s.likes.likedPosts);
   const postLikeCounts = useAppSelector((s) => s.likes.postLikeCounts);
 
@@ -931,7 +929,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         Animated.timing(likeOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]).start();
     }
-    sendLikeAction(item.id, newIsLiked);
     await onLike(item.id);
     setIsLiking(false);
   };

@@ -48,7 +48,7 @@ function mergeFollowingFeedPosts(currentPosts: Post[], incomingPosts: Post[]) {
 
 function normalizeSeedPosts(posts: Post[], targetUserId: string) {
   return posts
-    .filter((post) => post?.id && post.user?.id === targetUserId)
+    .filter((post) => post?.id && (post.user?.id === targetUserId || (post as any).user_id === targetUserId || (post as any).userId === targetUserId))
     .filter((post) => filterSecondarySurfacePosts([post]).length > 0)
     .map((post) => ({ ...post, is_following_author: true }));
 }
@@ -107,7 +107,7 @@ export function removeUserFromFollowingFeedCache(viewerUserId: string, targetUse
       ...existing,
       pages: existing.pages.map((page) => ({
         ...page,
-        posts: page.posts.filter((post) => post.user?.id !== targetUserId),
+        posts: page.posts.filter((post: any) => post.user?.id !== targetUserId && post.user_id !== targetUserId && post.userId !== targetUserId),
       })),
     };
   });
@@ -124,8 +124,14 @@ export function markUserFollowStateAcrossFeedCaches(targetUserId: string, isFoll
       pages: old.pages.map((page: any) => ({
         ...page,
         posts: page.posts.map((post: any) =>
-          post.user?.id === targetUserId
-            ? { ...post, is_following_author: isFollowing }
+          (post.user?.id === targetUserId || post.user_id === targetUserId || post.userId === targetUserId)
+            ? {
+                ...post,
+                user: post.user ? { ...post.user, id: post.user.id || targetUserId } : post.user,
+                user_id: post.user_id || targetUserId,
+                userId: post.userId || targetUserId,
+                is_following_author: isFollowing,
+              }
             : post,
         ),
       })),
@@ -144,8 +150,11 @@ export function syncFollowStateAcrossFeedCaches(followedUserIds: Set<string>) {
       pages: old.pages.map((page: any) => ({
         ...page,
         posts: page.posts.map((post: any) =>
-          post.user?.id
-            ? { ...post, is_following_author: followedUserIds.has(post.user.id) }
+          (post.user?.id || post.user_id || post.userId)
+            ? {
+                ...post,
+                is_following_author: followedUserIds.has(post.user?.id || post.user_id || post.userId),
+              }
             : post
         ),
       })),

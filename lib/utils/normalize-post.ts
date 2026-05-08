@@ -164,6 +164,16 @@ export function normalizePost(post: any): Post {
     challengeEntries[0]?.challenge?.name,
     challengeEntries[0]?.competition?.name,
   );
+  const normalizedUser =
+    userFromPost || post?.user_id || post?.userId || authorName || authorProfilePicture
+      ? {
+          ...(userFromPost || {}),
+          id: userFromPost?.id || post?.user_id || post?.userId || '',
+          username: userFromPost?.username || authorName || '',
+          profile_picture: userFromPost?.profile_picture || authorProfilePicture,
+          country: userFromPost?.country ?? post?.country ?? null,
+        }
+      : undefined;
 
   return {
     ...post,
@@ -204,15 +214,7 @@ export function normalizePost(post: any): Post {
     challengeName: challengeName || undefined,
     challengePosts: post?.challengePosts ?? post?.challenge_posts,
     challenge_posts: post?.challenge_posts ?? post?.challengePosts,
-    user:
-      userFromPost ||
-      (post?.user_id || authorName || authorProfilePicture
-        ? {
-            id: post?.user_id || post?.userId || '',
-            username: authorName || '',
-            profile_picture: authorProfilePicture,
-          }
-        : undefined),
+    user: normalizedUser,
   };
 }
 

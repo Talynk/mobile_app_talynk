@@ -169,8 +169,8 @@ export default function FeedScreen() {
       return;
     }
 
-    const currentIsLiked = likedPosts.includes(postId);
     const post = posts.find(p => p.id === postId);
+    const currentIsLiked = likedPosts.includes(postId) || post?.is_liked === true;
     const currentCount = postLikeCounts[postId] ?? post?.like_count ?? post?.likes ?? 0;
     const newIsLiked = !currentIsLiked;
     const newCount = newIsLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
@@ -208,7 +208,15 @@ export default function FeedScreen() {
         pages: old.pages.map((page: any) => ({
           ...page,
           posts: page.posts.map((p: any) =>
-            p.user?.id === userId ? { ...p, is_following_author: isFollowing } : p
+            (p.user?.id === userId || p.user_id === userId || p.userId === userId)
+              ? {
+                  ...p,
+                  user: p.user ? { ...p.user, id: p.user.id || userId } : p.user,
+                  user_id: p.user_id || userId,
+                  userId: p.userId || userId,
+                  is_following_author: isFollowing,
+                }
+              : p
           ),
         })),
       };
@@ -398,8 +406,8 @@ export default function FeedScreen() {
     const isActive = isScreenFocused && currentIndex === index;
     const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused || isActive });
 
-    const isLiked = item.is_liked ?? likedPosts.includes(item.id);
-    const targetUserId = item.user?.id || '';
+    const isLiked = likedPosts.includes(item.id) || item.is_liked === true;
+    const targetUserId = item.user?.id || (item as any).user_id || (item as any).userId || '';
     const optimisticFollowStatus = targetUserId ? userFollowStatus[targetUserId] : undefined;
     const cachedFollowStatus = targetUserId ? followedUsers.has(targetUserId) : false;
     // Prioritize explicit user action (optimistic) first,
@@ -408,7 +416,7 @@ export default function FeedScreen() {
     // stays consistent when switching between the For You and Following tabs.
     const isFollowing = optimisticFollowStatus !== undefined
       ? optimisticFollowStatus
-      : (cachedFollowStatus || (activeTab === 'following' ? true : item.is_following_author === true));
+      : (cachedFollowStatus || item.is_following_author === true || activeTab === 'following');
 
     return (
       <FullscreenFeedPostItem
