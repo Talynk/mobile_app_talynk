@@ -359,7 +359,7 @@ NativeFeedVideo.displayName = 'NativeFeedVideo';
 export interface FullscreenFeedPostItemProps {
   item: Post;
   index: number;
-  onLike: (postId: string) => void;
+  onLike: (postId: string) => void | Promise<void>;
   onComment: (postId: string) => void;
   onShare: (postId: string) => void;
   onReport: (postId: string) => void;
@@ -929,8 +929,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         Animated.timing(likeOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
       ]).start();
     }
-    await onLike(item.id);
-    setIsLiking(false);
+    try {
+      await onLike(item.id);
+    } finally {
+      if (isMountedRef.current) {
+        setIsLiking(false);
+      }
+    }
   };
 
   const handleFollow = () => {
@@ -1175,7 +1180,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.actionButton} onPress={handleLike}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={handleLike}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
               <Feather name="heart" size={24} color={isPostLiked ? '#ff2d55' : '#fff'} fill={isPostLiked ? '#ff2d55' : 'none'} />
             </Animated.View>

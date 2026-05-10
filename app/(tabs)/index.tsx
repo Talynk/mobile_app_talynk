@@ -83,10 +83,17 @@ export default function FeedScreen() {
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const flatListRef = useRef<FlatList<Post>>(null);
   const followingAutoloadAttemptedRef = useRef(false);
+  const lastFollowSyncUserIdRef = useRef<string | null>(null);
+  const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
-  const { followedUsers, followedUsersReady, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
+  const {
+    followedUsers,
+    followedUsersReady,
+    updateFollowedUsers,
+    syncFollowedUsersFromServer,
+  } = useCache();
   const dispatch = useAppDispatch();
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const postLikeCounts = useAppSelector(state => state.likes.postLikeCounts);
@@ -97,6 +104,9 @@ export default function FeedScreen() {
   const feedTab = activeTab === 'challenges' ? 'foryou' : activeTab as 'foryou' | 'following';
   const {
     posts,
+    userPreferences,
+    effectiveRefresh,
+    feedEndpoint,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -108,12 +118,60 @@ export default function FeedScreen() {
     : feedTab === 'foryou'
       ? { refreshSeed: forYouRefreshSeed, limit: FEED_DEFAULT_PAGE_SIZE }
       : {});
+  const currentFeedSessionId = React.useMemo(
+    () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
+    [effectiveRefresh, forYouRefreshSeed, user?.id],
+  );
+
+  React.useEffect(() => {
+    if (__DEV__ && activeTab === 'foryou' && userPreferences.length > 0) {
+      console.log('[FeedPreferences]', {
+        refresh: effectiveRefresh ?? forYouRefreshSeed,
+        userPreferences,
+      });
+    } else if (__DEV__ && activeTab === 'foryou' && userPreferences.length === 0) {
+      console.log('[FeedPreferences]', {
+        refresh: effectiveRefresh ?? forYouRefreshSeed,
+        userPreferences: [],
+      });
+    } else {
+      return;
+    }
+  }, [activeTab, effectiveRefresh, forYouRefreshSeed, userPreferences]);
+
+  const trackFeedEngagement = useCallback((postId: string, action: 'like' | 'comment' | 'share') => {
+    if (!postId) {
+      return;
+    }
+
+    feedTelemetry.trackEngagementAfterFeedImpression({
+      sessionId: currentFeedSessionId,
+      postId,
+      action,
+      timestamp: new Date().toISOString(),
+      refresh: effectiveRefresh ?? forYouRefreshSeed,
+    });
+  }, [currentFeedSessionId, effectiveRefresh, forYouRefreshSeed]);
 
   React.useEffect(() => {
     if (pullRefreshing && !isLoading && !isRefetching) {
       setPullRefreshing(false);
     }
   }, [isLoading, isRefetching, pullRefreshing]);
+
+  React.useEffect(() => {
+    if (!user?.id) {
+      lastFollowSyncUserIdRef.current = null;
+      return;
+    }
+
+    if (lastFollowSyncUserIdRef.current === user.id) {
+      return;
+    }
+
+    lastFollowSyncUserIdRef.current = user.id;
+    void syncFollowedUsersFromServer();
+  }, [user?.id, syncFollowedUsersFromServer]);
 
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
@@ -155,6 +213,36 @@ export default function FeedScreen() {
     });
   }, [queryClient]);
 
+  const updateCommentCountInCache = useCallback((postId: string, delta: number) => {
+    if (!postId || delta === 0) {
+      return;
+    }
+
+    queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) => {
+      if (!old?.pages) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page: any) => ({
+          ...page,
+          posts: page.posts.map((p: any) => {
+            if (p.id !== postId) {
+              return p;
+            }
+
+            const currentCount = Number(p.comments_count ?? p.comment_count ?? p.commentsCount ?? 0);
+            const nextCount = Math.max(0, currentCount + delta);
+            return {
+              ...p,
+              comments_count: nextCount,
+              comment_count: nextCount,
+              commentsCount: nextCount,
+            };
+          }),
+        })),
+      };
+    });
+  }, [queryClient]);
+
   const handleLike = useCallback(async (postId: string) => {
     if (!user) {
       Alert.alert(
@@ -168,6 +256,12 @@ export default function FeedScreen() {
       );
       return;
     }
+
+    if (pendingLikeRequestsRef.current.has(postId)) {
+      return;
+    }
+
+    pendingLikeRequestsRef.current.add(postId);
 
     const post = posts.find(p => p.id === postId);
     const currentIsLiked = likedPosts.includes(postId) || post?.is_liked === true;
@@ -190,6 +284,14 @@ export default function FeedScreen() {
         else dispatch(removeLikedPost(postId));
         dispatch(setPostLikeCount({ postId, count: serverCount }));
         updateLikeInCache(postId, serverLiked, serverCount);
+        if (serverLiked) {
+          trackFeedEngagement(postId, 'like');
+        }
+      } else {
+        if (currentIsLiked) dispatch(addLikedPost(postId));
+        else dispatch(removeLikedPost(postId));
+        dispatch(setPostLikeCount({ postId, count: currentCount }));
+        updateLikeInCache(postId, currentIsLiked, currentCount);
       }
     } catch {
       // Revert on failure
@@ -197,8 +299,10 @@ export default function FeedScreen() {
       else dispatch(removeLikedPost(postId));
       dispatch(setPostLikeCount({ postId, count: currentCount }));
       updateLikeInCache(postId, currentIsLiked, currentCount);
+    } finally {
+      pendingLikeRequestsRef.current.delete(postId);
     }
-  }, [user, likedPosts, posts, postLikeCounts, dispatch, updateLikeInCache]);
+  }, [user, likedPosts, posts, postLikeCounts, dispatch, trackFeedEngagement, updateLikeInCache]);
 
   const updateFollowInCache = useCallback((userId: string, isFollowing: boolean) => {
     queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) => {
@@ -282,17 +386,34 @@ export default function FeedScreen() {
     setCommentsModalVisible(true);
   }, [posts]);
 
-  const handleCommentAdded = useCallback(() => {}, []);
-  const handleCommentDeleted = useCallback(() => {}, []);
+  const handleCommentAdded = useCallback(() => {
+    if (!commentsPostId) {
+      return;
+    }
+
+    updateCommentCountInCache(commentsPostId, 1);
+    trackFeedEngagement(commentsPostId, 'comment');
+  }, [commentsPostId, trackFeedEngagement, updateCommentCountInCache]);
+
+  const handleCommentDeleted = useCallback(() => {
+    if (!commentsPostId) {
+      return;
+    }
+
+    updateCommentCountInCache(commentsPostId, -1);
+  }, [commentsPostId, updateCommentCountInCache]);
 
   const handleShare = useCallback(async (postId: string) => {
     const post = posts.find(p => p.id === postId);
     if (post) {
       try {
-        await sharePost(post);
+        const result = await sharePost(post);
+        if ((result as any)?.feedShareRecorded) {
+          trackFeedEngagement(postId, 'share');
+        }
       } catch {}
     }
-  }, [posts]);
+  }, [posts, trackFeedEngagement]);
 
   const handleRefresh = useCallback(async () => {
     if (activeTab !== 'foryou') {
@@ -303,7 +424,10 @@ export default function FeedScreen() {
 
     const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
     setPullRefreshing(true);
-    feedTelemetry.trackPullToRefresh({ endpoint: user ? 'personalized' : 'public', refresh: nextRefreshSeed });
+    feedTelemetry.trackPullToRefresh({
+      endpoint: feedEndpoint === 'public' ? 'public' : 'personalized',
+      refresh: nextRefreshSeed,
+    });
 
     if (FEED_INTEGRATION_CONFIG.enableSeenResetOnPullToRefresh) {
       const resetResponse = user
@@ -318,8 +442,12 @@ export default function FeedScreen() {
       }
     }
 
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    currentIndexRef.current = 0;
+    lastActiveIndexRef.current = 0;
+    setCurrentIndex(0);
     setForYouRefreshSeed(nextRefreshSeed);
-  }, [activeTab, forYouRefreshSeed, refetch, user]);
+  }, [activeTab, feedEndpoint, forYouRefreshSeed, refetch, user]);
 
   const handleReport = useCallback((postId: string) => {
     if (!user) {
@@ -675,18 +803,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingTop: 6,
+    paddingBottom: 10,
     backgroundColor: 'rgba(0,0,0,0.95)',
     zIndex: 100,
-    height: 56,
   },
   tabsContainer: {
-    flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
   },
   tab: {
     paddingHorizontal: 12,

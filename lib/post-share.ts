@@ -36,7 +36,10 @@ export async function sharePost(post: Post | null | undefined) {
   // iOS exposes a dismissed action; Android resolves without a reliable dismissal signal.
   const wasDismissed = result.action === Share.dismissedAction;
   if (!postId || wasDismissed) {
-    return result;
+    return {
+      ...result,
+      feedShareRecorded: false,
+    };
   }
 
   const response = await postsApi.share(postId);
@@ -49,5 +52,8 @@ export async function sharePost(post: Post | null | undefined) {
     });
   }
 
-  return result;
+  return {
+    ...result,
+    feedShareRecorded: response.status === 'success',
+  };
 }

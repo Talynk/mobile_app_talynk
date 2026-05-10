@@ -2,6 +2,7 @@ import { apiClient } from './api-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ApiResponse,
+  FeedApiResponse,
   Post,
   User,
   Notification,
@@ -389,6 +390,7 @@ export type FeedRequestOptions = {
   cursor?: string | null;
   limit?: number;
   refresh?: number;
+  page?: number;
 };
 
 function buildFeedParams(options: FeedRequestOptions = {}) {
@@ -396,11 +398,14 @@ function buildFeedParams(options: FeedRequestOptions = {}) {
   params.set('limit', String(options.limit ?? 10));
   if (options.cursor) params.set('cursor', options.cursor);
   if (typeof options.refresh === 'number') params.set('refresh', String(options.refresh));
+  if (typeof options.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
+    params.set('page', String(options.page));
+  }
   return params;
 }
 
 export const feedApi = {
-  getPublic: async (options: FeedRequestOptions = {}) => {
+  getPublic: async (options: FeedRequestOptions = {}): Promise<FeedApiResponse> => {
     const params = buildFeedParams(options);
     const fingerprint = await getDeviceFingerprint();
     const res = await apiClient.get(`/api/feed/public?${params}`, {
@@ -410,12 +415,12 @@ export const feedApi = {
     });
     return res.data;
   },
-  getPersonalized: async (options: FeedRequestOptions = {}) => {
+  getPersonalized: async (options: FeedRequestOptions = {}): Promise<FeedApiResponse> => {
     const params = buildFeedParams(options);
     const res = await apiClient.get(`/api/feed/personalized?${params}`);
     return res.data;
   },
-  getRecommendations: async (options: FeedRequestOptions = {}) => {
+  getRecommendations: async (options: FeedRequestOptions = {}): Promise<FeedApiResponse> => {
     const params = buildFeedParams(options);
     const res = await apiClient.get(`/api/recommendations/feed?${params}`);
     return res.data;
@@ -2177,19 +2182,41 @@ export const followsApi = {
 };
 
 // Likes API (per API_DOC)
+function mapLikeToggleResponse(raw: any): ApiResponse<{ isLiked: boolean; likeCount: number }> {
+  const payload = raw?.data ?? {};
+  return {
+    status: raw?.status ?? 'success',
+    message: raw?.message ?? '',
+    data: {
+      isLiked: payload?.isLiked ?? payload?.liked ?? payload?.is_liked ?? false,
+      likeCount:
+        payload?.likeCount ??
+        payload?.likesCount ??
+        payload?.like_count ??
+        payload?.likes ??
+        0,
+    },
+  };
+}
+
 export const likesApi = {
   toggle: async (postId: string): Promise<ApiResponse<{ isLiked: boolean; likeCount: number }>> => {
     try {
-      const response = await apiClient.post(`/api/likes/posts/${postId}/toggle`);
-      return {
-        status: response.data.status,
-        message: response.data.message,
-        data: {
-          isLiked: response.data.data?.isLiked || false,
-          likeCount: response.data.data?.likeCount || 0,
-        },
-      };
+      const response = await apiClient.post(`/api/posts/${encodeURIComponent(postId)}/like`);
+      return mapLikeToggleResponse(response.data);
     } catch (error: any) {
+      const fallbackStatus = error.response?.status;
+      const shouldFallbackToLegacyToggle = fallbackStatus === 404 || fallbackStatus === 405;
+
+      if (shouldFallbackToLegacyToggle) {
+        try {
+          const fallbackResponse = await apiClient.post(`/api/likes/posts/${encodeURIComponent(postId)}/toggle`);
+          return mapLikeToggleResponse(fallbackResponse.data);
+        } catch (fallbackError: any) {
+          error = fallbackError;
+        }
+      }
+
       const status = error.response?.status;
       const errorMessage = error.response?.data?.message || error.message || 'Failed to toggle like';
 

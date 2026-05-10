@@ -157,6 +157,59 @@ export interface Post {
   };
 }
 
+export interface UserPreferenceHint {
+  category: string;
+  score: number;
+}
+
+export interface FeedMeta {
+  pipeline?: string;
+  [key: string]: unknown;
+}
+
+export interface FeedPagination {
+  currentPage: number;
+  totalPages: number | null;
+  totalCount: number | null;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+export interface FeedResponseData {
+  posts: Post[];
+  nextCursor: string | null;
+  refresh?: number | null;
+  feed_meta?: FeedMeta;
+}
+
+export interface PublicFeedResponseData extends FeedResponseData {
+  userPreferences?: never;
+}
+
+export interface PersonalizedFeedData extends FeedResponseData {
+  userPreferences: UserPreferenceHint[];
+}
+
+export interface FeedSuccessResponse<TData extends FeedResponseData = FeedResponseData> {
+  status: 'success';
+  data: TData;
+  pagination: FeedPagination;
+  cached?: boolean;
+  message?: string;
+}
+
+export interface FeedErrorResponse {
+  status: 'error';
+  message: string;
+  data?: Partial<FeedResponseData>;
+  pagination?: Partial<FeedPagination>;
+  cached?: boolean;
+}
+
+export type PublicFeedSuccess = FeedSuccessResponse<PublicFeedResponseData>;
+export type PersonalizedFeedSuccess = FeedSuccessResponse<PersonalizedFeedData>;
+export type FeedApiResponse = PublicFeedSuccess | PersonalizedFeedSuccess | FeedErrorResponse;
+
 export interface Comment {
   id: string;
   content: string;

@@ -27,6 +27,34 @@ export const feedTelemetry = {
   trackFeedRequest(payload: FeedRequestTelemetry) {
     logTelemetry('feed_request', payload);
   },
+  trackPersonalizedFeedLoaded(payload: {
+    endpoint: FeedEndpoint;
+    refresh?: number;
+    preferenceCount: number;
+    topCategoryName: string | null;
+    postsCount: number;
+    adCount: number;
+    pipeline?: string;
+    cached?: boolean;
+  }) {
+    logTelemetry('personalized_feed_loaded', payload);
+  },
+  trackPreferenceHintRendered(payload: {
+    refresh?: number;
+    topCategoryName: string | null;
+    preferenceCount: number;
+  }) {
+    logTelemetry('preference_hint_rendered', payload);
+  },
+  trackEngagementAfterFeedImpression(payload: {
+    sessionId: string;
+    postId: string;
+    action: 'like' | 'comment' | 'share';
+    timestamp: string;
+    refresh?: number;
+  }) {
+    logTelemetry('engagement_after_feed_impression', payload);
+  },
   trackDuplicateRatio(payload: DuplicateRatioTelemetry) {
     logTelemetry('feed_duplicate_ratio', payload);
   },
