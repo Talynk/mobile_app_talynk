@@ -60,6 +60,31 @@ const FEED_TABS = [
 
 type FeedTab = 'foryou' | 'following' | 'challenges';
 
+function hashOrderKey(input: string) {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) | 0;
+  }
+  return hash;
+}
+
+function reorderFollowingPosts(posts: Post[], seed: number) {
+  if (posts.length < 2) {
+    return posts;
+  }
+
+  return [...posts].sort((left, right) => {
+    const leftKey = hashOrderKey(`${seed}:${left.id}`);
+    const rightKey = hashOrderKey(`${seed}:${right.id}`);
+
+    if (leftKey !== rightKey) {
+      return leftKey - rightKey;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+}
+
 export default function FeedScreen() {
   const [activeTab, setActiveTab] = useState<FeedTab>('foryou');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -80,11 +105,13 @@ export default function FeedScreen() {
   const [challengeDefaultTab, setChallengeDefaultTab] = useState<'active' | 'upcoming' | 'ended' | 'created' | undefined>(undefined);
   const [feedViewportHeight, setFeedViewportHeight] = useState(0);
   const [forYouRefreshSeed, setForYouRefreshSeed] = useState(() => createFeedRefreshSeed());
+  const [followingOrderSeed, setFollowingOrderSeed] = useState(() => createFeedRefreshSeed());
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const flatListRef = useRef<FlatList<Post>>(null);
   const followingAutoloadAttemptedRef = useRef(false);
   const lastFollowSyncUserIdRef = useRef<string | null>(null);
   const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
+  const lastTabRef = useRef<FeedTab>('foryou');
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
@@ -118,6 +145,10 @@ export default function FeedScreen() {
     : feedTab === 'foryou'
       ? { refreshSeed: forYouRefreshSeed, limit: FEED_DEFAULT_PAGE_SIZE }
       : {});
+  const visiblePosts = React.useMemo(
+    () => activeTab === 'following' ? reorderFollowingPosts(posts, followingOrderSeed) : posts,
+    [activeTab, followingOrderSeed, posts],
+  );
   const currentFeedSessionId = React.useMemo(
     () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
     [effectiveRefresh, forYouRefreshSeed, user?.id],
@@ -172,6 +203,23 @@ export default function FeedScreen() {
     lastFollowSyncUserIdRef.current = user.id;
     void syncFollowedUsersFromServer();
   }, [user?.id, syncFollowedUsersFromServer]);
+
+  React.useEffect(() => {
+    const previousTab = lastTabRef.current;
+    lastTabRef.current = activeTab;
+
+    if (activeTab !== 'following' || previousTab === 'following') {
+      return;
+    }
+
+    const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
+    setFollowingOrderSeed(nextSeed);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    currentIndexRef.current = 0;
+    lastActiveIndexRef.current = 0;
+    setCurrentIndex(0);
+    void refetch();
+  }, [activeTab, followingOrderSeed, refetch]);
 
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
@@ -263,7 +311,7 @@ export default function FeedScreen() {
 
     pendingLikeRequestsRef.current.add(postId);
 
-    const post = posts.find(p => p.id === postId);
+    const post = visiblePosts.find(p => p.id === postId);
     const currentIsLiked = likedPosts.includes(postId) || post?.is_liked === true;
     const currentCount = postLikeCounts[postId] ?? post?.like_count ?? post?.likes ?? 0;
     const newIsLiked = !currentIsLiked;
@@ -302,7 +350,7 @@ export default function FeedScreen() {
     } finally {
       pendingLikeRequestsRef.current.delete(postId);
     }
-  }, [user, likedPosts, posts, postLikeCounts, dispatch, trackFeedEngagement, updateLikeInCache]);
+  }, [user, likedPosts, visiblePosts, postLikeCounts, dispatch, trackFeedEngagement, updateLikeInCache]);
 
   const updateFollowInCache = useCallback((userId: string, isFollowing: boolean) => {
     queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) => {
@@ -378,13 +426,13 @@ export default function FeedScreen() {
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
-    const post = posts.find(p => p.id === postId);
+    const post = visiblePosts.find(p => p.id === postId);
     setCommentsPostId(postId);
     setCommentsPostTitle(post?.title || post?.description || '');
     setCommentsPostAuthor(post?.user?.username || '');
     setCommentsPostOwnerId(post?.user?.id);
     setCommentsModalVisible(true);
-  }, [posts]);
+  }, [visiblePosts]);
 
   const handleCommentAdded = useCallback(() => {
     if (!commentsPostId) {
@@ -404,7 +452,7 @@ export default function FeedScreen() {
   }, [commentsPostId, updateCommentCountInCache]);
 
   const handleShare = useCallback(async (postId: string) => {
-    const post = posts.find(p => p.id === postId);
+    const post = visiblePosts.find(p => p.id === postId);
     if (post) {
       try {
         const result = await sharePost(post);
@@ -413,9 +461,21 @@ export default function FeedScreen() {
         }
       } catch {}
     }
-  }, [posts, trackFeedEngagement]);
+  }, [trackFeedEngagement, visiblePosts]);
 
   const handleRefresh = useCallback(async () => {
+    if (activeTab === 'following') {
+      const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
+      setPullRefreshing(true);
+      setFollowingOrderSeed(nextSeed);
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      currentIndexRef.current = 0;
+      lastActiveIndexRef.current = 0;
+      setCurrentIndex(0);
+      await refetch();
+      return;
+    }
+
     if (activeTab !== 'foryou') {
       setPullRefreshing(true);
       await refetch();
@@ -447,7 +507,7 @@ export default function FeedScreen() {
     lastActiveIndexRef.current = 0;
     setCurrentIndex(0);
     setForYouRefreshSeed(nextRefreshSeed);
-  }, [activeTab, feedEndpoint, forYouRefreshSeed, refetch, user]);
+  }, [activeTab, feedEndpoint, followingOrderSeed, forYouRefreshSeed, refetch, user]);
 
   const handleReport = useCallback((postId: string) => {
     if (!user) {
@@ -586,7 +646,7 @@ export default function FeedScreen() {
       return;
     }
 
-    if (posts.length > 0) {
+    if (visiblePosts.length > 0) {
       followingAutoloadAttemptedRef.current = false;
       return;
     }
@@ -603,15 +663,15 @@ export default function FeedScreen() {
 
     followingAutoloadAttemptedRef.current = true;
     void refetch();
-  }, [activeTab, followedUsers.size, isLoading, isRefetching, posts.length, refetch, user]);
+  }, [activeTab, followedUsers.size, isLoading, isRefetching, refetch, user, visiblePosts.length]);
 
   React.useEffect(() => {
-    if (activeTab === 'challenges' || posts.length === 0) {
+    if (activeTab === 'challenges' || visiblePosts.length === 0) {
       return;
     }
 
-    warmFeedWindow(posts, Math.max(0, currentIndex));
-  }, [activeTab, currentIndex, posts]);
+    warmFeedWindow(visiblePosts, Math.max(0, currentIndex));
+  }, [activeTab, currentIndex, visiblePosts]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -659,14 +719,14 @@ export default function FeedScreen() {
             }
           }}
         >
-          {!isFeedViewportReady || (isLoading && posts.length === 0) ? (
+          {!isFeedViewportReady || (isLoading && visiblePosts.length === 0) ? (
             <View style={styles.loadingContainer}>
               {[1, 2, 3].map((i) => renderSkeletonItem(i))}
             </View>
           ) : (
             <FlatList
               ref={flatListRef}
-              data={posts}
+              data={visiblePosts}
              
               renderItem={renderItem}
               keyExtractor={(item) => item.id}
