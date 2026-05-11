@@ -90,12 +90,22 @@ const extractFirstHashtagLabel = (...values: unknown[]): string | null => {
 };
 
 const getPostSubcategoryName = (post: any): string | null => {
+  const directCategoryObject =
+    post?.category && typeof post.category === 'object'
+      ? post.category
+      : null;
+  const derivedSubcategoryFromCategory =
+    Number(directCategoryObject?.level) === 2
+      ? directCategoryObject?.name
+      : null;
   const rawSubcategory =
     post?.subcategory_name ||
+    post?.sub_category_name ||
     post?.subcategoryName ||
     post?.subcategory?.name ||
     post?.sub_category?.name ||
     post?.subCategory?.name ||
+    derivedSubcategoryFromCategory ||
     extractFirstHashtagLabel(post?.caption, post?.description, post?.title) ||
     null;
 

@@ -54,6 +54,23 @@ function extractFirstHashtagLabel(...values: unknown[]): string {
 }
 
 function normalizeCategoryValue(post: any) {
+  const directCategoryObject =
+    post?.category && typeof post.category === 'object'
+      ? post.category
+      : null;
+  const categoryIsLeafSubcategory = Number(directCategoryObject?.level) === 2;
+  const derivedSubcategoryNameFromCategory = categoryIsLeafSubcategory
+    ? pickString(directCategoryObject?.name)
+    : '';
+  const derivedSubcategoryIdFromCategory = categoryIsLeafSubcategory
+    ? directCategoryObject?.id
+    : null;
+  const derivedMainCategoryNameFromCategoryParent = categoryIsLeafSubcategory
+    ? pickString(directCategoryObject?.parent?.name)
+    : '';
+  const derivedMainCategoryIdFromCategoryParent = categoryIsLeafSubcategory
+    ? directCategoryObject?.parent?.id
+    : null;
   const hashtagCategory = extractFirstHashtagLabel(
     post?.caption,
     post?.description,
@@ -61,10 +78,12 @@ function normalizeCategoryValue(post: any) {
   );
   const rawSubcategoryName = pickString(
     post?.subcategory_name,
+    post?.sub_category_name,
     post?.subcategoryName,
     post?.subcategory?.name,
     post?.sub_category?.name,
     post?.subCategory?.name,
+    derivedSubcategoryNameFromCategory,
   );
   const rawCategoryName = pickString(
     typeof post?.category === 'string' ? post.category : '',
@@ -72,23 +91,29 @@ function normalizeCategoryValue(post: any) {
     post?.categoryName,
     post?.category_name,
     post?.post_category,
+    post?.mainCategory?.name,
     post?.main_category_name,
     post?.mainCategoryName,
     post?.main_category?.name,
+    derivedMainCategoryNameFromCategoryParent,
     hashtagCategory,
   );
 
   const rawSubcategoryId =
+    post?.sub_category_id ??
     post?.subcategory_id ??
     post?.subcategory?.id ??
     post?.sub_category?.id ??
     post?.subCategory?.id ??
+    derivedSubcategoryIdFromCategory ??
     null;
   const rawCategoryId =
     post?.category_id ??
+    post?.mainCategory?.id ??
     post?.category?.id ??
     post?.main_category_id ??
     post?.main_category?.id ??
+    derivedMainCategoryIdFromCategoryParent ??
     null;
 
   const normalizedSubcategory =
