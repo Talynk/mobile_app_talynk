@@ -134,10 +134,11 @@ const pages: OnboardingPage[] = [
 export default function OnboardingScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const footerReservedHeight = insets.bottom + 150;
-  const guideHeaderClearance = insets.top + 150;
-  const guideVideoMaxHeight = Math.max(280, height - guideHeaderClearance - footerReservedHeight);
-  const guideVideoMinHeight = Math.max(220, Math.min(340, guideVideoMaxHeight));
+  const guideShellWidth = Math.min(width - 24, 520);
+  const footerReservedHeight = insets.bottom + 120;
+  const guideHeaderClearance = insets.top + 118;
+  const guideVideoMaxHeight = Math.max(360, height - guideHeaderClearance - footerReservedHeight);
+  const guideVideoMinHeight = Math.max(300, Math.min(460, guideVideoMaxHeight));
   const [currentPage, setCurrentPage] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -346,7 +347,7 @@ export default function OnboardingScreen() {
             {!guideStarted && (
               <Text style={styles.guideCallToAction}>Click on the button below to start playing</Text>
             )}
-            <View style={styles.guideVideoShell}>
+            <View style={[styles.guideVideoShell, { width: guideShellWidth }]}>
               {!guideStarted ? (
                 <Pressable style={styles.guideStartCard} onPress={startGuidePlayback}>
                   <View style={styles.guideStartIcon}>
