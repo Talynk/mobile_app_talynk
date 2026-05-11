@@ -134,6 +134,10 @@ const pages: OnboardingPage[] = [
 export default function OnboardingScreen() {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const footerReservedHeight = insets.bottom + 150;
+  const guideHeaderClearance = insets.top + 150;
+  const guideVideoMaxHeight = Math.max(280, height - guideHeaderClearance - footerReservedHeight);
+  const guideVideoMinHeight = Math.max(220, Math.min(340, guideVideoMaxHeight));
   const [currentPage, setCurrentPage] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -356,7 +360,13 @@ export default function OnboardingScreen() {
                 <>
                   <VideoView
                     player={guidePlayer}
-                    style={styles.guideVideo}
+                    style={[
+                      styles.guideVideo,
+                      {
+                        maxHeight: guideVideoMaxHeight,
+                        minHeight: guideVideoMinHeight,
+                      },
+                    ]}
                     contentFit="contain"
                     nativeControls={false}
                   />
@@ -541,11 +551,13 @@ const styles = StyleSheet.create({
   },
   guideSection: {
     width: '100%',
+    flex: 1,
     marginTop: 10,
     alignItems: 'center',
+    justifyContent: 'flex-start',
   },
   guideSectionPlaying: {
-    marginTop: 40,
+    marginTop: 12,
   },
   guideVideoShell: {
     width: '100%',
@@ -588,8 +600,6 @@ const styles = StyleSheet.create({
   guideVideo: {
     width: '100%',
     aspectRatio: 9 / 16,
-    maxHeight: 500,
-    minHeight: 340,
     backgroundColor: '#000',
   },
   guideOverlayControls: {

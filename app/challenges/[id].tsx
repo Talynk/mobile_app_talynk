@@ -11,7 +11,6 @@ import {
   Alert,
   Dimensions,
   Modal,
-  useWindowDimensions,
   StatusBar,
   Platform,
 } from 'react-native';
@@ -20,8 +19,7 @@ import { challengesApi, followsApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Avatar } from '@/components/Avatar';
 import { getPostMediaUrl, getThumbnailUrl, getFileUrl } from '@/lib/utils/file-url';
@@ -130,8 +128,8 @@ export default function ChallengeDetailScreen() {
   const [participants, setParticipants] = useState<any[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
-  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
+  const safeAreaFrame = useSafeAreaFrame();
+  const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
@@ -1897,8 +1895,8 @@ export default function ChallengeDetailScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled={Platform.OS === 'ios'}
-            snapToInterval={Platform.OS === 'android' ? fullscreenAvailableHeight : undefined}
+            pagingEnabled
+            snapToInterval={fullscreenAvailableHeight}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}

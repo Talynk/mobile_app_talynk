@@ -33,6 +33,7 @@ import { sharePost } from '@/lib/post-share';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
+import { useAppActive } from '@/lib/hooks/use-app-active';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { runQuerySafely } from '@/lib/utils/query-cancellation';
@@ -107,14 +108,17 @@ export default function FeedScreen() {
   const [forYouRefreshSeed, setForYouRefreshSeed] = useState(() => createFeedRefreshSeed());
   const [followingOrderSeed, setFollowingOrderSeed] = useState(() => createFeedRefreshSeed());
   const [pullRefreshing, setPullRefreshing] = useState(false);
+  const [forYouRecoveryAttempts, setForYouRecoveryAttempts] = useState(0);
   const flatListRef = useRef<FlatList<Post>>(null);
   const followingAutoloadAttemptedRef = useRef(false);
   const lastFollowSyncUserIdRef = useRef<string | null>(null);
   const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
   const lastTabRef = useRef<FeedTab>('foryou');
+  const didAdvanceForYouSessionRef = useRef(false);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
+  const isAppActive = useAppActive();
   const {
     followedUsers,
     followedUsersReady,
@@ -140,6 +144,7 @@ export default function FeedScreen() {
     isLoading,
     refetch,
     isRefetching,
+    isError,
   } = useFeedQuery(feedTab, activeTab === 'challenges'
     ? {}
     : feedTab === 'foryou'
@@ -205,6 +210,15 @@ export default function FeedScreen() {
   }, [user?.id, syncFollowedUsersFromServer]);
 
   React.useEffect(() => {
+    if (didAdvanceForYouSessionRef.current) {
+      return;
+    }
+
+    didAdvanceForYouSessionRef.current = true;
+    setForYouRefreshSeed((currentSeed) => createNextFeedRefreshSeed(currentSeed));
+  }, []);
+
+  React.useEffect(() => {
     const previousTab = lastTabRef.current;
     lastTabRef.current = activeTab;
 
@@ -220,6 +234,37 @@ export default function FeedScreen() {
     setCurrentIndex(0);
     void refetch();
   }, [activeTab, followingOrderSeed, refetch]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'foryou' || !isAppActive) {
+      return;
+    }
+
+    if (isLoading || isRefetching || visiblePosts.length > 0 || isOffline) {
+      return;
+    }
+
+    if (forYouRecoveryAttempts >= 2) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      const nextSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
+      setForYouRecoveryAttempts((attempts) => attempts + 1);
+      setForYouRefreshSeed(nextSeed);
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [
+    activeTab,
+    forYouRecoveryAttempts,
+    forYouRefreshSeed,
+    isAppActive,
+    isLoading,
+    isOffline,
+    isRefetching,
+    visiblePosts.length,
+  ]);
 
   const headerTabsHeight = 44;
   const headerPaddingVertical = 12;
@@ -484,6 +529,7 @@ export default function FeedScreen() {
 
     const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
     setPullRefreshing(true);
+    setForYouRecoveryAttempts(0);
     feedTelemetry.trackPullToRefresh({
       endpoint: feedEndpoint === 'public' ? 'public' : 'personalized',
       refresh: nextRefreshSeed,
@@ -578,8 +624,8 @@ export default function FeedScreen() {
       data={Array.from({ length: count }, (_, index) => index)}
       keyExtractor={(item) => `skeleton-${item}`}
       renderItem={({ item }) => renderSkeletonItem(item)}
-      pagingEnabled={Platform.OS === 'ios'}
-      snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
+      pagingEnabled
+      snapToInterval={availableHeight}
       snapToAlignment="start"
       disableIntervalMomentum
       decelerationRate="fast"
@@ -639,6 +685,12 @@ export default function FeedScreen() {
   React.useEffect(() => {
     followingAutoloadAttemptedRef.current = false;
   }, [followedUsers.size]);
+
+  React.useEffect(() => {
+    if (visiblePosts.length > 0) {
+      setForYouRecoveryAttempts(0);
+    }
+  }, [visiblePosts.length]);
 
   React.useEffect(() => {
     if (activeTab !== 'following') {
@@ -735,8 +787,8 @@ export default function FeedScreen() {
                 offset: availableHeight * index,
                 index,
               })}
-              pagingEnabled={Platform.OS === 'ios'}
-              snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
+              pagingEnabled
+              snapToInterval={availableHeight}
               snapToAlignment="start"
               disableIntervalMomentum
               decelerationRate="fast"
@@ -792,6 +844,29 @@ export default function FeedScreen() {
                 ) : isRefetching || isLoading ? (
                   <View style={[styles.loadingContainer, { height: availableHeight }]}>
                     {[1, 2].map((i) => renderSkeletonItem(i))}
+                  </View>
+                ) : activeTab === 'foryou' ? (
+                  <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
+                    <Feather name="refresh-cw" size={54} color="#60a5fa" />
+                    <Text style={styles.emptyText}>
+                      {isError ? 'Feed failed to recover' : 'Refreshing your feed'}
+                    </Text>
+                    <Text style={styles.emptySubtext}>
+                      {isError
+                        ? 'Tap below to reload posts again.'
+                        : 'We are retrying automatically so posts appear again after app reopen.'}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.emptyLoginButton}
+                      onPress={() => {
+                        const nextSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
+                        setForYouRecoveryAttempts(0);
+                        setForYouRefreshSeed(nextSeed);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.emptyLoginButtonText}>Reload feed</Text>
+                    </TouchableOpacity>
                   </View>
                 ) : activeTab === 'following' && !user ? (
                 <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>

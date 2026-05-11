@@ -16,7 +16,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, likesApi, userApi, categoriesApi, followsApi, challengesApi } from '@/lib/api';
 import { API_BASE_URL } from '@/lib/config';
@@ -189,6 +189,7 @@ function ProfileFeedContent({
   const likedPosts = useAppSelector(state => state.likes.likedPosts);
   const { isCreateFocused } = useCreateFocus();
   const insets = useSafeAreaInsets();
+  const safeAreaFrame = useSafeAreaFrame();
   const likesManager = useLikesManager();
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
 
@@ -202,7 +203,7 @@ function ProfileFeedContent({
   }, [initialPosts]);
 
   // Full viewport height: one item = entire screen, only progress bar at bottom (no bottom tab here)
-  const availableHeight = screenHeight - insets.top;
+  const availableHeight = Math.max(0, Math.round(safeAreaFrame.height || (screenHeight - insets.top)));
 
   // CRITICAL FIX: Increased limit to fetch all posts from database
   const LIMIT = 100;
@@ -869,9 +870,9 @@ function ProfileFeedContent({
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
           }}
-          pagingEnabled={Platform.OS === 'ios'}
+          pagingEnabled
           showsVerticalScrollIndicator={false}
-          snapToInterval={Platform.OS === 'android' ? availableHeight : undefined}
+          snapToInterval={availableHeight}
           snapToAlignment="start"
           decelerationRate="fast"
           scrollEventThrottle={16}

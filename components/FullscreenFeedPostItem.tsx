@@ -709,8 +709,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
     if (isMountedRef.current) {
       setIsPlaying(nextPlaying);
+      if (nextPlaying) {
+        setVideoReady(true);
+        pauseIndicatorOpacity.setValue(0);
+      }
     }
-  }, []);
+  }, [pauseIndicatorOpacity]);
 
   const handleNativeStatusChange = useCallback((event: { status?: string; error?: unknown }) => {
     if (!isMountedRef.current) {
@@ -737,6 +741,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (event?.status === 'readyToPlay') {
       setVideoError(false);
       setDecoderErrorDetected(false);
+      setVideoReady(true);
     }
   }, [item.id, index, shouldLoadVideo, isActive, isAppActive]);
 

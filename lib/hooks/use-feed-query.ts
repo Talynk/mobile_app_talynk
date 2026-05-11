@@ -101,6 +101,44 @@ function countAdPosts(posts: Post[]) {
   return posts.filter((item: any) => item?.is_ad === true || item?.isAd === true).length;
 }
 
+function buildCatalogFallbackPage(args: {
+  raw: any;
+  requestIndex: number;
+  limit: number;
+  refreshSeed?: number;
+}): FeedPage {
+  const { raw, requestIndex, limit, refreshSeed } = args;
+  const rawPosts = Array.isArray(raw?.data?.posts) ? raw.data.posts : [];
+  const posts = normalizeForYouPosts(rawPosts);
+  const pagination = raw?.data?.pagination ?? {};
+  const totalPages = Number(pagination.totalPages || 0);
+  const hasNext = totalPages > 0 ? requestIndex < totalPages : posts.length >= limit;
+
+  primePostDetailsCache(posts);
+
+  feedTelemetry.trackFeedRequest({
+    endpoint: 'public',
+    refresh: refreshSeed ?? undefined,
+    fingerprintPresent: true,
+    pipeline: 'catalog-fallback',
+    countryPersonalization: null,
+    adImpressionsCount: countAdPosts(posts),
+  });
+
+  return {
+    posts,
+    nextCursor: hasNext ? String(requestIndex + 1) : null,
+    requestIndex,
+    hasNext,
+    endpoint: 'catalog',
+    refresh: refreshSeed ?? null,
+    pipeline: 'catalog-fallback',
+    userPreferences: [],
+    cached: false,
+    pagination,
+  };
+}
+
 function normalizeFeedPage(args: {
   response: Extract<FeedApiResponse, { status: 'success' }>;
   endpoint: 'public' | 'personalized';
@@ -240,17 +278,47 @@ async function loadForYouFeedPage(args: {
       endpoint = 'public';
       response = await feedApi.getPublic(options);
     } else {
-      throw error;
+      response = {
+        status: 'error',
+        message: error?.response?.data?.message || error?.message || 'Failed to load feed',
+      };
     }
   }
 
-  if (!isSuccessfulFeedResponse(response)) {
-    throw new Error(response?.message || 'Failed to load feed');
+  if (isSuccessfulFeedResponse(response)) {
+    return normalizeFeedPage({
+      response,
+      endpoint,
+      requestIndex,
+      limit,
+      refreshSeed,
+    });
   }
 
-  return normalizeFeedPage({
-    response,
-    endpoint,
+  if (isAuthenticated) {
+    try {
+      const recommendations = await feedApi.getRecommendations(options);
+      if (isSuccessfulFeedResponse(recommendations)) {
+        return normalizeFeedPage({
+          response: recommendations,
+          endpoint: 'personalized',
+          requestIndex,
+          limit,
+          refreshSeed,
+        });
+      }
+    } catch {
+      // Fall through to catalog fallback.
+    }
+  }
+
+  const catalog = await postsApi.getAll(requestIndex, limit, {
+    featured_first: 'false',
+    status: 'active',
+  });
+
+  return buildCatalogFallbackPage({
+    raw: catalog,
     requestIndex,
     limit,
     refreshSeed,

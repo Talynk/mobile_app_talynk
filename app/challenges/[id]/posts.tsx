@@ -13,14 +13,12 @@ import {
   FlatList,
   Share,
   Alert,
-  useWindowDimensions,
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { challengesApi, followsApi } from '@/lib/api';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Post } from '@/types';
 import { getThumbnailUrl, getFileUrl, getPostMediaUrl } from '@/lib/utils/file-url';
 import { sharePost } from '@/lib/post-share';
@@ -100,8 +98,8 @@ export default function ChallengePostsScreen() {
     useLocalSearchParams();
   const C = COLORS.dark;
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
-  const fullscreenAvailableHeight = windowHeight - insets.top - FULLSCREEN_HEADER_PX;
+  const safeAreaFrame = useSafeAreaFrame();
+  const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
   const isWinnerDetailView = !!winnerUserId;
   const isParticipantDetailView = !!participantUserId;
 
@@ -688,8 +686,8 @@ export default function ChallengePostsScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled={Platform.OS === 'ios'}
-            snapToInterval={Platform.OS === 'android' ? fullscreenAvailableHeight : undefined}
+            pagingEnabled
+            snapToInterval={fullscreenAvailableHeight}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
