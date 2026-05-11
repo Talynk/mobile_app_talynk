@@ -1,25 +1,22 @@
 diff --git a/node_modules/react-native-compressor/android/src/main/java/com/reactnativecompressor/Video/VideoCompressor/videoHelpers/OutputSurface.kt b/node_modules/react-native-compressor/android/src/main/java/com/reactnativecompressor/Video/VideoCompressor/videoHelpers/OutputSurface.kt
-index 1cd2bc8..7d36aa2 100644
+index 6222859..375c0c5 100644
 --- a/node_modules/react-native-compressor/android/src/main/java/com/reactnativecompressor/Video/VideoCompressor/videoHelpers/OutputSurface.kt
 +++ b/node_modules/react-native-compressor/android/src/main/java/com/reactnativecompressor/Video/VideoCompressor/videoHelpers/OutputSurface.kt
-@@ -1,5 +1,6 @@
- package com.reactnativecompressor.Video.VideoCompressor.video
+@@ -2,9 +2,13 @@ package com.reactnativecompressor.Video.VideoCompressor.video
  
  import android.graphics.SurfaceTexture
  import android.graphics.SurfaceTexture.OnFrameAvailableListener
 +import android.util.Log
  import android.view.Surface
  
-@@ -7,6 +8,10 @@ import android.view.Surface
  class OutputSurface : OnFrameAvailableListener {
-+
 +    companion object {
 +        private const val TAG = "RNCompressorOutputSurface"
 +    }
  
      private var mSurfaceTexture: SurfaceTexture? = null
      private var mSurface: Surface? = null
-@@ -41,6 +46,7 @@ class OutputSurface : OnFrameAvailableListener {
+@@ -45,6 +49,7 @@ class OutputSurface : OnFrameAvailableListener {
       * Discards all resources held by this class, notably the EGL context.
       */
      fun release() {
@@ -27,7 +24,7 @@ index 1cd2bc8..7d36aa2 100644
          mSurface?.release()
  
          mTextureRender = null
-@@ -84,7 +90,8 @@ class OutputSurface : OnFrameAvailableListener {
+@@ -93,7 +98,8 @@ class OutputSurface : OnFrameAvailableListener {
      override fun onFrameAvailable(p0: SurfaceTexture?) {
          synchronized(mFrameSyncObject) {
              if (mFrameAvailable) {
