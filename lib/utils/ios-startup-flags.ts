@@ -16,6 +16,5 @@ export const IOS_STARTUP_FLAGS = {
   enableStartupNotificationPermissionPrompt: false,
 
   /** Start custom iOS video cache proxy at startup. */
-  enableVideoCacheProxy: false,
+  enableVideoCacheProxy: true,
 } as const;
-

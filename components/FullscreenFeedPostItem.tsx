@@ -443,6 +443,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
+  const [preferDirectVideoSource, setPreferDirectVideoSource] = useState(false);
   const [videoProgress, setVideoProgress] = useState(0);
   const [retryCount, setRetryCount] = useState(0);
   const [showUnfollowModal, setShowUnfollowModal] = useState(false);
@@ -517,7 +518,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isAppActive &&
     (isActive || (shouldPreload && !isLongFormVideo)) &&
     !videoError;
-  const videoPlayerSource = shouldLoadVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
+  const directVideoPlayerSource = playbackUrl
+    ? {
+        uri: playbackUrl,
+        useCaching: false,
+        ...(playbackUrl.toLowerCase().includes('.m3u8') ? { contentType: 'hls' as const } : {}),
+      }
+    : null;
+  const videoPlayerSource =
+    shouldLoadVideo && playbackUrl
+      ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
+      : null;
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
   const fallbackImageUrl =
@@ -602,6 +613,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setVideoReady(false);
     setIsPlaying(false);
     setDecoderErrorDetected(false);
+    setPreferDirectVideoSource(false);
     setVideoProgress(0);
     setRetryCount(0);
     setPausedByUser(false);
@@ -679,6 +691,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       videoMountRetryTimeoutRef.current = null;
     }
 
+    if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
+      setPreferDirectVideoSource(true);
+      setVideoMountBoundaryKey((prev) => prev + 1);
+      setCanMountVideoPlayer(true);
+      return;
+    }
+
     if (!shouldLoadVideo || videoMountRetryCountRef.current >= 2) {
       captureFabricError(
         new Error('Feed video mount retries exhausted'),
@@ -704,7 +723,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setVideoMountBoundaryKey((prev) => prev + 1);
       setCanMountVideoPlayer(true);
     }, 450);
-  }, [handleNativePlayerInvalid, shouldLoadVideo, item.id, index, isActive, isAppActive]);
+  }, [handleNativePlayerInvalid, shouldLoadVideo, item.id, index, isActive, isAppActive, preferDirectVideoSource]);
 
   const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
     if (isMountedRef.current) {
@@ -735,6 +754,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         appActive: isAppActive,
       });
       setIsPlaying(false);
+      setVideoReady(false);
+      if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
+        setPreferDirectVideoSource(true);
+        setVideoMountBoundaryKey((prev) => prev + 1);
+        setCanMountVideoPlayer(true);
+      }
       return;
     }
 
@@ -743,7 +768,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setDecoderErrorDetected(false);
       setVideoReady(true);
     }
-  }, [item.id, index, shouldLoadVideo, isActive, isAppActive]);
+  }, [item.id, index, shouldLoadVideo, isActive, isAppActive, preferDirectVideoSource]);
 
   const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
     if (!isMountedRef.current) {
@@ -867,6 +892,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         return;
       }
       setRetryCount((prev) => prev + 1);
+      if (Platform.OS === 'ios' && !preferDirectVideoSource && retryCount >= 1) {
+        setPreferDirectVideoSource(true);
+      }
       // Only bump the boundary key. React's key reconciliation unmounts the
       // entire VideoMountBoundary + NativeFeedVideo tree atomically so the
       // native player is fully released before the new one is created.
@@ -876,7 +904,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }, delay);
 
     return () => clearTimeout(timeoutId);
-  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady]);
+  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource]);
 
   const handleTapToPause = useCallback((e?: any) => {
     // Only pause/play when tapping the CENTER of the screen.

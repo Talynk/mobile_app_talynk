@@ -260,8 +260,8 @@ function RootLayoutNav() {
 
   // Start video cache: iOS uses expo-video-cache (startVideoCacheServer.ios.ts); Android no-op (startVideoCacheServer.android.ts). Android bundle never references expo-video-cache.
   useEffect(() => {
-    if (IOS_LAUNCH_SAFE_MODE) {
-      captureSentryBootBreadcrumb('iOS launch-safe mode enabled: skipping startup video cache server');
+    if (Platform.OS === 'ios' && !IOS_STARTUP_FLAGS.enableVideoCacheProxy) {
+      captureSentryBootBreadcrumb('startup video cache server disabled by flag');
       return;
     }
     try {
