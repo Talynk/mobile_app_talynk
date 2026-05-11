@@ -74,6 +74,39 @@ const getAdFeaturedDurationText = (post: any): string | null => {
     : `Featured for ${remainingDays} more days`;
 };
 
+const extractFirstHashtagLabel = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      continue;
+    }
+
+    const match = value.match(/#([\p{L}\p{N}_-]+)/u);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+};
+
+const getPostSubcategoryName = (post: any): string | null => {
+  const rawSubcategory =
+    post?.subcategory_name ||
+    post?.subcategoryName ||
+    post?.subcategory?.name ||
+    post?.sub_category?.name ||
+    post?.subCategory?.name ||
+    extractFirstHashtagLabel(post?.caption, post?.description, post?.title) ||
+    null;
+
+  if (typeof rawSubcategory !== 'string') {
+    return null;
+  }
+
+  const normalized = rawSubcategory.trim();
+  return normalized.length > 0 ? normalized : null;
+};
+
 const ExpandableCaption = ({ text, maxLines = 3 }: { text: string; maxLines?: number }) => {
   const [expanded, setExpanded] = useState(false);
   if (!text) return null;
@@ -174,7 +207,20 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         instance.muted = true;
         instance.staysActiveInBackground = false;
         instance.timeUpdateEventInterval = 0.25;
-        (instance as any).preferredForwardBufferDuration = 8;
+        if (Platform.OS === 'android') {
+          try {
+            instance.bufferOptions = {
+              preferredForwardBufferDuration: 180,
+              minBufferForPlayback: 3,
+              maxBufferBytes: 128 * 1024 * 1024,
+              prioritizeTimeOverSizeThreshold: true,
+            } as any;
+          } catch (_) {
+            (instance as any).preferredForwardBufferDuration = 180;
+          }
+        } else {
+          (instance as any).preferredForwardBufferDuration = 8;
+        }
         // Don't auto-play — wait for the shouldPlay effect
         if (!shouldPlay) {
           instance.pause();
@@ -380,6 +426,8 @@ export interface FullscreenFeedPostItemProps {
   challengeName?: string;
   onPublishPress?: (postId: string) => void;
   bottomOverlayOffset?: number;
+  bottomFooterHeight?: number;
+  showBottomFooter?: boolean;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -404,6 +452,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   isChallengeEnded,
   challengeName,
   bottomOverlayOffset = 0,
+  bottomFooterHeight = 0,
+  showBottomFooter = false,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
   const isAppActive = useAppActive();
@@ -538,6 +588,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const imageDisplayUrl = usingImageFallback && fallbackImageUrl ? fallbackImageUrl : (mediaUrl || thumbnailOrPlaceholderUrl);
   const competitionVideoStatusLabel =
     isCompetitionPost && isVideo && !hlsReady ? getChallengeVideoStatusLabel(item) || 'Video' : null;
+  const subcategoryName = getPostSubcategoryName(item);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -1051,9 +1102,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   };
 
   const handleCategoryPress = () => {
-    const categoryName = typeof item.category === 'string' ? item.category : item.category?.name;
-    if (categoryName) {
-      router.push({ pathname: '/category/[name]' as any, params: { name: categoryName } });
+    if (subcategoryName) {
+      router.push({ pathname: '/category/[name]' as any, params: { name: subcategoryName } });
     }
   };
 
@@ -1062,21 +1112,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const adTitle = (item as any).title || (item as any).ad_title || '';
   const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
   const mediaContentFit = isAd ? 'contain' : 'cover';
-  // Keep overlay metadata pinned low on every device size, while ensuring
-  // the progress bar remains the final visible line at the very bottom.
+  const footerHeight = Math.max(bottomFooterHeight, 0);
   const reservedBottomSpace = Math.max(bottomOverlayOffset, 0);
-  // Progress bar sits flush at the screen bottom (bottom: 0).
-  // Thumb is 10px tall → occupies 0-10px from screen bottom.
-  // Container touch area is 28px → 0-28px from screen bottom.
-  //
-  // feedOverlayBottomInset drives rightActions + bottomInfo.
-  // actionButton has marginBottom:12 on the last item (flag/report),
-  // so flag visible-bottom = feedOverlayBottomInset + 12.
-  // We need that > 28 (touch zone) so: 30 + 12 = 42 > 28 ✓
-  // This calculation uses no safe-area adjustments so it is pixel-identical
-  // on every phone regardless of screen height.
-  const feedProgressBottomInset = 0;
-  const feedOverlayBottomInset = 30 + reservedBottomSpace;
+  const progressBarGap = 2;
+  const stackGapAboveProgress = 12;
+  const rightActionsGap = 22;
+  const feedProgressBottomInset = footerHeight + progressBarGap;
+  const feedOverlayBottomInset = feedProgressBottomInset + stackGapAboveProgress + reservedBottomSpace;
+  const feedRightActionsBottomInset = feedProgressBottomInset + rightActionsGap + reservedBottomSpace;
 
   return (
     <View style={[styles.postContainer, { height: availableHeight }]} pointerEvents="box-none">
@@ -1185,7 +1228,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           </View>
         )}
 
-        <View style={[styles.rightActions, { bottom: feedOverlayBottomInset }]}>
+        {showBottomFooter && footerHeight > 0 ? (
+          <View
+            pointerEvents="none"
+            style={[styles.fixedBottomFooter, { height: footerHeight }]}
+          />
+        ) : null}
+
+        <View style={[styles.rightActions, { bottom: feedRightActionsBottomInset }]}>
           {!isAd && (
             <View style={styles.avatarContainer}>
               <TouchableOpacity onPress={handleUserPress}>
@@ -1288,9 +1338,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               <Text style={styles.timestamp}>{timeAgo(item.createdAt || item.uploadDate || (item as any).created_at)}</Text>
             )}
           </View>
-          {!isAd && item.category && (
+          {!isAd && subcategoryName && (
             <TouchableOpacity style={styles.categoryBadge} onPress={handleCategoryPress}>
-              <Text style={styles.categoryText}>#{getCategoryDisplayName(typeof item.category === 'string' ? item.category : (item.category as { name?: string })?.name)}</Text>
+              <Text style={styles.categoryText}>#{getCategoryDisplayName(subcategoryName)}</Text>
             </TouchableOpacity>
           )}
           {!isAd && !isOwnPost && (
@@ -1819,7 +1869,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.4)',
     borderRadius: 8,
     padding: 10,
-    marginBottom: 0,
+    marginBottom: 6,
   },
   sponsoredMetaRow: {
     flexDirection: 'row',
@@ -1955,7 +2005,7 @@ const styles = StyleSheet.create({
   followButton: {
     alignSelf: 'flex-start',
     paddingHorizontal: 16,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',
@@ -1974,6 +2024,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 0,
     zIndex: 30,
+  },
+  fixedBottomFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000',
+    zIndex: 19,
   },
   progressBarInner: {
     // 10px = thumb diameter. 3px track is centred inside (3.5px from top/bottom).

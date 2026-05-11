@@ -7,6 +7,7 @@ import {
   UploaderHttpMethod,
   UploadType,
 } from 'react-native-compressor';
+import { runSerializedAndroidMediaCodecTask } from './android-media-codec-guard';
 
 const COMPRESS_IF_LARGER_THAN_BYTES = 4 * 1024 * 1024;
 const COMPRESS_IF_LONGER_THAN_SECONDS = 15;
@@ -188,29 +189,39 @@ export async function prepareVideoForUpload(
 
   if (shouldCompress) {
     try {
-      await CompressorVideo.activateBackgroundTask();
-    } catch {
-      // Best-effort only.
-    }
+      await runSerializedAndroidMediaCodecTask('video-compress', async () => {
+        try {
+          await CompressorVideo.activateBackgroundTask();
+        } catch {
+          // Best-effort only.
+        }
 
-    try {
-      const compressedPath = await CompressorVideo.compress(
-        originalUri,
-        {
-          compressionMethod: 'auto',
-          maxSize: 720,
-          minimumFileSizeForCompress: 0,
-        },
-        (progress) => onCompressionProgress?.(progress)
-      );
-      uploadUri = ensureFileUri(compressedPath);
+        try {
+          const compressedPath = await CompressorVideo.compress(
+            originalUri,
+            {
+              compressionMethod: 'auto',
+              maxSize: 720,
+              minimumFileSizeForCompress: 0,
+            },
+            (progress) => onCompressionProgress?.(progress)
+          );
+          uploadUri = ensureFileUri(compressedPath);
 
-      const compressedInfo = await getSafeFileInfo(uploadUri);
-      if (!compressedInfo.exists) {
-        throw new Error('Compressed video file was not created');
-      }
+          const compressedInfo = await getSafeFileInfo(uploadUri);
+          if (!compressedInfo.exists) {
+            throw new Error('Compressed video file was not created');
+          }
 
-      didCompress = uploadUri !== originalUri;
+          didCompress = uploadUri !== originalUri;
+        } finally {
+          try {
+            await CompressorVideo.deactivateBackgroundTask();
+          } catch {
+            // Best-effort only.
+          }
+        }
+      });
     } catch (error) {
       const originalExtension = originalUri.split('.').pop()?.toLowerCase();
       if (originalExtension !== 'mp4') {
@@ -218,12 +229,6 @@ export async function prepareVideoForUpload(
       }
       uploadUri = originalUri;
       didCompress = false;
-    } finally {
-      try {
-        await CompressorVideo.deactivateBackgroundTask();
-      } catch {
-        // Best-effort only.
-      }
     }
   }
 

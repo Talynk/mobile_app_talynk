@@ -147,6 +147,12 @@ export interface Post {
   };
   category_id?: number;
   categoryName?: string;
+  subcategory?: {
+    id: number;
+    name: string;
+  };
+  subcategory_id?: number;
+  subcategoryName?: string;
   challenge_id?: string;
   challengeId?: string;
   challenge_name?: string;

@@ -38,6 +38,93 @@ function pickString(...values: unknown[]): string {
   return '';
 }
 
+function extractFirstHashtagLabel(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      continue;
+    }
+
+    const match = value.match(/#([\p{L}\p{N}_-]+)/u);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return '';
+}
+
+function normalizeCategoryValue(post: any) {
+  const hashtagCategory = extractFirstHashtagLabel(
+    post?.caption,
+    post?.description,
+    post?.title,
+  );
+  const rawSubcategoryName = pickString(
+    post?.subcategory_name,
+    post?.subcategoryName,
+    post?.subcategory?.name,
+    post?.sub_category?.name,
+    post?.subCategory?.name,
+  );
+  const rawCategoryName = pickString(
+    typeof post?.category === 'string' ? post.category : '',
+    post?.category?.name,
+    post?.categoryName,
+    post?.category_name,
+    post?.post_category,
+    post?.main_category_name,
+    post?.mainCategoryName,
+    post?.main_category?.name,
+    hashtagCategory,
+  );
+
+  const rawSubcategoryId =
+    post?.subcategory_id ??
+    post?.subcategory?.id ??
+    post?.sub_category?.id ??
+    post?.subCategory?.id ??
+    null;
+  const rawCategoryId =
+    post?.category_id ??
+    post?.category?.id ??
+    post?.main_category_id ??
+    post?.main_category?.id ??
+    null;
+
+  const normalizedSubcategory =
+    post?.subcategory ??
+    post?.sub_category ??
+    post?.subCategory ??
+    (rawSubcategoryName
+      ? (rawSubcategoryId !== null && rawSubcategoryId !== undefined && Number.isFinite(Number(rawSubcategoryId))
+          ? { id: Number(rawSubcategoryId), name: rawSubcategoryName }
+          : undefined)
+      : undefined);
+
+  const normalizedCategory =
+    post?.category ??
+    (rawCategoryName
+      ? (rawCategoryId
+          ? { id: Number(rawCategoryId), name: rawCategoryName }
+          : rawCategoryName)
+      : undefined);
+
+  return {
+    normalizedCategory,
+    normalizedCategoryName: rawCategoryName || undefined,
+    normalizedCategoryId:
+      rawCategoryId !== null && rawCategoryId !== undefined && Number.isFinite(Number(rawCategoryId))
+        ? Number(rawCategoryId)
+        : undefined,
+    normalizedSubcategory,
+    normalizedSubcategoryName: rawSubcategoryName || undefined,
+    normalizedSubcategoryId:
+      rawSubcategoryId !== null && rawSubcategoryId !== undefined && Number.isFinite(Number(rawSubcategoryId))
+        ? Number(rawSubcategoryId)
+        : undefined,
+  };
+}
+
 function getChallengeEntries(post: any): any[] {
   return [
     ...(Array.isArray(post?.challengePosts) ? post.challengePosts : []),
@@ -164,6 +251,14 @@ export function normalizePost(post: any): Post {
     challengeEntries[0]?.challenge?.name,
     challengeEntries[0]?.competition?.name,
   );
+  const {
+    normalizedCategory,
+    normalizedCategoryName,
+    normalizedCategoryId,
+    normalizedSubcategory,
+    normalizedSubcategoryName,
+    normalizedSubcategoryId,
+  } = normalizeCategoryValue(post);
   const normalizedUser =
     userFromPost || post?.user_id || post?.userId || authorName || authorProfilePicture
       ? {
@@ -207,6 +302,12 @@ export function normalizePost(post: any): Post {
     view_count: post?.view_count ?? post?.views ?? 0,
     is_featured: post?.is_featured ?? post?.isFeatured ?? false,
     isAd: post?.isAd === true || post?.is_ad === true,
+    category: normalizedCategory,
+    categoryName: normalizedCategoryName,
+    category_id: normalizedCategoryId,
+    subcategory: normalizedSubcategory,
+    subcategoryName: normalizedSubcategoryName,
+    subcategory_id: normalizedSubcategoryId,
     challenge: primaryChallenge || post?.challenge || post?.competition,
     challenge_id: challengeId || undefined,
     challengeId: challengeId || undefined,

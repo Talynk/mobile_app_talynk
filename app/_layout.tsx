@@ -8,6 +8,7 @@ import { useEffect, useCallback, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setVideoCacheSizeAsync } from 'expo-video';
 
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
@@ -256,6 +257,10 @@ function RootLayoutNav() {
     try {
       imageCache.initialize();
     } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    setVideoCacheSizeAsync(4 * 1024 * 1024 * 1024).catch(() => {});
   }, []);
 
   // Start video cache: iOS uses expo-video-cache (startVideoCacheServer.ios.ts); Android no-op (startVideoCacheServer.android.ts). Android bundle never references expo-video-cache.

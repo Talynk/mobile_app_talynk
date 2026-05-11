@@ -1,10 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { createVideoThumbnail } from 'react-native-compressor';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 
 /**
- * Generate thumbnail from video URI
- * For Expo Go compatibility, we return the video URI and let the backend generate the thumbnail.
- * This is the simplest approach and avoids MediaLibrary permission issues in Expo Go.
+ * Generate a local thumbnail for a captured or picked video without going through
+ * `react-native-compressor`, which avoids Android MediaCodec contention with uploads.
  */
 export const generateThumbnail = async (videoUri: string): Promise<string | null> => {
   try {
@@ -14,9 +13,11 @@ export const generateThumbnail = async (videoUri: string): Promise<string | null
       return null;
     }
 
-    const thumbnail = await createVideoThumbnail(videoUri);
-    if (thumbnail?.path) {
-      return thumbnail.path.startsWith('file://') ? thumbnail.path : `file://${thumbnail.path}`;
+    const thumbnail = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: 1000,
+    });
+    if (thumbnail?.uri) {
+      return thumbnail.uri.startsWith('file://') ? thumbnail.uri : `file://${thumbnail.uri}`;
     }
 
     return null;

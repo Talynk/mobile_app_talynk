@@ -130,6 +130,7 @@ export default function ChallengeDetailScreen() {
   const insets = useSafeAreaInsets();
   const safeAreaFrame = useSafeAreaFrame();
   const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
+  const fullscreenFooterHeight = Math.max(insets.bottom + 18, 28);
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
@@ -1891,6 +1892,8 @@ export default function ChallengeDetailScreen() {
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
                   isChallengeEnded={isChallengeEnded}
                   challengeName={challenge?.name}
+                  bottomFooterHeight={fullscreenFooterHeight}
+                  showBottomFooter
                 />
               );
             }}

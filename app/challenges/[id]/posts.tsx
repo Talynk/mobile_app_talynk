@@ -100,6 +100,7 @@ export default function ChallengePostsScreen() {
   const insets = useSafeAreaInsets();
   const safeAreaFrame = useSafeAreaFrame();
   const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
+  const fullscreenFooterHeight = Math.max(insets.bottom + 18, 28);
   const isWinnerDetailView = !!winnerUserId;
   const isParticipantDetailView = !!participantUserId;
 
@@ -682,6 +683,8 @@ export default function ChallengePostsScreen() {
                   availableHeight={fullscreenAvailableHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
                   isChallengeEnded={isChallengeEnded}
+                  bottomFooterHeight={fullscreenFooterHeight}
+                  showBottomFooter
                 />
               );
             }}
