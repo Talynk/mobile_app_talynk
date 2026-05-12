@@ -40,6 +40,8 @@ import {
 import { filterChallengeSurfacePosts, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { useVerticalSnapPager } from '@/lib/hooks/use-vertical-snap-pager';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
   shouldPreloadFeedVideo,
@@ -50,6 +52,7 @@ import {
 } from '@/lib/utils/video-feed';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { openFullscreenWithSafeScroll } from '@/lib/utils/fabric-diagnostics';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const INITIAL_LIMIT = 20;
 const LOAD_MORE_LIMIT = 10;
@@ -154,8 +157,51 @@ export default function ChallengePostsScreen() {
     itemVisiblePercentThreshold: 60,
     minimumViewTime: 50,
   }).current;
+  const {
+    pageHeight: fullscreenPageHeight,
+    snapToOffsets: fullscreenSnapToOffsets,
+    getItemLayout: getFullscreenItemLayout,
+    handleScroll: handleFullscreenPagerScroll,
+    handleMomentumScrollEnd: handleFullscreenPagerMomentumEnd,
+  } = useVerticalSnapPager<Post>({
+    itemCount: posts.length,
+    pageHeight: fullscreenAvailableHeight,
+    listRef: fullscreenListRef,
+    screenName: 'challenge-posts-fullscreen',
+    onIndexChanged: (index) => {
+      setFullscreenIndex(index);
+    },
+    onIndexSettled: (index) => {
+      setFullscreenIndex(index);
+    },
+    onTransitionEnd: () => {
+      setIsFullscreenTransitioning(false);
+    },
+  });
 
   useRefetchOnReconnect(() => loadPosts(1, true));
+
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'challenge-posts',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      void loadPosts(1, true);
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'challenge-posts',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      fullscreenListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      setFullscreenIndex(0);
+      void loadPosts(1, true);
+    },
+  });
 
   const filterFallbackPosts = useCallback((allPosts: Post[]) => {
     if (isWinnerDetailView) {
@@ -680,7 +726,7 @@ export default function ChallengePostsScreen() {
                   isActive={isActive}
                   suspendPlayback={isFullscreenTransitioning || commentsModalVisible || reportModalVisible}
                   shouldPreload={shouldPreload}
-                  availableHeight={fullscreenAvailableHeight}
+                  availableHeight={fullscreenPageHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
                   isChallengeEnded={isChallengeEnded}
                   bottomFooterHeight={fullscreenFooterHeight}
@@ -689,8 +735,7 @@ export default function ChallengePostsScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled
-            snapToInterval={fullscreenAvailableHeight}
+            snapToOffsets={fullscreenSnapToOffsets}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
@@ -703,16 +748,9 @@ export default function ChallengePostsScreen() {
             viewabilityConfig={fullscreenViewabilityConfig}
             onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
-            onMomentumScrollEnd={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
-              setFullscreenIndex(Math.max(0, Math.min(index, posts.length - 1)));
-              setIsFullscreenTransitioning(false);
-            }}
-            getItemLayout={(_, index) => ({
-              length: fullscreenAvailableHeight,
-              offset: fullscreenAvailableHeight * index,
-              index,
-            })}
+            onScroll={handleFullscreenPagerScroll}
+            onMomentumScrollEnd={handleFullscreenPagerMomentumEnd}
+            getItemLayout={getFullscreenItemLayout}
           />
         </SafeAreaView>
       </Modal>

@@ -50,6 +50,8 @@ import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
 } from '@/lib/utils/post-detail-enrichment';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const EXTERNAL_PROFILE_PAGE_LIMIT = 24;
 const { width: screenWidth } = Dimensions.get('window');
@@ -912,6 +914,27 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     };
     fetchData();
   };
+
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'external-profile',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      onRefresh();
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'external-profile',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      postsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      onRefresh();
+    },
+  });
 
   const handleLoadMorePosts = useCallback(() => {
     if (loadingMorePosts || loadingPosts || !hasMorePosts) {

@@ -1,4 +1,4 @@
-type FeedEndpoint = 'public' | 'personalized' | 'recommendations';
+type FeedEndpoint = 'public' | 'personalized' | 'recommendations' | 'following' | 'catalog';
 
 type FeedRequestTelemetry = {
   endpoint: FeedEndpoint;
@@ -63,6 +63,80 @@ export const feedTelemetry = {
   },
   trackSeenResetCalled(payload: { endpoint: 'guest' | 'auth'; refresh: number }) {
     logTelemetry('feed_seen_reset_called', payload);
+  },
+  trackResumeRefetch(payload: {
+    screenName: string;
+    endpoint?: FeedEndpoint;
+    backgroundDurationMs: number;
+  }) {
+    logTelemetry('feed_resume_refetch', payload);
+  },
+  trackResumeHardReset(payload: {
+    screenName: string;
+    endpoint?: FeedEndpoint;
+    backgroundDurationMs: number;
+  }) {
+    logTelemetry('feed_resume_hard_reset', payload);
+  },
+  trackFeedFirstPageOutcome(payload: {
+    endpoint?: FeedEndpoint;
+    outcome: 'success' | 'empty' | 'error' | 'degraded';
+    message?: string;
+    postsCount?: number;
+  }) {
+    logTelemetry('feed_first_page_outcome', payload);
+  },
+  trackFeedNetworkError(payload: {
+    endpoint?: FeedEndpoint;
+    message: string;
+  }) {
+    logTelemetry('feed_network_error', payload);
+  },
+  trackManualReload(payload: {
+    screenName: string;
+    endpoint?: FeedEndpoint;
+  }) {
+    logTelemetry('feed_reload_manual', payload);
+  },
+  trackVideoSourceMode(payload: {
+    mode: 'ios_proxy' | 'direct' | 'android_cache';
+    postId: string;
+    screenName: string;
+  }) {
+    logTelemetry('video_source_mode', payload);
+  },
+  trackVideoTimeToFirstFrame(payload: {
+    postId: string;
+    screenName: string;
+    sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
+    durationMs: number;
+  }) {
+    logTelemetry('video_time_to_first_frame_ms', payload);
+  },
+  trackVideoStall(payload: {
+    postId: string;
+    screenName: string;
+    count: number;
+  }) {
+    logTelemetry('video_stall_count', payload);
+  },
+  trackActiveFeedPlayers(payload: {
+    count: number;
+    postId: string;
+    screenName: string;
+  }) {
+    logTelemetry('active_feed_players_count', payload);
+  },
+  trackPageAlignmentError(payload: {
+    screenName: string;
+    alignmentErrorPx: number;
+    pageHeight: number;
+    index: number;
+  }) {
+    if (payload.alignmentErrorPx <= 1) {
+      return;
+    }
+    logTelemetry('page_alignment_error_px', payload);
   },
   trackShareSuccess(payload: { postId: string }) {
     logTelemetry('feed_share_post_success', payload);

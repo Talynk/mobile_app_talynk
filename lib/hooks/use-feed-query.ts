@@ -1,16 +1,19 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo } from 'react';
+
 import { feedApi, followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { FeedApiResponse, FeedPagination, Post, UserPreferenceHint } from '@/types';
-import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
-import { useEffect, useMemo } from 'react';
-import { primePostDetailsCache } from '@/lib/post-details-cache';
-import { normalizePost } from '@/lib/utils/normalize-post';
-import { FEED_DEFAULT_PAGE_SIZE } from '@/lib/feed-config';
+import { FEED_DEFAULT_PAGE_SIZE, FEED_INTEGRATION_CONFIG } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
+import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { FeedApiResponse, FeedPagination, Post, UserPreferenceHint } from '@/types';
+import { normalizePost } from '@/lib/utils/normalize-post';
+import { isNetworkError } from '@/lib/utils/network-error-handler';
+import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 
 type FeedTab = 'foryou' | 'following';
 type FeedEndpoint = 'public' | 'personalized' | 'following' | 'catalog';
+type FeedLoadOutcome = 'success' | 'empty' | 'error' | 'degraded';
 
 type UseFeedQueryOptions = {
   refreshSeed?: number;
@@ -33,6 +36,14 @@ interface FeedPage {
   userPreferences: UserPreferenceHint[];
   cached: boolean;
   pagination?: Partial<FeedPagination>;
+  loadOutcome: FeedLoadOutcome;
+  errorMessage?: string;
+}
+
+function createFeedRequestError(message: string, extras?: Record<string, unknown>) {
+  const error = new Error(message) as Error & Record<string, unknown>;
+  Object.assign(error, extras);
+  return error;
 }
 
 function isSuccessfulFeedResponse(response: FeedApiResponse): response is Extract<FeedApiResponse, { status: 'success' }> {
@@ -117,7 +128,7 @@ function buildCatalogFallbackPage(args: {
   primePostDetailsCache(posts);
 
   feedTelemetry.trackFeedRequest({
-    endpoint: 'public',
+    endpoint: 'catalog',
     refresh: refreshSeed ?? undefined,
     fingerprintPresent: true,
     pipeline: 'catalog-fallback',
@@ -136,6 +147,7 @@ function buildCatalogFallbackPage(args: {
     userPreferences: [],
     cached: false,
     pagination,
+    loadOutcome: posts.length > 0 ? 'degraded' : 'empty',
   };
 }
 
@@ -194,6 +206,7 @@ function normalizeFeedPage(args: {
     userPreferences,
     cached: response.cached === true,
     pagination,
+    loadOutcome: posts.length > 0 ? 'success' : 'empty',
   };
 }
 
@@ -211,6 +224,7 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
       refresh: null,
       userPreferences: [],
       cached: false,
+      loadOutcome: 'empty',
     };
   }
 
@@ -248,7 +262,24 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
     refresh: null,
     userPreferences: [],
     cached: false,
+    loadOutcome: pagePosts.length > 0 ? 'degraded' : 'empty',
   };
+}
+
+function shouldUseRecommendationsFallback(error: unknown, response?: FeedApiResponse) {
+  const status = (error as any)?.response?.status;
+  const message = String(
+    (response as any)?.message ||
+      (error as any)?.response?.data?.message ||
+      (error as any)?.message ||
+      '',
+  ).toLowerCase();
+
+  if (status === 404 || status === 405 || status === 410 || status === 501) {
+    return true;
+  }
+
+  return /not found|not available|unsupported|deprecated/i.test(message);
 }
 
 async function loadForYouFeedPage(args: {
@@ -268,6 +299,7 @@ async function loadForYouFeedPage(args: {
 
   let endpoint: 'public' | 'personalized' = isAuthenticated ? 'personalized' : 'public';
   let response: FeedApiResponse;
+  let requestError: unknown = null;
 
   try {
     response = isAuthenticated
@@ -278,6 +310,7 @@ async function loadForYouFeedPage(args: {
       endpoint = 'public';
       response = await feedApi.getPublic(options);
     } else {
+      requestError = error;
       response = {
         status: 'error',
         message: error?.response?.data?.message || error?.message || 'Failed to load feed',
@@ -295,7 +328,7 @@ async function loadForYouFeedPage(args: {
     });
   }
 
-  if (isAuthenticated) {
+  if (isAuthenticated && shouldUseRecommendationsFallback(requestError, response)) {
     try {
       const recommendations = await feedApi.getRecommendations(options);
       if (isSuccessfulFeedResponse(recommendations)) {
@@ -308,14 +341,40 @@ async function loadForYouFeedPage(args: {
         });
       }
     } catch {
-      // Fall through to catalog fallback.
+      // Fall through to configured fallback handling.
     }
+  }
+
+  if (requestError && isNetworkError(requestError)) {
+    const message = response?.message || (requestError as any)?.message || 'Failed to load feed';
+    feedTelemetry.trackFeedNetworkError({ endpoint, message });
+    throw createFeedRequestError(message, {
+      endpoint,
+      loadOutcome: 'error' as FeedLoadOutcome,
+    });
+  }
+
+  if (!FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback) {
+    const message = response?.message || 'Failed to load feed';
+    throw createFeedRequestError(message, {
+      endpoint,
+      loadOutcome: 'error' as FeedLoadOutcome,
+    });
   }
 
   const catalog = await postsApi.getAll(requestIndex, limit, {
     featured_first: 'false',
     status: 'active',
   });
+
+  if (catalog.status !== 'success') {
+    const message = catalog.message || 'Failed to load fallback feed';
+    feedTelemetry.trackFeedNetworkError({ endpoint: 'catalog', message });
+    throw createFeedRequestError(message, {
+      endpoint: 'catalog',
+      loadOutcome: 'error' as FeedLoadOutcome,
+    });
+  }
 
   return buildCatalogFallbackPage({
     raw: catalog,
@@ -327,6 +386,7 @@ async function loadForYouFeedPage(args: {
 
 export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const isAuthenticated = !!user;
   const userId = isAuthenticated ? user?.id : 'guest';
   const refreshSeed = options.refreshSeed;
@@ -350,12 +410,23 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             refresh: null,
             userPreferences: [],
             cached: false,
+            loadOutcome: 'empty',
           } satisfies FeedPage;
         }
 
         const currentParam = (pageParam as FeedPageParam | undefined) ?? { page: 1 };
         const page = Number(currentParam.page || 1);
         const raw = await postsApi.getFollowing(page, 20);
+
+        if (raw.status !== 'success') {
+          const message = raw.message || 'Failed to load following feed';
+          feedTelemetry.trackFeedNetworkError({ endpoint: 'following', message });
+          throw createFeedRequestError(message, {
+            endpoint: 'following',
+            loadOutcome: 'error' as FeedLoadOutcome,
+          });
+        }
+
         const allPosts = extractPosts(raw).map((post) => ({
           ...post,
           is_following_author: true,
@@ -382,6 +453,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           userPreferences: [],
           cached: false,
           pagination,
+          loadOutcome: 'success',
         };
       }
 
@@ -410,9 +482,12 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
     gcTime: 5 * 60_000,
     retry: 2,
     refetchOnMount: 'always' as const,
+    refetchOnWindowFocus: true,
   });
 
   const firstPage = query.data?.pages[0];
+  const loadOutcome: FeedLoadOutcome = query.isError ? 'error' : firstPage?.loadOutcome ?? 'empty';
+  const errorMessage = query.error instanceof Error ? query.error.message : undefined;
 
   const flattenedPosts = useMemo(
     () => query.data?.pages.flatMap((page) => page.posts) ?? [],
@@ -446,6 +521,41 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
     });
   }, [firstPage?.endpoint, firstPage?.refresh, flattenedPosts, refreshSeed, tab]);
 
+  const endpoint = firstPage?.endpoint ?? (tab === 'following' ? 'following' : isAuthenticated ? 'personalized' : 'public');
+
+  useEffect(() => {
+    if (query.isLoading || query.isRefetching) {
+      return;
+    }
+
+    if (query.isError) {
+      feedTelemetry.trackFeedFirstPageOutcome({
+        endpoint,
+        outcome: 'error',
+        message: errorMessage,
+        postsCount: 0,
+      });
+      return;
+    }
+
+    if (!firstPage || firstPage.requestIndex !== 1) {
+      return;
+    }
+
+    feedTelemetry.trackFeedFirstPageOutcome({
+      endpoint,
+      outcome: firstPage.loadOutcome,
+      message: firstPage.errorMessage,
+      postsCount: firstPage.posts.length,
+    });
+  }, [endpoint, errorMessage, firstPage, query.isError, query.isLoading, query.isRefetching]);
+
+  const hardRefetch = useCallback(async () => {
+    await queryClient.cancelQueries({ queryKey });
+    queryClient.removeQueries({ queryKey });
+    return query.refetch();
+  }, [query, queryClient, queryKey]);
+
   return {
     posts,
     userPreferences: firstPage?.userPreferences ?? [],
@@ -453,6 +563,10 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
     feedPipeline: firstPage?.pipeline,
     feedEndpoint: firstPage?.endpoint === 'following' ? null : firstPage?.endpoint ?? null,
     feedCached: firstPage?.cached ?? false,
+    loadOutcome,
+    errorMessage,
+    queryKey,
+    hardRefetch,
     fetchNextPage: query.fetchNextPage,
     hasNextPage: !!query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,

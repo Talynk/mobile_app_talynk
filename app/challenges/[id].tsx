@@ -66,7 +66,11 @@ import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { useVerticalSnapPager } from '@/lib/hooks/use-vertical-snap-pager';
 import { openFullscreenWithSafeScroll } from '@/lib/utils/fabric-diagnostics';
+import { feedTelemetry } from '@/lib/feed-telemetry';
+import { Post } from '@/types';
 
 const { width: screenWidth } = Dimensions.get('window');
 const FULLSCREEN_HEADER_PX = 64;
@@ -194,6 +198,27 @@ export default function ChallengeDetailScreen() {
     itemVisiblePercentThreshold: 60,
     minimumViewTime: 50,
   }).current;
+  const {
+    pageHeight: fullscreenPageHeight,
+    snapToOffsets: fullscreenSnapToOffsets,
+    getItemLayout: getFullscreenItemLayout,
+    handleScroll: handleFullscreenPagerScroll,
+    handleMomentumScrollEnd: handleFullscreenPagerMomentumEnd,
+  } = useVerticalSnapPager<Post>({
+    itemCount: posts.length,
+    pageHeight: fullscreenAvailableHeight,
+    listRef: fullscreenListRef,
+    screenName: 'challenge-detail-fullscreen',
+    onIndexChanged: (index) => {
+      setFullscreenIndex(index);
+    },
+    onIndexSettled: (index) => {
+      setFullscreenIndex(index);
+    },
+    onTransitionEnd: () => {
+      setIsFullscreenTransitioning(false);
+    },
+  });
 
   useRefetchOnReconnect(() => {
     fetchChallenge({ showLoader: false });
@@ -536,6 +561,32 @@ export default function ChallengeDetailScreen() {
       fetchPosts(options);
     }
   }, [activeTab, participantsFetched, postsFetched, winnersFetched]);
+
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'challenge-detail',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      fetchChallenge({ showLoader: false });
+      handleTabChange(activeTab, { forceRefresh: true });
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'challenge-detail',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      if (showFullscreen) {
+        fullscreenListRef.current?.scrollToOffset({ offset: 0, animated: false });
+        setFullscreenIndex(0);
+      }
+      fetchChallenge({ showLoader: false });
+      handleTabChange(activeTab, { forceRefresh: true });
+    },
+  });
 
   // Initial load when screen mounts or challenge id changes.
   useEffect(() => {
@@ -1888,7 +1939,7 @@ export default function ChallengeDetailScreen() {
                   isActive={isActive}
                   suspendPlayback={isFullscreenTransitioning || commentsModalVisible || reportModalVisible}
                   shouldPreload={shouldPreload}
-                  availableHeight={fullscreenAvailableHeight}
+                  availableHeight={fullscreenPageHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
                   isChallengeEnded={isChallengeEnded}
                   challengeName={challenge?.name}
@@ -1898,8 +1949,7 @@ export default function ChallengeDetailScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            pagingEnabled
-            snapToInterval={fullscreenAvailableHeight}
+            snapToOffsets={fullscreenSnapToOffsets}
             snapToAlignment="start"
             decelerationRate="fast"
             scrollEventThrottle={16}
@@ -1912,17 +1962,10 @@ export default function ChallengeDetailScreen() {
             viewabilityConfig={fullscreenViewabilityConfig}
             onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
-            onMomentumScrollEnd={(event) => {
-              const index = Math.round(event.nativeEvent.contentOffset.y / fullscreenAvailableHeight);
-              setFullscreenIndex(Math.max(0, Math.min(index, sortedPosts.length - 1)));
-              setIsFullscreenTransitioning(false);
-            }}
+            onScroll={handleFullscreenPagerScroll}
+            onMomentumScrollEnd={handleFullscreenPagerMomentumEnd}
             initialScrollIndex={fullscreenIndex}
-            getItemLayout={(_, index) => ({
-              length: fullscreenAvailableHeight,
-              offset: fullscreenAvailableHeight * index,
-              index,
-            })}
+            getItemLayout={getFullscreenItemLayout}
           />
         </SafeAreaView>
       </Modal>

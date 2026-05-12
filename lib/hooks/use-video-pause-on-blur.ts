@@ -8,6 +8,7 @@
  * 4. iOS AVAudioSession deactivation to kill ALL audio at the OS level.
  */
 import { AppState, AppStateStatus, Platform } from 'react-native';
+import { deactivateAudio } from '@/lib/media/audio-session';
 
 type PauseCallback = () => void;
 
@@ -28,18 +29,7 @@ export function registerVideoPauser(cb: PauseCallback): () => void {
  */
 function deactivateAudioSessionIOS(): void {
   if (Platform.OS !== 'ios') return;
-  try {
-    // expo-av's Audio.setAudioModeAsync with staysActiveInBackground:false
-    // ensures the audio session is released when no player is active.
-    const Audio = require('expo-av').Audio;
-    Audio.setAudioModeAsync?.({
-      allowsRecordingIOS: false,
-      staysActiveInBackground: false,
-      playsInSilentModeIOS: false, // Kill audio even in silent mode
-    }).catch(() => {});
-  } catch (_) {
-    // expo-av not available — skip gracefully
-  }
+  void deactivateAudio();
 }
 
 /** Immediately pause ALL registered video players. */

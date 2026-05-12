@@ -4,6 +4,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { Feather } from '@expo/vector-icons';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { enterPlaybackMode } from '@/lib/media/audio-session';
 
 interface VideoPlayerProps {
   source: string | { uri: string };
@@ -63,6 +64,7 @@ export const VideoPlayer = ({
 
     try {
       if (shouldPlay && isAppActive) {
+        void enterPlaybackMode();
         player.play();
       } else {
         player.pause();

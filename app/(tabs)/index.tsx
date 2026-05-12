@@ -11,7 +11,6 @@ import {
   Animated,
   Alert,
   FlatList,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -34,6 +33,8 @@ import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { useNetworkStatus } from '@/lib/hooks/use-network-status';
 import { useAppActive } from '@/lib/hooks/use-app-active';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { useVerticalSnapPager } from '@/lib/hooks/use-vertical-snap-pager';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { runQuerySafely } from '@/lib/utils/query-cancellation';
@@ -144,7 +145,8 @@ export default function FeedScreen() {
     isLoading,
     refetch,
     isRefetching,
-    isError,
+    loadOutcome,
+    errorMessage,
   } = useFeedQuery(feedTab, activeTab === 'challenges'
     ? {}
     : feedTab === 'foryou'
@@ -158,6 +160,81 @@ export default function FeedScreen() {
     () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
     [effectiveRefresh, forYouRefreshSeed, user?.id],
   );
+  const feedQueryOwnerId = user?.id ?? 'guest';
+
+  const resetFeedViewportToTop = useCallback(() => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    currentIndexRef.current = 0;
+    lastActiveIndexRef.current = 0;
+    setCurrentIndex(0);
+  }, []);
+
+  const hardRefreshForYou = useCallback((reason: 'resume' | 'manual' | 'recovery', backgroundDurationMs = 0) => {
+    const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
+    setForYouRecoveryAttempts(0);
+    resetFeedViewportToTop();
+    queryClient.removeQueries({
+      queryKey: ['feed', 'foryou', feedQueryOwnerId],
+    });
+    setForYouRefreshSeed(nextRefreshSeed);
+
+    if (reason === 'manual') {
+      feedTelemetry.trackManualReload({
+        screenName: 'feed:foryou',
+        endpoint: feedEndpoint ?? 'public',
+      });
+    } else {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'feed:foryou',
+        endpoint: feedEndpoint ?? 'public',
+        backgroundDurationMs,
+      });
+    }
+  }, [feedEndpoint, feedQueryOwnerId, forYouRefreshSeed, resetFeedViewportToTop]);
+
+  const hardRefreshFollowing = useCallback((reason: 'resume' | 'manual', backgroundDurationMs = 0) => {
+    const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
+    setFollowingOrderSeed(nextSeed);
+    resetFeedViewportToTop();
+    queryClient.removeQueries({
+      queryKey: ['feed', 'following', feedQueryOwnerId],
+    });
+    void refetch();
+
+    if (reason === 'manual') {
+      feedTelemetry.trackManualReload({
+        screenName: 'feed:following',
+        endpoint: 'following',
+      });
+    } else {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'feed:following',
+        endpoint: 'following',
+        backgroundDurationMs,
+      });
+    }
+  }, [feedQueryOwnerId, followingOrderSeed, refetch, resetFeedViewportToTop]);
+
+  const softRefreshCurrentTab = useCallback((backgroundDurationMs: number) => {
+    if (activeTab === 'following') {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'feed:following',
+        endpoint: 'following',
+        backgroundDurationMs,
+      });
+      void refetch();
+      return;
+    }
+
+    if (activeTab === 'foryou') {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'feed:foryou',
+        endpoint: feedEndpoint ?? 'public',
+        backgroundDurationMs,
+      });
+      void refetch();
+    }
+  }, [activeTab, feedEndpoint, refetch]);
 
   React.useEffect(() => {
     if (__DEV__ && activeTab === 'foryou' && userPreferences.length > 0) {
@@ -228,12 +305,9 @@ export default function FeedScreen() {
 
     const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
     setFollowingOrderSeed(nextSeed);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    currentIndexRef.current = 0;
-    lastActiveIndexRef.current = 0;
-    setCurrentIndex(0);
+    resetFeedViewportToTop();
     void refetch();
-  }, [activeTab, followingOrderSeed, refetch]);
+  }, [activeTab, followingOrderSeed, refetch, resetFeedViewportToTop]);
 
   React.useEffect(() => {
     if (activeTab !== 'foryou' || !isAppActive) {
@@ -249,16 +323,15 @@ export default function FeedScreen() {
     }
 
     const timeout = setTimeout(() => {
-      const nextSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
       setForYouRecoveryAttempts((attempts) => attempts + 1);
-      setForYouRefreshSeed(nextSeed);
+      hardRefreshForYou('recovery');
     }, 350);
 
     return () => clearTimeout(timeout);
   }, [
     activeTab,
     forYouRecoveryAttempts,
-    forYouRefreshSeed,
+    hardRefreshForYou,
     isAppActive,
     isLoading,
     isOffline,
@@ -272,6 +345,48 @@ export default function FeedScreen() {
   const fallbackAvailableHeight = Math.max(0, (safeAreaFrame.height || screenHeight) - headerHeight);
   const availableHeight = feedViewportHeight > 0 ? feedViewportHeight : fallbackAvailableHeight;
   const isFeedViewportReady = activeTab === 'challenges' || availableHeight > 0;
+  const {
+    pageHeight: verticalPageHeight,
+    snapToOffsets,
+    getItemLayout,
+    handleScroll: handlePagerScroll,
+    handleMomentumScrollEnd: handlePagerMomentumScrollEnd,
+  } = useVerticalSnapPager<Post>({
+    itemCount: visiblePosts.length,
+    pageHeight: availableHeight,
+    listRef: flatListRef,
+    screenName: `feed:${activeTab}`,
+    onIndexChanged: (index) => {
+      if (index !== currentIndexRef.current) {
+        pauseAllVideos();
+        currentIndexRef.current = index;
+      }
+    },
+    onIndexSettled: (nextIndex) => {
+      setCurrentIndex(nextIndex);
+      lastActiveIndexRef.current = nextIndex;
+    },
+    onTransitionEnd: () => {
+      setIsFeedTransitioning(false);
+    },
+  });
+
+  useResumeRefresh({
+    enabled: isScreenFocused && activeTab !== 'challenges',
+    onSoftResume: (backgroundDurationMs) => {
+      softRefreshCurrentTab(backgroundDurationMs);
+    },
+    onHardResume: (backgroundDurationMs) => {
+      if (activeTab === 'following') {
+        hardRefreshFollowing('resume', backgroundDurationMs);
+        return;
+      }
+
+      if (activeTab === 'foryou') {
+        hardRefreshForYou('resume', backgroundDurationMs);
+      }
+    },
+  });
 
   useFocusEffect(
     useCallback(() => {
@@ -510,13 +625,9 @@ export default function FeedScreen() {
 
   const handleRefresh = useCallback(async () => {
     if (activeTab === 'following') {
-      const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
       setPullRefreshing(true);
-      setFollowingOrderSeed(nextSeed);
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-      currentIndexRef.current = 0;
-      lastActiveIndexRef.current = 0;
-      setCurrentIndex(0);
+      setFollowingOrderSeed(createNextFeedRefreshSeed(followingOrderSeed));
+      resetFeedViewportToTop();
       await refetch();
       return;
     }
@@ -548,12 +659,9 @@ export default function FeedScreen() {
       }
     }
 
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    currentIndexRef.current = 0;
-    lastActiveIndexRef.current = 0;
-    setCurrentIndex(0);
+    resetFeedViewportToTop();
     setForYouRefreshSeed(nextRefreshSeed);
-  }, [activeTab, feedEndpoint, followingOrderSeed, forYouRefreshSeed, refetch, user]);
+  }, [activeTab, feedEndpoint, followingOrderSeed, forYouRefreshSeed, refetch, resetFeedViewportToTop, user]);
 
   const handleReport = useCallback((postId: string) => {
     if (!user) {
@@ -624,8 +732,7 @@ export default function FeedScreen() {
       data={Array.from({ length: count }, (_, index) => index)}
       keyExtractor={(item) => `skeleton-${item}`}
       renderItem={({ item }) => renderSkeletonItem(item)}
-      pagingEnabled
-      snapToInterval={availableHeight}
+      snapToOffsets={Array.from({ length: count }, (_, index) => index * verticalPageHeight)}
       snapToAlignment="start"
       disableIntervalMomentum
       decelerationRate="fast"
@@ -634,7 +741,7 @@ export default function FeedScreen() {
       alwaysBounceVertical={false}
       scrollEnabled
     />
-  ), [availableHeight, renderSkeletonItem]);
+  ), [renderSkeletonItem, verticalPageHeight]);
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
@@ -668,10 +775,10 @@ export default function FeedScreen() {
         isActive={isActive}
         suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
         shouldPreload={shouldPreload}
-        availableHeight={availableHeight}
+        availableHeight={verticalPageHeight}
       />
     );
-  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, availableHeight]);
+  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
 
   React.useEffect(() => {
     if (activeTab !== 'following' || !user) {
@@ -779,16 +886,10 @@ export default function FeedScreen() {
             <FlatList
               ref={flatListRef}
               data={visiblePosts}
-             
               renderItem={renderItem}
               keyExtractor={(item) => item.id}
-              getItemLayout={(_data, index) => ({
-                length: availableHeight,
-                offset: availableHeight * index,
-                index,
-              })}
-              pagingEnabled
-              snapToInterval={availableHeight}
+              getItemLayout={getItemLayout}
+              snapToOffsets={snapToOffsets}
               snapToAlignment="start"
               disableIntervalMomentum
               decelerationRate="fast"
@@ -812,20 +913,8 @@ export default function FeedScreen() {
               }
               onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
               onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
-              onScroll={(event) => {
-                const y = event.nativeEvent.contentOffset.y;
-                const idx = Math.round(y / availableHeight);
-                if (idx !== currentIndexRef.current) {
-                  pauseAllVideos();
-                  currentIndexRef.current = idx;
-                }
-              }}
-              onMomentumScrollEnd={(event) => {
-                const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
-                setCurrentIndex(nextIndex);
-                lastActiveIndexRef.current = nextIndex;
-                setIsFeedTransitioning(false);
-              }}
+              onScroll={handlePagerScroll}
+              onMomentumScrollEnd={handlePagerMomentumScrollEnd}
               onEndReached={onEndReached}
               onEndReachedThreshold={0.5}
               ListFooterComponent={
@@ -842,26 +931,24 @@ export default function FeedScreen() {
                 isOffline ? (
                   renderScrollableSkeletonFeed()
                 ) : isRefetching || isLoading ? (
-                  <View style={[styles.loadingContainer, { height: availableHeight }]}>
+                  <View style={[styles.loadingContainer, { height: verticalPageHeight }]}>
                     {[1, 2].map((i) => renderSkeletonItem(i))}
                   </View>
                 ) : activeTab === 'foryou' ? (
-                  <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
+                  <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
                     <Feather name="refresh-cw" size={54} color="#60a5fa" />
                     <Text style={styles.emptyText}>
-                      {isError ? 'Feed failed to recover' : 'Refreshing your feed'}
+                      {loadOutcome === 'error' ? 'Feed failed to recover' : 'Refreshing your feed'}
                     </Text>
                     <Text style={styles.emptySubtext}>
-                      {isError
-                        ? 'Tap below to reload posts again.'
+                      {loadOutcome === 'error'
+                        ? errorMessage || 'Tap below to reload posts again.'
                         : 'We are retrying automatically so posts appear again after app reopen.'}
                     </Text>
                     <TouchableOpacity
                       style={styles.emptyLoginButton}
                       onPress={() => {
-                        const nextSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
-                        setForYouRecoveryAttempts(0);
-                        setForYouRefreshSeed(nextSeed);
+                        hardRefreshForYou('manual');
                       }}
                       activeOpacity={0.8}
                     >
@@ -869,7 +956,7 @@ export default function FeedScreen() {
                     </TouchableOpacity>
                   </View>
                 ) : activeTab === 'following' && !user ? (
-                <View style={[styles.emptyContainer, { height: availableHeight - 100 }]}>
+                <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
                   <Feather name="user-plus" size={64} color="#666" />
                   <Text style={styles.emptyText}>
                     Sign in to see posts from people you follow

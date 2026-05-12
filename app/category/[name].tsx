@@ -19,12 +19,14 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { categoriesApi, postsApi } from '@/lib/api';
 import { setExplorePostsCache } from '@/lib/explore-posts-cache';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { Post } from '@/types';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const POSTS_PER_PAGE = 24;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -106,6 +108,7 @@ export default function CategoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadVersionRef = useRef(0);
+  const postsListRef = useRef<FlatList<Post>>(null);
 
   const { data: categoriesData, isLoading: categoryLoading } = useQuery({
     queryKey: ['categories'],
@@ -262,6 +265,27 @@ export default function CategoryScreen() {
     void loadCategoryPosts(true);
   }, [loadCategoryPosts]);
 
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'category',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      void loadCategoryPosts(true);
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'category',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      postsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      void loadCategoryPosts(true);
+    },
+  });
+
   const handlePostPress = useCallback(
     (postId: string) => {
       setExplorePostsCache(posts);
@@ -332,6 +356,7 @@ export default function CategoryScreen() {
       </View>
 
       <FlatList
+        ref={postsListRef}
         data={posts}
         renderItem={renderGridItem}
         keyExtractor={(item) => item.id}

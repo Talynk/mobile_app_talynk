@@ -4,6 +4,7 @@ export const FEED_LOAD_MORE_PAGE_SIZE = 10;
 
 export const FEED_INTEGRATION_CONFIG = {
   enableSeenResetOnPullToRefresh: false,
+  enableCatalogFeedFallback: false,
 } as const;
 
 export function createFeedRefreshSeed(now = Date.now()) {

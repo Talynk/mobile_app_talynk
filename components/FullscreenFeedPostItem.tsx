@@ -38,7 +38,11 @@ import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibil
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
+import { enterPlaybackMode } from '@/lib/media/audio-session';
+import { feedTelemetry } from '@/lib/feed-telemetry';
+import { disableVideoProxyForSession } from '@/lib/utils/video-proxy-state';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+let mountedFeedPlayerCount = 0;
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -150,6 +154,9 @@ type NativeFeedVideoProps = {
   contentFit: 'contain' | 'cover' | 'fill';
   isMuted: boolean;
   shouldPlay: boolean;
+  postId: string;
+  screenName: string;
+  sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
   onFirstFrameRender: () => void;
   onStatusChange: (event: { status?: string; error?: unknown }) => void;
   onPlayingChange: (isPlaying: boolean) => void;
@@ -194,6 +201,9 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       contentFit,
       isMuted,
       shouldPlay,
+      postId,
+      screenName,
+      sourceMode,
       onFirstFrameRender,
       onStatusChange,
       onPlayingChange,
@@ -217,19 +227,29 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         instance.muted = true;
         instance.staysActiveInBackground = false;
         instance.timeUpdateEventInterval = 0.25;
+        try {
+          (instance as any).audioMixingMode = 'doNotMix';
+        } catch (_) {}
         if (Platform.OS === 'android') {
           try {
             instance.bufferOptions = {
-              preferredForwardBufferDuration: 180,
-              minBufferForPlayback: 3,
-              maxBufferBytes: 128 * 1024 * 1024,
+              preferredForwardBufferDuration: 8,
+              minBufferForPlayback: 1,
+              maxBufferBytes: 0,
               prioritizeTimeOverSizeThreshold: true,
             } as any;
           } catch (_) {
-            (instance as any).preferredForwardBufferDuration = 180;
+            (instance as any).preferredForwardBufferDuration = 8;
           }
         } else {
-          (instance as any).preferredForwardBufferDuration = 8;
+          try {
+            instance.bufferOptions = {
+              preferredForwardBufferDuration: 0,
+              waitsToMinimizeStalling: false,
+            } as any;
+          } catch (_) {
+            (instance as any).preferredForwardBufferDuration = 0;
+          }
         }
         // Don't auto-play — wait for the shouldPlay effect
         if (!shouldPlay) {
@@ -245,6 +265,22 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         onPlayerReady();
       } else {
         onPlayerInvalid();
+      }
+
+      if (player) {
+        mountedFeedPlayerCount += 1;
+        feedTelemetry.trackActiveFeedPlayers({
+          count: mountedFeedPlayerCount,
+          postId,
+          screenName,
+        });
+        if (__DEV__ && mountedFeedPlayerCount > 1) {
+          console.warn('[FeedVideo] More than one fullscreen player mounted', {
+            mountedFeedPlayerCount,
+            postId,
+            screenName,
+          });
+        }
       }
 
       const unregister = player
@@ -263,6 +299,12 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       return () => {
         unregister?.();
         if (player) {
+          mountedFeedPlayerCount = Math.max(0, mountedFeedPlayerCount - 1);
+          feedTelemetry.trackActiveFeedPlayers({
+            count: mountedFeedPlayerCount,
+            postId,
+            screenName,
+          });
           try {
             player.muted = true;
             player.pause();
@@ -273,7 +315,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         }
         onPlayerInvalid();
       };
-    }, [onPlayerInvalid, onPlayerReady, player]);
+    }, [onPlayerInvalid, onPlayerReady, player, postId, screenName]);
 
     React.useEffect(() => {
       if (!player) return;
@@ -455,7 +497,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   isFollowStateReady = true,
   isActive,
   suspendPlayback = false,
-  shouldPreload,
   availableHeight,
   showReportButton = true,
   likesDuringChallenge,
@@ -521,6 +562,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const thumbnailOpacity = useRef(new Animated.Value(1)).current;
   const playbackStatusRef = useRef<'idle' | 'loading' | 'readyToPlay' | 'error'>('idle');
   const lastPlaybackTimeRef = useRef(0);
+  const firstPlaybackRequestedAtRef = useRef<number | null>(null);
+  const stallCountRef = useRef(0);
   // Animated value that drives the progress bar fill + thumb visually.
   // During drag we update this directly (no setState → no re-render lag).
   // When not dragging it mirrors the videoProgress state.
@@ -569,14 +612,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
-  const declaredVideoDuration =
-    Number((item as any).video_duration ?? (item as any).duration ?? (item as any).durationSeconds ?? 0) || 0;
-  const isLongFormVideo = declaredVideoDuration >= 60;
   const shouldLoadVideo =
     isVideo &&
     hlsReady &&
     isAppActive &&
-    (isActive || (shouldPreload && !isLongFormVideo)) &&
+    isActive &&
     !videoError;
   const directVideoPlayerSource = playbackUrl
     ? {
@@ -589,6 +629,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     shouldLoadVideo && playbackUrl
       ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
       : null;
+  const videoPlayerSourceUri =
+    typeof videoPlayerSource === 'string'
+      ? videoPlayerSource
+      : (typeof (videoPlayerSource as any)?.uri === 'string' ? (videoPlayerSource as any).uri : '');
+  const videoSourceMode = Platform.OS === 'android'
+    ? 'android_cache'
+    : videoPlayerSourceUri.includes('127.0.0.1:9000')
+      ? 'ios_proxy'
+      : 'direct';
+  const screenName = 'fullscreen-feed-post';
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
   const fallbackImageUrl =
@@ -683,7 +733,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
+    firstPlaybackRequestedAtRef.current = null;
+    stallCountRef.current = 0;
   }, [item.id]);
+
+  useEffect(() => {
+    if (!isVideo || !isActive || !isAppActive || suspendPlayback) {
+      return;
+    }
+
+    void enterPlaybackMode();
+  }, [isActive, isAppActive, isVideo, suspendPlayback]);
 
   useEffect(() => {
     if (!shouldLoadVideo) {
@@ -739,6 +799,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       retryCount: videoMountRetryCountRef.current,
       isActive,
       appActive: isAppActive,
+      sourceMode: videoSourceMode,
     });
     handleNativePlayerInvalid();
     if (isMountedRef.current) {
@@ -753,6 +814,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
+      if (videoSourceMode === 'ios_proxy') {
+        disableVideoProxyForSession();
+      }
       setPreferDirectVideoSource(true);
       setVideoMountBoundaryKey((prev) => prev + 1);
       setCanMountVideoPlayer(true);
@@ -770,6 +834,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           retryCount: videoMountRetryCountRef.current,
           isActive,
           appActive: isAppActive,
+          sourceMode: videoSourceMode,
         },
         'warning',
       );
@@ -784,7 +849,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setVideoMountBoundaryKey((prev) => prev + 1);
       setCanMountVideoPlayer(true);
     }, 450);
-  }, [handleNativePlayerInvalid, shouldLoadVideo, item.id, index, isActive, isAppActive, preferDirectVideoSource]);
+  }, [handleNativePlayerInvalid, shouldLoadVideo, item.id, index, isActive, isAppActive, preferDirectVideoSource, videoSourceMode]);
 
   const handleNativePlayingChange = useCallback((nextPlaying: boolean) => {
     if (isMountedRef.current) {
@@ -813,10 +878,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         shouldLoadVideo,
         isActive,
         appActive: isAppActive,
+        sourceMode: videoSourceMode,
+        currentTime: lastPlaybackTimeRef.current,
       });
       setIsPlaying(false);
       setVideoReady(false);
       if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
+        if (videoSourceMode === 'ios_proxy') {
+          disableVideoProxyForSession();
+        }
         setPreferDirectVideoSource(true);
         setVideoMountBoundaryKey((prev) => prev + 1);
         setCanMountVideoPlayer(true);
@@ -829,7 +899,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setDecoderErrorDetected(false);
       setVideoReady(true);
     }
-  }, [item.id, index, shouldLoadVideo, isActive, isAppActive, preferDirectVideoSource]);
+  }, [item.id, index, shouldLoadVideo, isActive, isAppActive, preferDirectVideoSource, videoSourceMode]);
 
   const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
     if (!isMountedRef.current) {
@@ -855,6 +925,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
     setVideoReady(true);
   }, []);
+
+  useEffect(() => {
+    if (shouldLoadVideo && firstPlaybackRequestedAtRef.current === null) {
+      firstPlaybackRequestedAtRef.current = Date.now();
+      feedTelemetry.trackVideoSourceMode({
+        mode: videoSourceMode,
+        postId: item.id,
+        screenName,
+      });
+    }
+  }, [item.id, screenName, shouldLoadVideo, videoSourceMode]);
 
   useEffect(() => {
     const controller = videoControllerRef.current;
@@ -952,8 +1033,24 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (!isMountedRef.current || videoReady || videoError) {
         return;
       }
+      stallCountRef.current += 1;
+      feedTelemetry.trackVideoStall({
+        postId: item.id,
+        screenName,
+        count: stallCountRef.current,
+      });
+      addFabricBreadcrumb('feed_video_stall_retry', {
+        postId: item.id,
+        retryCount,
+        sourceMode: videoSourceMode,
+        status: playbackStatusRef.current,
+        currentTime: lastPlaybackTimeRef.current,
+      });
       setRetryCount((prev) => prev + 1);
       if (Platform.OS === 'ios' && !preferDirectVideoSource && retryCount >= 1) {
+        if (videoSourceMode === 'ios_proxy') {
+          disableVideoProxyForSession();
+        }
         setPreferDirectVideoSource(true);
       }
       // Only bump the boundary key. React's key reconciliation unmounts the
@@ -965,7 +1062,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }, delay);
 
     return () => clearTimeout(timeoutId);
-  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource]);
+  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource, item.id, screenName, videoSourceMode]);
 
   const handleTapToPause = useCallback((e?: any) => {
     // Only pause/play when tapping the CENTER of the screen.
@@ -1157,8 +1254,21 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       contentFit={mediaContentFit}
                       isMuted={isMuted}
                       shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}
+                      postId={item.id}
+                      screenName={screenName}
+                      sourceMode={videoSourceMode}
                       onFirstFrameRender={() => {
                         setVideoReady(true);
+                        const firstRequestedAt = firstPlaybackRequestedAtRef.current;
+                        if (firstRequestedAt) {
+                          feedTelemetry.trackVideoTimeToFirstFrame({
+                            postId: item.id,
+                            screenName,
+                            sourceMode: videoSourceMode,
+                            durationMs: Math.max(0, Date.now() - firstRequestedAt),
+                          });
+                          firstPlaybackRequestedAtRef.current = null;
+                        }
                         // Kick-start playback asynchronously — calling play() synchronously
                         // inside the native callback can race with player teardown on iOS.
                         setTimeout(() => {

@@ -17,7 +17,7 @@ function getSourceKey(source?: string): string {
 }
 
 function isConnectivitySource(source?: string): boolean {
-  return source === 'api-client' || source === 'offline-probe';
+  return source === 'api-client' || source === 'offline-probe' || source === 'netinfo';
 }
 
 function clearPendingTimer(source: string) {

@@ -33,6 +33,8 @@ import { getExplorePostsCache, setExplorePostsCache } from '@/lib/explore-posts-
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { createFeedRefreshSeed } from '@/lib/feed-config';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const EXPLORE_PAGE_LIMIT = 24;
@@ -399,6 +401,29 @@ export default function ExploreScreen() {
       setGridLoading(false);
     }
   };
+
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'explore',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      loadInitialContent();
+      void loadGridPosts(1, true);
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'explore',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      gridListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      loadInitialContent();
+      void loadGridPosts(1, true);
+    },
+  });
 
   const performSearch = async () => {
     if (!deferredSearchQuery.trim()) return;

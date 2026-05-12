@@ -49,6 +49,8 @@ import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getProfileFeedLaunchCache } from '@/lib/profile-feed-launch-cache';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { useVerticalSnapPager } from '@/lib/hooks/use-vertical-snap-pager';
 import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import {
@@ -63,6 +65,7 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { safeScrollToIndex } from '@/lib/utils/fabric-diagnostics';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -650,6 +653,61 @@ function ProfileFeedContent({
     setInitialScrollDone(false);
     loadPosts(1, true);
   };
+  const {
+    pageHeight: verticalPageHeight,
+    snapToOffsets,
+    getItemLayout,
+    handleScroll: handlePagerScroll,
+    handleMomentumScrollEnd: handlePagerMomentumScrollEnd,
+  } = useVerticalSnapPager<Post>({
+    itemCount: posts.length,
+    pageHeight: availableHeight,
+    listRef: flatListRef,
+    screenName: 'profile-feed',
+    onIndexChanged: (index) => {
+      if (index !== currentIndexRef.current) {
+        pauseAllVideos();
+        currentIndexRef.current = index;
+      }
+    },
+    onIndexSettled: (nextIndex) => {
+      setCurrentIndex(nextIndex);
+      lastActiveIndexRef.current = nextIndex;
+    },
+    onTransitionEnd: () => {
+      setIsFeedTransitioning(false);
+    },
+  });
+
+  useResumeRefresh({
+    enabled: isScreenFocused,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'profile-feed',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      setCurrentPage(1);
+      setHasMore(true);
+      setInitialScrollDone(false);
+      void loadPosts(1, true);
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'profile-feed',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      currentIndexRef.current = 0;
+      lastActiveIndexRef.current = 0;
+      setCurrentIndex(0);
+      setCurrentPage(1);
+      setHasMore(true);
+      setInitialScrollDone(false);
+      void loadPosts(1, true);
+    },
+  });
 
   const handleLike = async (postId: string) => {
     if (!user) {
@@ -862,7 +920,7 @@ function ProfileFeedContent({
                 isActive={isActive}
                 suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
                 shouldPreload={shouldPreload}
-                availableHeight={availableHeight}
+                availableHeight={verticalPageHeight}
                 showReportButton={!isOwnProfile}
                 bottomFooterHeight={fullscreenFooterHeight}
                 showBottomFooter
@@ -873,9 +931,8 @@ function ProfileFeedContent({
             // Ensure unique keys - use id if available, fallback to index
             return item.id ? `post-${item.id}` : `post-${index}`;
           }}
-          pagingEnabled
           showsVerticalScrollIndicator={false}
-          snapToInterval={availableHeight}
+          snapToOffsets={snapToOffsets}
           snapToAlignment="start"
           decelerationRate="fast"
           scrollEventThrottle={16}
@@ -884,11 +941,7 @@ function ProfileFeedContent({
           initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
           maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
           removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
-          getItemLayout={(data, index) => ({
-            length: availableHeight,
-            offset: availableHeight * index,
-            index,
-          })}
+          getItemLayout={getItemLayout}
           extraData={posts.length}
           refreshControl={
             <RefreshControl
@@ -900,20 +953,8 @@ function ProfileFeedContent({
           }
           onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
           onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
-          onScroll={(event) => {
-            const y = event.nativeEvent.contentOffset.y;
-            const idx = Math.round(y / availableHeight);
-            if (idx !== currentIndexRef.current) {
-              pauseAllVideos();
-              currentIndexRef.current = idx;
-            }
-          }}
-          onMomentumScrollEnd={(event) => {
-            const nextIndex = Math.round(event.nativeEvent.contentOffset.y / availableHeight);
-            setCurrentIndex(nextIndex);
-            lastActiveIndexRef.current = nextIndex;
-            setIsFeedTransitioning(false);
-          }}
+          onScroll={handlePagerScroll}
+          onMomentumScrollEnd={handlePagerMomentumScrollEnd}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           onEndReached={loadMorePosts}

@@ -9,8 +9,9 @@ import { StatusBar } from 'expo-status-bar';
 import { LogBox, AppState, AppStateStatus, View, Image, ActivityIndicator, Animated, Modal, Text, TouchableOpacity, StyleSheet as RNStyleSheet, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { setVideoCacheSizeAsync } from 'expo-video';
+import NetInfo from '@react-native-community/netinfo';
 
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
 import { AuthProvider } from '@/lib/auth-context';
 import { CacheProvider } from '@/lib/cache-context';
@@ -225,6 +226,53 @@ function RootLayoutNav() {
     UploadNotificationService.getInstance().requestPermissions().catch(err => {
       console.warn('Failed to ask for notification permissions on startup', err);
     });
+  }, []);
+
+  useEffect(() => {
+    const syncFocus = (state: AppStateStatus) => {
+      focusManager.setFocused(state === 'active');
+    };
+
+    syncFocus(AppState.currentState);
+    const subscription = AppState.addEventListener('change', syncFocus);
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      const isOnline = Boolean(state.isConnected) && state.isInternetReachable !== false;
+      onlineManager.setOnline(isOnline);
+
+      if (isOnline) {
+        networkStatus.reportOnline({ source: 'netinfo' });
+      } else {
+        networkStatus.reportOffline({
+          source: 'netinfo',
+          immediate: true,
+          message: 'Device connectivity is unavailable',
+        });
+      }
+    });
+
+    void NetInfo.fetch().then((state) => {
+      const isOnline = Boolean(state.isConnected) && state.isInternetReachable !== false;
+      onlineManager.setOnline(isOnline);
+      if (isOnline) {
+        networkStatus.reportOnline({ source: 'netinfo' });
+      } else {
+        networkStatus.reportOffline({
+          source: 'netinfo',
+          immediate: true,
+          message: 'Device connectivity is unavailable',
+        });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

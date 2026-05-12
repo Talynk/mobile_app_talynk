@@ -496,7 +496,7 @@ export const postsApi = {
     } catch (error: any) {
       return {
         status: 'error',
-        message: 'Failed to fetch posts',
+        message: error.response?.data?.message || error.message || 'Failed to fetch posts',
         data: { posts: [], pagination: {}, filters: {} },
       };
     }
@@ -569,13 +569,10 @@ export const postsApi = {
       const isNetwork = isNetworkError(error);
       const errorMessage = getErrorMessage(error, 'Failed to fetch following posts');
 
-      // Handle network errors gracefully - return empty result instead of error
       if (isNetwork) {
-        // Silently handle network errors
-        // Return empty result for network errors so UI doesn't break
         return {
-          status: 'success',
-          message: 'Unable to load posts. Please check your connection.',
+          status: 'error',
+          message: errorMessage,
           data: { posts: [], pagination: {}, filters: {} },
         };
       }

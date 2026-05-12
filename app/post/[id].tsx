@@ -40,6 +40,7 @@ import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingFeedCache } from '@/lib/following-feed-cache';
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
+import { enterPlaybackMode } from '@/lib/media/audio-session';
 
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
@@ -365,6 +366,7 @@ export default function PostDetailScreen() {
     useCallback(() => {
       if (videoPlayer) {
         try {
+          void enterPlaybackMode();
           videoPlayer.muted = isMuted;
           videoPlayer.play();
         } catch { }
@@ -384,6 +386,7 @@ export default function PostDetailScreen() {
   useEffect(() => {
     if (!videoPlayer) return;
     try {
+      void enterPlaybackMode();
       videoPlayer.play();
     } catch { }
   }, [videoPlayer]);

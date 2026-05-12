@@ -39,7 +39,6 @@ import {
   useMicrophonePermission as useVisionMicrophonePermission,
 } from 'react-native-vision-camera';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { Audio } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Constants from 'expo-constants';
@@ -67,6 +66,7 @@ import { isChallengeParticipationOpen } from '@/lib/utils/challenge';
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import websocketService from '@/lib/websocket-service';
+import { enterPlaybackMode, enterRecordingMode } from '@/lib/media/audio-session';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLORS = {
@@ -516,12 +516,7 @@ export default function CreatePostScreen() {
         return;
       }
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,
-        });
+        await enterRecordingMode();
         console.log('Audio mode configured for recording');
       } catch (error) {
         console.error('Error configuring audio mode:', error);
@@ -1187,12 +1182,7 @@ export default function CreatePostScreen() {
   const handleRecordVideo = useCallback(async () => {
     try {
       if (Platform.OS === 'ios') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,
-        });
+        await enterRecordingMode();
       }
 
       // Show informative 2-min limit modal first (only for video); user taps "Proceed to record" to open camera
@@ -1673,13 +1663,7 @@ export default function CreatePostScreen() {
       }, (MAX_RECORDING_SECONDS + 1) * 1000);
 
       if (Platform.OS === 'ios') {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,
-          staysActiveInBackground: false,
-        });
+        await enterRecordingMode();
         await new Promise((resolve) => setTimeout(resolve, 160));
       }
 
@@ -2751,12 +2735,7 @@ export default function CreatePostScreen() {
           setIsVideoPlaying(false);
         } else {
           // Ensure audio plays in silent mode on iOS
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: false,
-            playsInSilentModeIOS: true,
-            shouldDuckAndroid: false,
-            playThroughEarpieceAndroid: false,
-          });
+          await enterPlaybackMode();
           previewPlayer.muted = false;
           previewPlayer.play();
           setIsVideoPlaying(true);

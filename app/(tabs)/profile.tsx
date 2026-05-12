@@ -49,6 +49,8 @@ import {
   needsRenderableMediaEnrichment,
 } from '@/lib/utils/post-detail-enrichment';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
+import { feedTelemetry } from '@/lib/feed-telemetry';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -506,6 +508,7 @@ export default function ProfileScreen() {
   });
   const loadPostsRequestIdRef = useRef(0);
   const loadPostsRef = useRef<(showLoading?: boolean) => Promise<void> | void>(() => {});
+  const postsListRef = useRef<FlatList<Post>>(null);
   const loadProfileRef = useRef<(showLoading?: boolean) => Promise<void> | void>(() => {});
   const publishedPostsCountRef = useRef(0);
 
@@ -973,6 +976,27 @@ export default function ProfileScreen() {
     setError(null);
     Promise.all([loadProfile(true), loadPosts(true)]).finally(() => setRefreshing(false));
   };
+
+  useResumeRefresh({
+    enabled: true,
+    onSoftResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeRefetch({
+        screenName: 'profile',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      onRefresh();
+    },
+    onHardResume: (backgroundDurationMs) => {
+      feedTelemetry.trackResumeHardReset({
+        screenName: 'profile',
+        endpoint: 'catalog',
+        backgroundDurationMs,
+      });
+      postsListRef.current?.scrollToOffset({ offset: 0, animated: false });
+      onRefresh();
+    },
+  });
 
   const openBioEditor = useCallback(() => {
     setBioDraft((profile?.bio ?? '').slice(0, 150));
@@ -1506,6 +1530,7 @@ export default function ProfileScreen() {
       </View>
 
       <FlatList
+        ref={postsListRef}
         data={posts}
         renderItem={renderPost}
         keyExtractor={(item) => item.id}
