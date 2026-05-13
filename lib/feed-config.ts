@@ -3,7 +3,7 @@ export const FEED_DEFAULT_PAGE_SIZE = 10;
 export const FEED_LOAD_MORE_PAGE_SIZE = 10;
 
 export const FEED_INTEGRATION_CONFIG = {
-  enableSeenResetOnPullToRefresh: false,
+  enableSeenResetOnPullToRefresh: true,
   enableCatalogFeedFallback: false,
 } as const;
 

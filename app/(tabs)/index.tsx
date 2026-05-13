@@ -53,6 +53,7 @@ import {
   FEED_INTEGRATION_CONFIG,
 } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
+import { captureFabricError } from '@/lib/utils/fabric-diagnostics';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -116,6 +117,7 @@ export default function FeedScreen() {
   const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
   const lastTabRef = useRef<FeedTab>('foryou');
   const didAdvanceForYouSessionRef = useRef(false);
+  const seenResetRecoveryAttemptedRef = useRef(false);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
@@ -171,7 +173,9 @@ export default function FeedScreen() {
 
   const hardRefreshForYou = useCallback((reason: 'resume' | 'manual' | 'recovery', backgroundDurationMs = 0) => {
     const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
-    setForYouRecoveryAttempts(0);
+    if (reason !== 'recovery') {
+      setForYouRecoveryAttempts(0);
+    }
     resetFeedViewportToTop();
     queryClient.removeQueries({
       queryKey: ['feed', 'foryou', feedQueryOwnerId],
@@ -191,6 +195,35 @@ export default function FeedScreen() {
       });
     }
   }, [feedEndpoint, feedQueryOwnerId, forYouRefreshSeed, resetFeedViewportToTop]);
+
+  const resetSeenAndRefreshForYou = useCallback(async (
+    reason: 'manual' | 'recovery',
+    backgroundDurationMs = 0,
+  ) => {
+    const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
+    const resetResponse = user
+      ? await feedApi.resetSeen()
+      : await feedApi.resetSeenGuest();
+
+    if (resetResponse.status === 'success') {
+      feedTelemetry.trackSeenResetCalled({
+        endpoint: user ? 'auth' : 'guest',
+        refresh: nextRefreshSeed,
+      });
+    } else {
+      captureFabricError(
+        new Error(resetResponse.message || 'Failed to reset feed seen history'),
+        'feed_seen_reset_failed',
+        {
+          endpoint: user ? 'personalized' : 'public',
+          reason,
+        },
+        'warning',
+      );
+    }
+
+    hardRefreshForYou(reason, backgroundDurationMs);
+  }, [forYouRefreshSeed, hardRefreshForYou, user]);
 
   const hardRefreshFollowing = useCallback((reason: 'resume' | 'manual', backgroundDurationMs = 0) => {
     const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
@@ -310,12 +343,32 @@ export default function FeedScreen() {
   }, [activeTab, followingOrderSeed, refetch, resetFeedViewportToTop]);
 
   React.useEffect(() => {
+    if (activeTab === 'foryou') {
+      return;
+    }
+
+    seenResetRecoveryAttemptedRef.current = false;
+    setForYouRecoveryAttempts(0);
+  }, [activeTab]);
+
+  React.useEffect(() => {
     if (activeTab !== 'foryou' || !isAppActive) {
       return;
     }
 
     if (isLoading || isRefetching || visiblePosts.length > 0 || isOffline) {
       return;
+    }
+
+    if (loadOutcome === 'empty' && !seenResetRecoveryAttemptedRef.current) {
+      seenResetRecoveryAttemptedRef.current = true;
+      setForYouRecoveryAttempts(1);
+
+      const timeout = setTimeout(() => {
+        void resetSeenAndRefreshForYou('recovery');
+      }, 200);
+
+      return () => clearTimeout(timeout);
     }
 
     if (forYouRecoveryAttempts >= 2) {
@@ -336,6 +389,8 @@ export default function FeedScreen() {
     isLoading,
     isOffline,
     isRefetching,
+    loadOutcome,
+    resetSeenAndRefreshForYou,
     visiblePosts.length,
   ]);
 
@@ -641,6 +696,7 @@ export default function FeedScreen() {
     const nextRefreshSeed = createNextFeedRefreshSeed(forYouRefreshSeed);
     setPullRefreshing(true);
     setForYouRecoveryAttempts(0);
+    seenResetRecoveryAttemptedRef.current = false;
     feedTelemetry.trackPullToRefresh({
       endpoint: feedEndpoint === 'public' ? 'public' : 'personalized',
       refresh: nextRefreshSeed,
@@ -795,6 +851,7 @@ export default function FeedScreen() {
 
   React.useEffect(() => {
     if (visiblePosts.length > 0) {
+      seenResetRecoveryAttemptedRef.current = false;
       setForYouRecoveryAttempts(0);
     }
   }, [visiblePosts.length]);
@@ -930,7 +987,7 @@ export default function FeedScreen() {
               ListEmptyComponent={
                 isOffline ? (
                   renderScrollableSkeletonFeed()
-                ) : isRefetching || isLoading ? (
+                ) : isRefetching || isLoading || (activeTab === 'foryou' && forYouRecoveryAttempts > 0 && forYouRecoveryAttempts < 2) ? (
                   <View style={[styles.loadingContainer, { height: verticalPageHeight }]}>
                     {[1, 2].map((i) => renderSkeletonItem(i))}
                   </View>
@@ -938,17 +995,19 @@ export default function FeedScreen() {
                   <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
                     <Feather name="refresh-cw" size={54} color="#60a5fa" />
                     <Text style={styles.emptyText}>
-                      {loadOutcome === 'error' ? 'Feed failed to recover' : 'Refreshing your feed'}
+                      {loadOutcome === 'error' ? 'Feed failed to recover' : 'No posts available right now'}
                     </Text>
                     <Text style={styles.emptySubtext}>
                       {loadOutcome === 'error'
                         ? errorMessage || 'Tap below to reload posts again.'
-                        : 'We are retrying automatically so posts appear again after app reopen.'}
+                        : 'Reload the feed to fetch posts again.'}
                     </Text>
                     <TouchableOpacity
                       style={styles.emptyLoginButton}
                       onPress={() => {
-                        hardRefreshForYou('manual');
+                        seenResetRecoveryAttemptedRef.current = false;
+                        setForYouRecoveryAttempts(1);
+                        void resetSeenAndRefreshForYou('manual');
                       }}
                       activeOpacity={0.8}
                     >

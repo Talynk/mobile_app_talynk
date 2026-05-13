@@ -17,10 +17,72 @@ type DuplicateRatioTelemetry = {
   uniqueItems: number;
 };
 
+function getSentry() {
+  if (__DEV__) {
+    return null;
+  }
+
+  try {
+    // Lazy-load so telemetry does not affect startup.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('@sentry/react-native');
+  } catch {
+    return null;
+  }
+}
+
+function addFeedBreadcrumb(
+  event: string,
+  payload: Record<string, unknown>,
+  level: 'debug' | 'info' | 'warning' | 'error' = 'info',
+) {
+  const Sentry = getSentry();
+  if (!Sentry) {
+    return;
+  }
+
+  try {
+    Sentry.addBreadcrumb({
+      category: 'feed',
+      level,
+      message: event,
+      data: payload,
+    });
+  } catch {
+    // Best-effort only.
+  }
+}
+
+function captureFeedMessage(
+  event: string,
+  payload: Record<string, unknown>,
+  level: 'info' | 'warning' | 'error' = 'info',
+) {
+  const Sentry = getSentry();
+  if (!Sentry) {
+    return;
+  }
+
+  try {
+    Sentry.captureMessage(event, {
+      level,
+      tags: {
+        area: 'feed',
+        event,
+      },
+      extra: payload,
+    });
+  } catch {
+    // Best-effort only.
+  }
+}
+
 function logTelemetry(event: string, payload: Record<string, unknown>) {
   if (__DEV__) {
     console.log(`[FeedTelemetry] ${event}`, payload);
   }
+
+  addFeedBreadcrumb(event, payload);
 }
 
 export const feedTelemetry = {
@@ -85,12 +147,18 @@ export const feedTelemetry = {
     postsCount?: number;
   }) {
     logTelemetry('feed_first_page_outcome', payload);
+    if (payload.outcome === 'empty') {
+      captureFeedMessage('feed_empty_first_page', payload, 'warning');
+    } else if (payload.outcome === 'error') {
+      captureFeedMessage('feed_first_page_error', payload, 'error');
+    }
   },
   trackFeedNetworkError(payload: {
     endpoint?: FeedEndpoint;
     message: string;
   }) {
     logTelemetry('feed_network_error', payload);
+    captureFeedMessage('feed_network_error', payload, 'error');
   },
   trackManualReload(payload: {
     screenName: string;

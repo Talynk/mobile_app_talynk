@@ -166,6 +166,13 @@ type NativeFeedVideoProps = {
   onPlayerInvalid: () => void;
 };
 
+type FeedVideoPreloaderProps = {
+  source: any;
+  sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
+  postId: string;
+  screenName: string;
+};
+
 class VideoMountBoundary extends React.Component<
   { boundaryKey: string; onError: () => void; children: React.ReactNode },
   { hasError: boolean }
@@ -454,6 +461,78 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
 
 NativeFeedVideo.displayName = 'NativeFeedVideo';
 
+const FeedVideoPreloader: React.FC<FeedVideoPreloaderProps> = ({
+  source,
+  sourceMode,
+  postId,
+  screenName,
+}) => {
+  const player = useVideoPlayer(source, (instance) => {
+    if (!instance) {
+      return;
+    }
+
+    try {
+      instance.loop = false;
+      instance.muted = true;
+      instance.staysActiveInBackground = false;
+      try {
+        (instance as any).audioMixingMode = 'doNotMix';
+      } catch (_) {}
+
+      if (Platform.OS === 'android') {
+        try {
+          instance.bufferOptions = {
+            preferredForwardBufferDuration: 8,
+            minBufferForPlayback: 1,
+            maxBufferBytes: 0,
+            prioritizeTimeOverSizeThreshold: true,
+          } as any;
+        } catch (_) {
+          (instance as any).preferredForwardBufferDuration = 8;
+        }
+      } else {
+        try {
+          instance.bufferOptions = {
+            preferredForwardBufferDuration: 0,
+            waitsToMinimizeStalling: false,
+          } as any;
+        } catch (_) {
+          (instance as any).preferredForwardBufferDuration = 0;
+        }
+      }
+
+      instance.pause();
+    } catch (_) {}
+  });
+
+  React.useEffect(() => {
+    if (!player) {
+      return;
+    }
+
+    feedTelemetry.trackVideoSourceMode({
+      mode: sourceMode,
+      postId,
+      screenName: `${screenName}:preload`,
+    });
+
+    try {
+      player.muted = true;
+      player.pause();
+    } catch (_) {}
+
+    return () => {
+      try {
+        player.muted = true;
+        player.pause();
+      } catch (_) {}
+    };
+  }, [player, postId, screenName, sourceMode]);
+
+  return null;
+};
+
 export interface FullscreenFeedPostItemProps {
   item: Post;
   index: number;
@@ -618,6 +697,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isAppActive &&
     isActive &&
     !videoError;
+  const shouldPrewarmVideo =
+    isVideo &&
+    hlsReady &&
+    isAppActive &&
+    shouldPreload &&
+    !isActive &&
+    !videoError;
   const directVideoPlayerSource = playbackUrl
     ? {
         uri: playbackUrl,
@@ -628,6 +714,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const videoPlayerSource =
     shouldLoadVideo && playbackUrl
       ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
+      : null;
+  const videoPreloadSource =
+    shouldPrewarmVideo && playbackUrl
+      ? (Platform.OS === 'ios' ? directVideoPlayerSource : getVideoSource(playbackUrl))
       : null;
   const videoPlayerSourceUri =
     typeof videoPlayerSource === 'string'
@@ -990,7 +1080,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           duration: 200,
           useNativeDriver: true,
         }).start();
-      }, 350);
+      }, 80);
       return () => clearTimeout(timerId);
     } else {
       thumbnailOpacity.setValue(1);
@@ -1233,6 +1323,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
+            {!shouldLoadVideo && videoPreloadSource ? (
+              <FeedVideoPreloader
+                source={videoPreloadSource}
+                sourceMode={Platform.OS === 'android' ? 'android_cache' : 'direct'}
+                postId={item.id}
+                screenName={screenName}
+              />
+            ) : null}
             <Pressable style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]} onPress={(e) => handleTapToPause(e)}>
               {thumbnailOrPlaceholderUrl ? (
                 <Animated.Image
