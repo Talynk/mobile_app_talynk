@@ -576,6 +576,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   isFollowStateReady = true,
   isActive,
   suspendPlayback = false,
+  shouldPreload,
   availableHeight,
   showReportButton = true,
   likesDuringChallenge,
