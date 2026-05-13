@@ -17,7 +17,7 @@ import {
   PanResponder,
   Modal,
 } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { VideoView, type VideoPlayer } from 'expo-video';
 import { router } from 'expo-router';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
@@ -41,6 +41,11 @@ import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diag
 import { enterPlaybackMode } from '@/lib/media/audio-session';
 import { feedTelemetry } from '@/lib/feed-telemetry';
 import { disableVideoProxyForSession } from '@/lib/utils/video-proxy-state';
+import {
+  acquireFeedVideoPlayer,
+  createFeedVideoPlayerKey,
+  prewarmFeedVideoPlayer,
+} from '@/lib/feed-video-player-pool';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
 
@@ -150,7 +155,7 @@ type NativeFeedVideoHandle = {
 };
 
 type NativeFeedVideoProps = {
-  source: any;
+  player: VideoPlayer | null;
   contentFit: 'contain' | 'cover' | 'fill';
   isMuted: boolean;
   shouldPlay: boolean;
@@ -164,13 +169,6 @@ type NativeFeedVideoProps = {
   onPlayToEnd: () => void;
   onPlayerReady: () => void;
   onPlayerInvalid: () => void;
-};
-
-type FeedVideoPreloaderProps = {
-  source: any;
-  sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
-  postId: string;
-  screenName: string;
 };
 
 class VideoMountBoundary extends React.Component<
@@ -204,7 +202,7 @@ class VideoMountBoundary extends React.Component<
 const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoProps>(
   (
     {
-      source,
+      player,
       contentFit,
       isMuted,
       shouldPlay,
@@ -221,108 +219,74 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
     },
     ref,
   ) => {
-    const player = useVideoPlayer(source, (instance) => {
-      if (!instance) {
-        return;
-      }
-
-      try {
-        instance.loop = true;
-        // CRITICAL: Always start MUTED. The shouldPlay effect will unmute
-        // when appropriate. This prevents preloaded videos from ever
-        // leaking audio during player initialization.
-        instance.muted = true;
-        instance.staysActiveInBackground = false;
-        instance.timeUpdateEventInterval = 0.25;
-        try {
-          (instance as any).audioMixingMode = 'doNotMix';
-        } catch (_) {}
-        if (Platform.OS === 'android') {
-          try {
-            instance.bufferOptions = {
-              preferredForwardBufferDuration: 8,
-              minBufferForPlayback: 1,
-              maxBufferBytes: 0,
-              prioritizeTimeOverSizeThreshold: true,
-            } as any;
-          } catch (_) {
-            (instance as any).preferredForwardBufferDuration = 8;
-          }
-        } else {
-          try {
-            instance.bufferOptions = {
-              preferredForwardBufferDuration: 0,
-              waitsToMinimizeStalling: false,
-            } as any;
-          } catch (_) {
-            (instance as any).preferredForwardBufferDuration = 0;
-          }
-        }
-        // Don't auto-play — wait for the shouldPlay effect
-        if (!shouldPlay) {
-          instance.pause();
-        }
-      } catch (e) {
-        console.warn('[FeedVideo] Error configuring player:', e);
-      }
-    });
-
     React.useEffect(() => {
-      if (player) {
-        onPlayerReady();
-      } else {
+      if (!player) {
         onPlayerInvalid();
+        return () => {};
       }
 
-      if (player) {
-        mountedFeedPlayerCount += 1;
+      onPlayerReady();
+      mountedFeedPlayerCount += 1;
+      feedTelemetry.trackActiveFeedPlayers({
+        count: mountedFeedPlayerCount,
+        postId,
+        screenName,
+      });
+      if (__DEV__ && mountedFeedPlayerCount > 1) {
+        console.warn('[FeedVideo] More than one fullscreen player mounted', {
+          mountedFeedPlayerCount,
+          postId,
+          screenName,
+        });
+      }
+
+      const unregister = registerVideoPauser(() => {
+        try {
+          player.muted = true;
+          player.pause();
+          if ((player as any).volume !== undefined) {
+            (player as any).volume = 0;
+          }
+        } catch (_) {}
+      });
+
+      return () => {
+        unregister?.();
+        mountedFeedPlayerCount = Math.max(0, mountedFeedPlayerCount - 1);
         feedTelemetry.trackActiveFeedPlayers({
           count: mountedFeedPlayerCount,
           postId,
           screenName,
         });
-        if (__DEV__ && mountedFeedPlayerCount > 1) {
-          console.warn('[FeedVideo] More than one fullscreen player mounted', {
-            mountedFeedPlayerCount,
-            postId,
-            screenName,
-          });
-        }
-      }
-
-      const unregister = player
-        ? registerVideoPauser(() => {
-            try {
-              player.muted = true;
-              player.pause();
-              // Nuclear fallback: set volume to 0
-              if ((player as any).volume !== undefined) {
-                (player as any).volume = 0;
-              }
-            } catch (_) {}
-          })
-        : undefined;
-
-      return () => {
-        unregister?.();
-        if (player) {
-          mountedFeedPlayerCount = Math.max(0, mountedFeedPlayerCount - 1);
-          feedTelemetry.trackActiveFeedPlayers({
-            count: mountedFeedPlayerCount,
-            postId,
-            screenName,
-          });
-          try {
-            player.muted = true;
-            player.pause();
-            if ((player as any).volume !== undefined) {
-              (player as any).volume = 0;
-            }
-          } catch (_) {}
-        }
+        try {
+          player.muted = true;
+          player.pause();
+          if ((player as any).volume !== undefined) {
+            (player as any).volume = 0;
+          }
+        } catch (_) {}
         onPlayerInvalid();
       };
     }, [onPlayerInvalid, onPlayerReady, player, postId, screenName]);
+
+    React.useEffect(() => {
+      if (!player) {
+        return;
+      }
+
+      try {
+        player.loop = true;
+        player.muted = true;
+        player.staysActiveInBackground = false;
+        player.timeUpdateEventInterval = 0.25;
+        try {
+          (player as any).audioMixingMode = 'doNotMix';
+        } catch (_) {}
+        if (!shouldPlay) {
+          player.pause();
+        }
+      } catch (_) {}
+    }, [player, shouldPlay]);
 
     React.useEffect(() => {
       if (!player) return;
@@ -461,78 +425,6 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
 
 NativeFeedVideo.displayName = 'NativeFeedVideo';
 
-const FeedVideoPreloader: React.FC<FeedVideoPreloaderProps> = ({
-  source,
-  sourceMode,
-  postId,
-  screenName,
-}) => {
-  const player = useVideoPlayer(source, (instance) => {
-    if (!instance) {
-      return;
-    }
-
-    try {
-      instance.loop = false;
-      instance.muted = true;
-      instance.staysActiveInBackground = false;
-      try {
-        (instance as any).audioMixingMode = 'doNotMix';
-      } catch (_) {}
-
-      if (Platform.OS === 'android') {
-        try {
-          instance.bufferOptions = {
-            preferredForwardBufferDuration: 8,
-            minBufferForPlayback: 1,
-            maxBufferBytes: 0,
-            prioritizeTimeOverSizeThreshold: true,
-          } as any;
-        } catch (_) {
-          (instance as any).preferredForwardBufferDuration = 8;
-        }
-      } else {
-        try {
-          instance.bufferOptions = {
-            preferredForwardBufferDuration: 0,
-            waitsToMinimizeStalling: false,
-          } as any;
-        } catch (_) {
-          (instance as any).preferredForwardBufferDuration = 0;
-        }
-      }
-
-      instance.pause();
-    } catch (_) {}
-  });
-
-  React.useEffect(() => {
-    if (!player) {
-      return;
-    }
-
-    feedTelemetry.trackVideoSourceMode({
-      mode: sourceMode,
-      postId,
-      screenName: `${screenName}:preload`,
-    });
-
-    try {
-      player.muted = true;
-      player.pause();
-    } catch (_) {}
-
-    return () => {
-      try {
-        player.muted = true;
-        player.pause();
-      } catch (_) {}
-    };
-  }, [player, postId, screenName, sourceMode]);
-
-  return null;
-};
-
 export interface FullscreenFeedPostItemProps {
   item: Post;
   index: number;
@@ -613,6 +505,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const videoControllerRef = useRef<NativeFeedVideoHandle | null>(null);
   const videoMountRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoMountRetryCountRef = useRef(0);
+  const [managedPlayer, setManagedPlayer] = useState<VideoPlayer | null>(null);
   const [isPlayerValid, setIsPlayerValid] = useState(false);
   const [canMountVideoPlayer, setCanMountVideoPlayer] = useState(false);
   const [videoMountBoundaryKey, setVideoMountBoundaryKey] = useState(0);
@@ -698,13 +591,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isAppActive &&
     isActive &&
     !videoError;
-  const shouldPrewarmVideo =
-    isVideo &&
-    hlsReady &&
-    isAppActive &&
-    shouldPreload &&
-    !isActive &&
-    !videoError;
+  const shouldPrewarmVideo = isVideo && hlsReady && isAppActive && shouldPreload && !isActive && !videoError;
   const directVideoPlayerSource = playbackUrl
     ? {
         uri: playbackUrl,
@@ -712,23 +599,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         ...(playbackUrl.toLowerCase().includes('.m3u8') ? { contentType: 'hls' as const } : {}),
       }
     : null;
-  const videoPlayerSource =
-    shouldLoadVideo && playbackUrl
+  const resolvedVideoSource =
+    playbackUrl
       ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
       : null;
-  const videoPreloadSource =
-    shouldPrewarmVideo && playbackUrl
-      ? (Platform.OS === 'ios' ? directVideoPlayerSource : getVideoSource(playbackUrl))
-      : null;
   const videoPlayerSourceUri =
-    typeof videoPlayerSource === 'string'
-      ? videoPlayerSource
-      : (typeof (videoPlayerSource as any)?.uri === 'string' ? (videoPlayerSource as any).uri : '');
+    typeof resolvedVideoSource === 'string'
+      ? resolvedVideoSource
+      : (typeof (resolvedVideoSource as any)?.uri === 'string' ? (resolvedVideoSource as any).uri : '');
   const videoSourceMode = Platform.OS === 'android'
     ? 'android_cache'
     : videoPlayerSourceUri.includes('127.0.0.1:9000')
       ? 'ios_proxy'
       : 'direct';
+  const videoPoolKey = resolvedVideoSource ? createFeedVideoPlayerKey(item.id, resolvedVideoSource) : null;
   const screenName = 'fullscreen-feed-post';
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
@@ -798,12 +682,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [isActive, suspendPlayback, isAppActive, pausedByUser, decoderErrorDetected]);
 
   useEffect(() => {
-    if (!videoPlayerSource) {
+    if (!managedPlayer) {
       playerValidRef.current = false;
       videoControllerRef.current = null;
       if (isMountedRef.current) setIsPlayerValid(false);
     }
-  }, [videoPlayerSource]);
+  }, [managedPlayer]);
 
   useEffect(() => {
     setImageError(false);
@@ -839,33 +723,36 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   useEffect(() => {
     if (!shouldLoadVideo) {
       setCanMountVideoPlayer(false);
+      setManagedPlayer(null);
       playerValidRef.current = false;
       videoControllerRef.current = null;
       if (isMountedRef.current) {
         setIsPlayerValid(false);
       }
+    }
+  }, [shouldLoadVideo]);
+
+  useEffect(() => {
+    if (!videoPoolKey || !resolvedVideoSource) {
       return;
     }
 
-    let cancelled = false;
-    let frameId = 0;
+    if (shouldLoadVideo) {
+      const lease = acquireFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
+      setManagedPlayer(lease.player);
+      setCanMountVideoPlayer(true);
 
-    // Mount video players immediately for preloaded items (no
-    // InteractionManager delay) so HLS manifests start fetching
-    // right away. Only use requestAnimationFrame to batch.
-    frameId = requestAnimationFrame(() => {
-      if (!cancelled) {
-        setCanMountVideoPlayer(true);
-      }
-    });
+      return () => {
+        lease.release();
+      };
+    }
 
-    return () => {
-      cancelled = true;
-      if (frameId) {
-        cancelAnimationFrame(frameId);
-      }
-    };
-  }, [item.id, shouldLoadVideo]);
+    if (shouldPrewarmVideo) {
+      return prewarmFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
+    }
+
+    return;
+  }, [resolvedVideoSource, shouldLoadVideo, shouldPrewarmVideo, videoPoolKey]);
 
   const handleNativePlayerReady = useCallback(() => {
     playerValidRef.current = true;
@@ -1324,14 +1211,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       <View style={[styles.mediaContainer, { height: availableHeight, width: screenWidth }]}>
         {isVideo ? (
           <>
-            {!shouldLoadVideo && videoPreloadSource ? (
-              <FeedVideoPreloader
-                source={videoPreloadSource}
-                sourceMode={Platform.OS === 'android' ? 'android_cache' : 'direct'}
-                postId={item.id}
-                screenName={screenName}
-              />
-            ) : null}
             <Pressable style={[styles.mediaWrapper, isAd && styles.adMediaWrapper]} onPress={(e) => handleTapToPause(e)}>
               {thumbnailOrPlaceholderUrl ? (
                 <Animated.Image
@@ -1341,7 +1220,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 />
               ) : null}
 
-              {canMountVideoPlayer && shouldLoadVideo && !videoError && videoPlayerSource && (
+              {canMountVideoPlayer && shouldLoadVideo && !videoError && managedPlayer && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
                   <VideoMountBoundary
                     boundaryKey={`${item.id}:${videoMountBoundaryKey}`}
@@ -1349,7 +1228,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                   >
                     <NativeFeedVideo
                       ref={videoControllerRef}
-                      source={videoPlayerSource}
+                      player={managedPlayer}
                       contentFit={mediaContentFit}
                       isMuted={isMuted}
                       shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}

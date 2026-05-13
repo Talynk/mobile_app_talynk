@@ -1,13 +1,16 @@
 import { Image as ExpoImage } from 'expo-image';
 import { Post } from '@/types';
-import { getPostMediaUrl, getThumbnailUrl } from '@/lib/utils/file-url';
+import { getPlaybackUrl, getPostMediaUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { primePostDetailsCache, getPostDetailsCached } from '@/lib/post-details-cache';
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
+import { getVideoSource } from '@/lib/utils/video-source';
+import { createFeedVideoPlayerKey, prewarmFeedVideoPlayer } from '@/lib/feed-video-player-pool';
 
 const FEED_WARM_RADIUS = 3;
 const FEED_WARM_TTL_MS = 2 * 60 * 1000;
 
 const warmedPostIds = new Map<string, number>();
+const releasePrewarmedPlayers = new Map<string, () => void>();
 
 function isVideoPost(post: Post) {
   const mediaUrl = getPostMediaUrl(post) || '';
@@ -36,6 +39,35 @@ export function warmFeedWindow(posts: Post[], centerIndex: number, options?: { r
   }
 
   primePostDetailsCache(targets);
+
+  const activeTargetIds = new Set(targets.map((post) => post.id));
+  for (const [key, release] of [...releasePrewarmedPlayers.entries()]) {
+    const separatorIndex = key.indexOf(':');
+    const postId = separatorIndex >= 0 ? key.slice(0, separatorIndex) : key;
+    if (activeTargetIds.has(postId)) {
+      continue;
+    }
+
+    release();
+    releasePrewarmedPlayers.delete(key);
+  }
+
+  targets.forEach((post) => {
+    const playbackUrl = getPlaybackUrl(post);
+    if (!playbackUrl) {
+      return;
+    }
+
+    const source = getVideoSource(playbackUrl);
+    const sourceKey = createFeedVideoPlayerKey(post.id, source);
+
+    if (releasePrewarmedPlayers.has(sourceKey)) {
+      return;
+    }
+
+    const release = prewarmFeedVideoPlayer(sourceKey, source);
+    releasePrewarmedPlayers.set(sourceKey, release);
+  });
 
   const freshTargets = targets.filter((post) => {
     const warmedAt = warmedPostIds.get(post.id) || 0;
