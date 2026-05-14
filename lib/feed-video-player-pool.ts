@@ -6,6 +6,7 @@ type PoolEntry = {
   player: VideoPlayer;
   sourceSignature: string;
   lastUsedAt: number;
+  detachedAt: number | null;
   activeRefs: number;
   warmRefs: number;
 };
@@ -15,8 +16,9 @@ type PlayerLease = {
   release: () => void;
 };
 
-const MAX_POOL_SIZE = Platform.OS === 'ios' ? 4 : 6;
+const MAX_POOL_SIZE = Platform.OS === 'ios' ? 8 : 6;
 const IDLE_EVICT_AFTER_MS = 45_000;
+const RELEASE_GRACE_MS = Platform.OS === 'ios' ? 8_000 : 3_000;
 const playerPool = new Map<string, PoolEntry>();
 
 function getSourceSignature(source: VideoSource) {
@@ -101,7 +103,12 @@ function releaseEntry(entry: PoolEntry) {
 function evictIdleEntries() {
   const now = Date.now();
   const idleEntries = [...playerPool.values()]
-    .filter((entry) => entry.activeRefs === 0 && entry.warmRefs === 0)
+    .filter((entry) => (
+      entry.activeRefs === 0 &&
+      entry.warmRefs === 0 &&
+      entry.detachedAt !== null &&
+      now - entry.detachedAt >= RELEASE_GRACE_MS
+    ))
     .sort((left, right) => left.lastUsedAt - right.lastUsedAt);
 
   idleEntries.forEach((entry) => {
@@ -115,7 +122,12 @@ function evictIdleEntries() {
   }
 
   const remainingIdle = [...playerPool.values()]
-    .filter((entry) => entry.activeRefs === 0 && entry.warmRefs === 0)
+    .filter((entry) => (
+      entry.activeRefs === 0 &&
+      entry.warmRefs === 0 &&
+      entry.detachedAt !== null &&
+      now - entry.detachedAt >= RELEASE_GRACE_MS
+    ))
     .sort((left, right) => left.lastUsedAt - right.lastUsedAt);
 
   while (playerPool.size > MAX_POOL_SIZE && remainingIdle.length > 0) {
@@ -159,6 +171,7 @@ function getOrCreateEntry(key: string, source: VideoSource) {
     player,
     sourceSignature,
     lastUsedAt: Date.now(),
+    detachedAt: null,
     activeRefs: 0,
     warmRefs: 0,
   };
@@ -172,6 +185,7 @@ export function acquireFeedVideoPlayer(key: string, source: VideoSource): Player
   const entry = getOrCreateEntry(key, source);
   entry.activeRefs += 1;
   entry.lastUsedAt = Date.now();
+  entry.detachedAt = null;
 
   return {
     player: entry.player,
@@ -183,7 +197,16 @@ export function acquireFeedVideoPlayer(key: string, source: VideoSource): Player
 
       current.activeRefs = Math.max(0, current.activeRefs - 1);
       current.lastUsedAt = Date.now();
-      evictIdleEntries();
+      if (current.activeRefs === 0 && current.warmRefs === 0) {
+        current.detachedAt = Date.now();
+        try {
+          current.player.muted = true;
+          current.player.pause();
+        } catch {
+          // Best-effort only.
+        }
+        setTimeout(evictIdleEntries, RELEASE_GRACE_MS);
+      }
     },
   };
 }
@@ -192,6 +215,7 @@ export function prewarmFeedVideoPlayer(key: string, source: VideoSource): () => 
   const entry = getOrCreateEntry(key, source);
   entry.warmRefs += 1;
   entry.lastUsedAt = Date.now();
+  entry.detachedAt = null;
 
   try {
     entry.player.muted = true;
@@ -208,6 +232,9 @@ export function prewarmFeedVideoPlayer(key: string, source: VideoSource): () => 
 
     current.warmRefs = Math.max(0, current.warmRefs - 1);
     current.lastUsedAt = Date.now();
-    evictIdleEntries();
+    if (current.activeRefs === 0 && current.warmRefs === 0) {
+      current.detachedAt = Date.now();
+      setTimeout(evictIdleEntries, RELEASE_GRACE_MS);
+    }
   };
 }

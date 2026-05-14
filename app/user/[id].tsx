@@ -21,6 +21,7 @@ import { useRefetchOnReconnect } from '@/lib/hooks/use-network-status';
 import { userApi, followsApi, postsApi } from '@/lib/api';
 import { User, Post } from '@/types';
 import { getFileUrl, getThumbnailUrl } from '@/lib/utils/file-url';
+import { getVideoSource } from '@/lib/utils/video-source';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useRealtime } from '@/lib/realtime-context';
@@ -533,7 +534,8 @@ export default function ExternalUserProfileScreen() {
 
 const ModalVideoPlayer = ({ source }: { source: string }) => {
   const isAppActive = useAppActive();
-  const player = useVideoPlayer(source, (player) => {
+  const videoSource = React.useMemo(() => getVideoSource(source), [source]);
+  const player = useVideoPlayer(videoSource, (player) => {
     player.loop = true;
     player.muted = true; // Start muted, unmute after mount
     player.staysActiveInBackground = false;

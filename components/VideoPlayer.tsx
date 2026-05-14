@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 import { useVideoMute } from '@/lib/hooks/use-video-mute';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { enterPlaybackMode } from '@/lib/media/audio-session';
+import { getVideoSource } from '@/lib/utils/video-source';
 
 interface VideoPlayerProps {
   source: string | { uri: string };
@@ -41,10 +42,11 @@ export const VideoPlayer = ({
 
   // Resolve source URI
   const uri = typeof source === 'string' ? source : source?.uri || '';
+  const videoSource = React.useMemo(() => (uri ? getVideoSource(uri) : null), [uri]);
 
   const effectiveIsMuted = initialMuted !== undefined ? initialMuted : isMuted;
 
-  const player = useVideoPlayer(uri || null, (p) => {
+  const player = useVideoPlayer(videoSource, (p) => {
     p.loop = isLooping;
     p.muted = effectiveIsMuted;
     if (shouldPlay) {

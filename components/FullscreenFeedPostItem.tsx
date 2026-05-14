@@ -592,17 +592,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isActive &&
     !videoError;
   const shouldPrewarmVideo = isVideo && hlsReady && isAppActive && shouldPreload && !isActive && !videoError;
-  const directVideoPlayerSource = playbackUrl
-    ? {
-        uri: playbackUrl,
-        useCaching: false,
-        ...(playbackUrl.toLowerCase().includes('.m3u8') ? { contentType: 'hls' as const } : {}),
-      }
-    : null;
-  const resolvedVideoSource =
-    playbackUrl
+  const directVideoPlayerSource = React.useMemo(
+    () => playbackUrl
+      ? {
+          uri: playbackUrl,
+          useCaching: false,
+          ...(playbackUrl.toLowerCase().includes('.m3u8') ? { contentType: 'hls' as const } : {}),
+        }
+      : null,
+    [playbackUrl],
+  );
+  const resolvedVideoSource = React.useMemo(
+    () => playbackUrl
       ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
-      : null;
+      : null,
+    [directVideoPlayerSource, playbackUrl, preferDirectVideoSource],
+  );
   const videoPlayerSourceUri =
     typeof resolvedVideoSource === 'string'
       ? resolvedVideoSource
@@ -1197,7 +1202,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const adTitle = (item as any).title || (item as any).ad_title || '';
   const adFeaturedDurationText = isAd ? getAdFeaturedDurationText(item) : null;
   const mediaContentFit = isAd ? 'contain' : 'cover';
-  const footerHeight = Math.max(bottomFooterHeight, 0);
+  const footerHeight = showBottomFooter
+    ? Math.max(bottomFooterHeight, insets.bottom + 44, 56)
+    : Math.max(bottomFooterHeight, 0);
   const reservedBottomSpace = Math.max(bottomOverlayOffset, 0);
   const progressBarGap = 2;
   const stackGapAboveProgress = 12;

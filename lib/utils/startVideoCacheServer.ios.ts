@@ -12,7 +12,7 @@ import {
 let startPromise: Promise<boolean> | null = null;
 
 export function start(): Promise<boolean> {
-  const ENABLE_IOS_VIDEO_CACHE_PROXY = IOS_STARTUP_FLAGS.enableVideoCacheProxy;
+  const ENABLE_IOS_VIDEO_CACHE_PROXY = false && IOS_STARTUP_FLAGS.enableVideoCacheProxy;
   if (!ENABLE_IOS_VIDEO_CACHE_PROXY) {
     markVideoProxyFailed();
     return Promise.resolve(false);

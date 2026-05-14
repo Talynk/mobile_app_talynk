@@ -94,6 +94,41 @@ function normalizeForYouPosts(rawPosts: any[]) {
   return filterHlsReady(rawPosts.map((post) => normalizePost(post)));
 }
 
+function mergeUniquePosts(primary: Post[], fallback: Post[]) {
+  const seen = new Set<string>();
+  const merged: Post[] = [];
+
+  [...primary, ...fallback].forEach((post) => {
+    if (!post?.id || seen.has(post.id)) {
+      return;
+    }
+
+    seen.add(post.id);
+    merged.push(post);
+  });
+
+  return merged;
+}
+
+function extractHasNextFromPagination(pagination: any, requestIndex: number, returnedCount: number, limit: number) {
+  if (typeof pagination?.hasNext === 'boolean') return pagination.hasNext;
+  if (typeof pagination?.has_next === 'boolean') return pagination.has_next;
+  if (typeof pagination?.hasNextPage === 'boolean') return pagination.hasNextPage;
+  if (typeof pagination?.has_next_page === 'boolean') return pagination.has_next_page;
+
+  const totalPages = Number(pagination?.totalPages ?? pagination?.total_pages ?? 0);
+  if (Number.isFinite(totalPages) && totalPages > 0) {
+    return requestIndex < totalPages;
+  }
+
+  const totalCount = Number(pagination?.totalCount ?? pagination?.total_count ?? pagination?.total ?? 0);
+  if (Number.isFinite(totalCount) && totalCount > 0) {
+    return requestIndex * limit < totalCount;
+  }
+
+  return returnedCount >= limit;
+}
+
 function sanitizeUserPreferences(raw: unknown): UserPreferenceHint[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -122,8 +157,7 @@ function buildCatalogFallbackPage(args: {
   const rawPosts = Array.isArray(raw?.data?.posts) ? raw.data.posts : [];
   const posts = normalizeForYouPosts(rawPosts);
   const pagination = raw?.data?.pagination ?? {};
-  const totalPages = Number(pagination.totalPages || 0);
-  const hasNext = totalPages > 0 ? requestIndex < totalPages : posts.length >= limit;
+  const hasNext = extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
 
   primePostDetailsCache(posts);
 
@@ -160,13 +194,12 @@ function normalizeFeedPage(args: {
 }): FeedPage {
   const { response, endpoint, requestIndex, limit, refreshSeed } = args;
   const data = response.data ?? {};
-  const posts = normalizeForYouPosts(Array.isArray(data.posts) ? data.posts : []);
+  const rawPosts = Array.isArray(data.posts) ? data.posts : [];
+  const posts = normalizeForYouPosts(rawPosts);
   const pagination = response.pagination ?? {};
   const nextCursor = typeof data.nextCursor === 'string' && data.nextCursor.length > 0 ? data.nextCursor : null;
   const hasNext =
-    typeof pagination.hasNext === 'boolean'
-      ? pagination.hasNext
-      : nextCursor !== null || posts.length >= limit;
+    nextCursor !== null || extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
   const userPreferences = sanitizeUserPreferences((data as any).userPreferences);
   const refresh = typeof data.refresh === 'number' ? data.refresh : refreshSeed ?? null;
   const pipeline = typeof data.feed_meta?.pipeline === 'string' ? data.feed_meta.pipeline : undefined;
@@ -319,13 +352,49 @@ async function loadForYouFeedPage(args: {
   }
 
   if (isSuccessfulFeedResponse(response)) {
-    return normalizeFeedPage({
+    const primaryPage = normalizeFeedPage({
       response,
       endpoint,
       requestIndex,
       limit,
       refreshSeed,
     });
+
+    if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (primaryPage.posts.length < limit || !primaryPage.hasNext)) {
+      try {
+        const catalog = await postsApi.getAll(requestIndex, limit, {
+          featured_first: 'false',
+          status: 'active',
+        });
+
+        if (catalog.status === 'success') {
+          const catalogPage = buildCatalogFallbackPage({
+            raw: catalog,
+            requestIndex,
+            limit,
+            refreshSeed,
+          });
+          const mergedPosts = mergeUniquePosts(primaryPage.posts, catalogPage.posts);
+          return {
+            ...primaryPage,
+            posts: mergedPosts,
+            hasNext: primaryPage.hasNext || catalogPage.hasNext,
+            nextCursor: primaryPage.nextCursor ?? catalogPage.nextCursor,
+            endpoint: primaryPage.endpoint,
+            pipeline: primaryPage.pipeline ?? 'catalog-supplement',
+            loadOutcome: primaryPage.loadOutcome === 'success' ? 'success' : catalogPage.loadOutcome,
+            pagination: primaryPage.pagination ?? catalogPage.pagination,
+          };
+        }
+      } catch (catalogError: any) {
+        feedTelemetry.trackFeedNetworkError({
+          endpoint: 'catalog',
+          message: catalogError?.message || 'Failed to supplement For You feed',
+        });
+      }
+    }
+
+    return primaryPage;
   }
 
   if (isAuthenticated && shouldUseRecommendationsFallback(requestError, response)) {

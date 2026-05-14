@@ -207,7 +207,7 @@ function ProfileFeedContent({
 
   // Full viewport height: one item = entire screen, only progress bar at bottom (no bottom tab here)
   const availableHeight = Math.max(0, Math.round(safeAreaFrame.height || (screenHeight - insets.top)));
-  const fullscreenFooterHeight = Math.max(insets.bottom + 18, 28);
+  const fullscreenFooterHeight = Math.max(insets.bottom + 44, 56);
 
   // CRITICAL FIX: Increased limit to fetch all posts from database
   const LIMIT = 100;

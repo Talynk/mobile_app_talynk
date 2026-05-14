@@ -103,7 +103,7 @@ export default function ChallengePostsScreen() {
   const insets = useSafeAreaInsets();
   const safeAreaFrame = useSafeAreaFrame();
   const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
-  const fullscreenFooterHeight = Math.max(insets.bottom + 18, 28);
+  const fullscreenFooterHeight = Math.max(insets.bottom + 44, 56);
   const isWinnerDetailView = !!winnerUserId;
   const isParticipantDetailView = !!participantUserId;
 

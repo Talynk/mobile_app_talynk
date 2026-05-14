@@ -115,6 +115,7 @@ export default function FeedScreen() {
   const followingAutoloadAttemptedRef = useRef(false);
   const lastFollowSyncUserIdRef = useRef<string | null>(null);
   const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
+  const lastAutoPaginationKeyRef = useRef<string | null>(null);
   const lastTabRef = useRef<FeedTab>('foryou');
   const didAdvanceForYouSessionRef = useRef(false);
   const seenResetRecoveryAttemptedRef = useRef(false);
@@ -755,6 +756,25 @@ export default function FeedScreen() {
       void runQuerySafely(() => fetchNextPage(), 'feed pagination');
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  React.useEffect(() => {
+    if (activeTab === 'challenges' || visiblePosts.length === 0 || !hasNextPage || isFetchingNextPage) {
+      return;
+    }
+
+    const remainingItems = visiblePosts.length - Math.max(0, currentIndex) - 1;
+    if (remainingItems > 4) {
+      return;
+    }
+
+    const paginationKey = `${activeTab}:${visiblePosts.length}:${currentIndex}`;
+    if (lastAutoPaginationKeyRef.current === paginationKey) {
+      return;
+    }
+
+    lastAutoPaginationKeyRef.current = paginationKey;
+    void runQuerySafely(() => fetchNextPage(), 'feed pagination prefetch');
+  }, [activeTab, currentIndex, fetchNextPage, hasNextPage, isFetchingNextPage, visiblePosts.length]);
 
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
