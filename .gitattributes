@@ -1,0 +1,14 @@
+* text=auto
+
+# Xcode and shell scripts are sourced by macOS /bin/sh during EAS iOS builds.
+# Keep them LF-only even when edited from Windows.
+*.sh text eol=lf
+*.env text eol=lf
+.xcode.env text eol=lf
+.xcode.env.* text eol=lf
+ios/.xcode.env text eol=lf
+ios/.xcode.env.* text eol=lf
+ios/Podfile text eol=lf
+ios/Podfile.properties.json text eol=lf
+*.pbxproj text eol=lf
+*.xcconfig text eol=lf

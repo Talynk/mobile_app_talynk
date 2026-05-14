@@ -11,6 +11,7 @@
     "web": "expo start --web",
     "test": "jest --watchAll",
     "postinstall": "patch-package",
+    "eas-build-pre-install": "node scripts/ensure-ios-lf.mjs",
     "fix:icon": "node scripts/fix-app-icon.mjs"
   },
   "jest": {
@@ -34,8 +35,6 @@
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.10.0",
     "date-fns": "^2.30.0",
-    "eas": "^0.1.0",
-    "eas-cli": "^18.12.3",
     "expo": "~54.0.34",
     "expo-av": "~16.0.8",
     "expo-build-properties": "^1.0.10",
