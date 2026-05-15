@@ -311,29 +311,6 @@ function RootLayoutNav() {
     setVideoCacheSizeAsync(4 * 1024 * 1024 * 1024).catch(() => {});
   }, []);
 
-  // Start video cache: iOS uses expo-video-cache (startVideoCacheServer.ios.ts); Android no-op (startVideoCacheServer.android.ts). Android bundle never references expo-video-cache.
-  useEffect(() => {
-    if (Platform.OS === 'ios' && !IOS_STARTUP_FLAGS.enableVideoCacheProxy) {
-      captureSentryBootBreadcrumb('startup video cache server disabled by flag');
-      return;
-    }
-    try {
-      require('@/lib/utils/startVideoCacheServer').start();
-      captureSentryBootBreadcrumb('startup video cache server started');
-    } catch (error) {
-      captureSentryBootBreadcrumb('startup video cache server failed');
-      if (!__DEV__) {
-        try {
-          const Sentry = require('@sentry/react-native');
-          Sentry.captureException(error, {
-            tags: { context: 'startup_video_cache_server' },
-            level: 'error',
-          });
-        } catch (_) {}
-      }
-    }
-  }, []);
-
   // Memory management: Clear caches when app goes to background
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {

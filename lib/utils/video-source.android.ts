@@ -5,7 +5,7 @@ function isHlsUrl(url: string): boolean {
 }
 
 /**
- * Android: ExoPlayer native LRU disk cache. No expo-video-cache in this bundle.
+ * Android: ExoPlayer native LRU disk cache.
  */
 export function getVideoSource(url: string): VideoSource {
   return {

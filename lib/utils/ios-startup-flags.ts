@@ -15,6 +15,4 @@ export const IOS_STARTUP_FLAGS = {
   /** Request push notification permission during startup boot effect. */
   enableStartupNotificationPermissionPrompt: false,
 
-  /** Start custom iOS video cache proxy at startup. */
-  enableVideoCacheProxy: true,
 } as const;

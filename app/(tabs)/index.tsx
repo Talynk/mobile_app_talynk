@@ -53,7 +53,7 @@ import {
   FEED_INTEGRATION_CONFIG,
 } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
-import { captureFabricError } from '@/lib/utils/fabric-diagnostics';
+import { addFabricBreadcrumb } from '@/lib/utils/fabric-diagnostics';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -119,6 +119,7 @@ export default function FeedScreen() {
   const lastTabRef = useRef<FeedTab>('foryou');
   const didAdvanceForYouSessionRef = useRef(false);
   const seenResetRecoveryAttemptedRef = useRef(false);
+  const feedTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
@@ -149,7 +150,6 @@ export default function FeedScreen() {
     refetch,
     isRefetching,
     loadOutcome,
-    errorMessage,
   } = useFeedQuery(feedTab, activeTab === 'challenges'
     ? {}
     : feedTab === 'foryou'
@@ -159,6 +159,33 @@ export default function FeedScreen() {
     () => activeTab === 'following' ? reorderFollowingPosts(posts, followingOrderSeed) : posts,
     [activeTab, followingOrderSeed, posts],
   );
+
+  const finishFeedTransition = useCallback(() => {
+    if (feedTransitionTimeoutRef.current) {
+      clearTimeout(feedTransitionTimeoutRef.current);
+      feedTransitionTimeoutRef.current = null;
+    }
+    setIsFeedTransitioning(false);
+  }, []);
+
+  const startFeedTransition = useCallback(() => {
+    pauseAllVideos();
+    setIsFeedTransitioning(true);
+    if (feedTransitionTimeoutRef.current) {
+      clearTimeout(feedTransitionTimeoutRef.current);
+    }
+    feedTransitionTimeoutRef.current = setTimeout(() => {
+      feedTransitionTimeoutRef.current = null;
+      setIsFeedTransitioning(false);
+    }, 700);
+  }, []);
+
+  React.useEffect(() => () => {
+    if (feedTransitionTimeoutRef.current) {
+      clearTimeout(feedTransitionTimeoutRef.current);
+      feedTransitionTimeoutRef.current = null;
+    }
+  }, []);
   const currentFeedSessionId = React.useMemo(
     () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
     [effectiveRefresh, forYouRefreshSeed, user?.id],
@@ -212,14 +239,13 @@ export default function FeedScreen() {
         refresh: nextRefreshSeed,
       });
     } else {
-      captureFabricError(
-        new Error(resetResponse.message || 'Failed to reset feed seen history'),
+      addFabricBreadcrumb(
         'feed_seen_reset_failed',
         {
           endpoint: user ? 'personalized' : 'public',
           reason,
+          message: resetResponse.message || 'Failed to reset feed seen history',
         },
-        'warning',
       );
     }
 
@@ -423,7 +449,7 @@ export default function FeedScreen() {
       lastActiveIndexRef.current = nextIndex;
     },
     onTransitionEnd: () => {
-      setIsFeedTransitioning(false);
+      finishFeedTransition();
     },
   });
 
@@ -736,11 +762,11 @@ export default function FeedScreen() {
       , null as any);
 
       const idx = mostVisible?.index ?? viewableItems[0]?.index ?? 0;
-      setIsFeedTransitioning(false);
+      finishFeedTransition();
       setCurrentIndex(idx);
       lastActiveIndexRef.current = idx;
     } else {
-      setIsFeedTransitioning(false);
+      finishFeedTransition();
       setCurrentIndex(-1);
     }
   }).current;
@@ -988,8 +1014,8 @@ export default function FeedScreen() {
                   tintColor="#60a5fa"
                 />
               }
-              onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
-              onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
+              onScrollBeginDrag={startFeedTransition}
+              onMomentumScrollBegin={startFeedTransition}
               onScroll={handlePagerScroll}
               onMomentumScrollEnd={handlePagerMomentumScrollEnd}
               onEndReached={onEndReached}
@@ -1012,28 +1038,7 @@ export default function FeedScreen() {
                     {[1, 2].map((i) => renderSkeletonItem(i))}
                   </View>
                 ) : activeTab === 'foryou' ? (
-                  <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
-                    <Feather name="refresh-cw" size={54} color="#60a5fa" />
-                    <Text style={styles.emptyText}>
-                      {loadOutcome === 'error' ? 'Feed failed to recover' : 'No posts available right now'}
-                    </Text>
-                    <Text style={styles.emptySubtext}>
-                      {loadOutcome === 'error'
-                        ? errorMessage || 'Tap below to reload posts again.'
-                        : 'Reload the feed to fetch posts again.'}
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.emptyLoginButton}
-                      onPress={() => {
-                        seenResetRecoveryAttemptedRef.current = false;
-                        setForYouRecoveryAttempts(1);
-                        void resetSeenAndRefreshForYou('manual');
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.emptyLoginButtonText}>Reload feed</Text>
-                    </TouchableOpacity>
-                  </View>
+                  renderScrollableSkeletonFeed(12)
                 ) : activeTab === 'following' && !user ? (
                 <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
                   <Feather name="user-plus" size={64} color="#666" />

@@ -148,7 +148,7 @@ export const feedTelemetry = {
   }) {
     logTelemetry('feed_first_page_outcome', payload);
     if (payload.outcome === 'empty') {
-      captureFeedMessage('feed_empty_first_page', payload, 'warning');
+      addFeedBreadcrumb('feed_empty_first_page', payload, 'warning');
     } else if (payload.outcome === 'error') {
       captureFeedMessage('feed_first_page_error', payload, 'error');
     }
@@ -157,8 +157,10 @@ export const feedTelemetry = {
     endpoint?: FeedEndpoint;
     message: string;
   }) {
-    logTelemetry('feed_network_error', payload);
-    captureFeedMessage('feed_network_error', payload, 'error');
+    addFeedBreadcrumb('feed_network_error', payload, 'warning');
+    if (__DEV__) {
+      console.log('[FeedTelemetry] feed_network_error', payload);
+    }
   },
   trackManualReload(payload: {
     screenName: string;
@@ -167,7 +169,7 @@ export const feedTelemetry = {
     logTelemetry('feed_reload_manual', payload);
   },
   trackVideoSourceMode(payload: {
-    mode: 'ios_proxy' | 'direct' | 'android_cache';
+    mode: 'direct' | 'android_cache';
     postId: string;
     screenName: string;
   }) {
@@ -176,7 +178,7 @@ export const feedTelemetry = {
   trackVideoTimeToFirstFrame(payload: {
     postId: string;
     screenName: string;
-    sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
+    sourceMode: 'direct' | 'android_cache';
     durationMs: number;
   }) {
     logTelemetry('video_time_to_first_frame_ms', payload);

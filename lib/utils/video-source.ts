@@ -6,7 +6,7 @@ function isHlsUrl(url: string): boolean {
 
 /**
  * Fallback when no platform-specific file is used (e.g. web).
- * Android/iOS use video-source.android.ts and video-source.ios.ts so the Android bundle never references expo-video-cache.
+ * Android/iOS use video-source.android.ts and video-source.ios.ts so each platform gets the stable native source shape.
  */
 export function getVideoSource(url: string): VideoSource {
   return {

@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo } from 'react';
 
 import { feedApi, followsApi, postsApi, userApi } from '@/lib/api';
@@ -14,6 +15,10 @@ import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-fi
 type FeedTab = 'foryou' | 'following';
 type FeedEndpoint = 'public' | 'personalized' | 'following' | 'catalog';
 type FeedLoadOutcome = 'success' | 'empty' | 'error' | 'degraded';
+
+const FEED_CACHE_KEY_PREFIX = 'talentix:feed-cache:v1';
+const FEED_CACHE_MAX_PAGES = 8;
+const FEED_CACHE_MAX_POSTS_PER_PAGE = 40;
 
 type UseFeedQueryOptions = {
   refreshSeed?: number;
@@ -94,6 +99,68 @@ function normalizeForYouPosts(rawPosts: any[]) {
   return filterHlsReady(rawPosts.map((post) => normalizePost(post)));
 }
 
+type CachedFeedPayload = {
+  savedAt: number;
+  pages: FeedPage[];
+};
+
+function getFeedCacheKey(tab: FeedTab, userId: string) {
+  return `${FEED_CACHE_KEY_PREFIX}:${tab}:${userId || 'guest'}`;
+}
+
+function asCachedFeedPage(page: FeedPage): FeedPage {
+  return {
+    ...page,
+    cached: true,
+    loadOutcome: page.posts.length > 0 ? 'degraded' : page.loadOutcome,
+    errorMessage: undefined,
+  };
+}
+
+async function readCachedFeedPage(tab: FeedTab, userId: string, requestIndex: number): Promise<FeedPage | null> {
+  try {
+    const raw = await AsyncStorage.getItem(getFeedCacheKey(tab, userId));
+    if (!raw) {
+      return null;
+    }
+
+    const payload = JSON.parse(raw) as Partial<CachedFeedPayload>;
+    const pages = Array.isArray(payload?.pages) ? payload.pages : [];
+    const page = pages.find((item) => item?.requestIndex === requestIndex) ?? (requestIndex === 1 ? pages[0] : null);
+    if (!page || !Array.isArray(page.posts) || page.posts.length === 0) {
+      return null;
+    }
+
+    return asCachedFeedPage(page);
+  } catch {
+    return null;
+  }
+}
+
+async function persistFeedPages(tab: FeedTab, userId: string, pages: FeedPage[]) {
+  try {
+    const cacheablePages = pages
+      .filter((page) => Array.isArray(page.posts) && page.posts.length > 0)
+      .slice(0, FEED_CACHE_MAX_PAGES)
+      .map((page) => ({
+        ...page,
+        posts: page.posts.slice(0, FEED_CACHE_MAX_POSTS_PER_PAGE),
+        cached: false,
+      }));
+
+    if (cacheablePages.length === 0) {
+      return;
+    }
+
+    await AsyncStorage.setItem(getFeedCacheKey(tab, userId), JSON.stringify({
+      savedAt: Date.now(),
+      pages: cacheablePages,
+    } satisfies CachedFeedPayload));
+  } catch {
+    // Feed cache is best-effort only.
+  }
+}
+
 function mergeUniquePosts(primary: Post[], fallback: Post[]) {
   const seen = new Set<string>();
   const merged: Post[] = [];
@@ -154,9 +221,9 @@ function buildCatalogFallbackPage(args: {
   refreshSeed?: number;
 }): FeedPage {
   const { raw, requestIndex, limit, refreshSeed } = args;
-  const rawPosts = Array.isArray(raw?.data?.posts) ? raw.data.posts : [];
+  const rawPosts = extractPosts(raw);
   const posts = normalizeForYouPosts(rawPosts);
-  const pagination = raw?.data?.pagination ?? {};
+  const pagination = raw?.data?.pagination ?? raw?.pagination ?? {};
   const hasNext = extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
 
   primePostDetailsCache(posts);
@@ -182,6 +249,43 @@ function buildCatalogFallbackPage(args: {
     cached: false,
     pagination,
     loadOutcome: posts.length > 0 ? 'degraded' : 'empty',
+  };
+}
+
+async function loadCatalogFeedPage(requestIndex: number, limit: number, refreshSeed?: number): Promise<FeedPage> {
+  const catalog = await postsApi.getAll(requestIndex, limit, {
+    featured_first: 'false',
+    status: 'active',
+  });
+
+  if (catalog.status !== 'success') {
+    const message = catalog.message || 'Failed to load fallback feed';
+    throw createFeedRequestError(message, {
+      endpoint: 'catalog',
+      loadOutcome: 'error' as FeedLoadOutcome,
+    });
+  }
+
+  return buildCatalogFallbackPage({
+    raw: catalog,
+    requestIndex,
+    limit,
+    refreshSeed,
+  });
+}
+
+function mergePrimaryWithCatalog(primaryPage: FeedPage, catalogPage: FeedPage): FeedPage {
+  const mergedPosts = mergeUniquePosts(primaryPage.posts, catalogPage.posts);
+  return {
+    ...primaryPage,
+    posts: mergedPosts,
+    hasNext: primaryPage.hasNext || catalogPage.hasNext,
+    nextCursor: primaryPage.nextCursor ?? catalogPage.nextCursor,
+    pipeline: primaryPage.pipeline ?? 'catalog-supplement',
+    loadOutcome: primaryPage.loadOutcome === 'success'
+      ? 'success'
+      : (mergedPosts.length > 0 ? 'degraded' : catalogPage.loadOutcome),
+    pagination: primaryPage.pagination ?? catalogPage.pagination,
   };
 }
 
@@ -362,30 +466,10 @@ async function loadForYouFeedPage(args: {
 
     if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (primaryPage.posts.length < limit || !primaryPage.hasNext)) {
       try {
-        const catalog = await postsApi.getAll(requestIndex, limit, {
-          featured_first: 'false',
-          status: 'active',
-        });
-
-        if (catalog.status === 'success') {
-          const catalogPage = buildCatalogFallbackPage({
-            raw: catalog,
-            requestIndex,
-            limit,
-            refreshSeed,
-          });
-          const mergedPosts = mergeUniquePosts(primaryPage.posts, catalogPage.posts);
-          return {
-            ...primaryPage,
-            posts: mergedPosts,
-            hasNext: primaryPage.hasNext || catalogPage.hasNext,
-            nextCursor: primaryPage.nextCursor ?? catalogPage.nextCursor,
-            endpoint: primaryPage.endpoint,
-            pipeline: primaryPage.pipeline ?? 'catalog-supplement',
-            loadOutcome: primaryPage.loadOutcome === 'success' ? 'success' : catalogPage.loadOutcome,
-            pagination: primaryPage.pagination ?? catalogPage.pagination,
-          };
-        }
+        return mergePrimaryWithCatalog(
+          primaryPage,
+          await loadCatalogFeedPage(requestIndex, limit, refreshSeed),
+        );
       } catch (catalogError: any) {
         feedTelemetry.trackFeedNetworkError({
           endpoint: 'catalog',
@@ -414,42 +498,24 @@ async function loadForYouFeedPage(args: {
     }
   }
 
+  if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback) {
+    try {
+      return await loadCatalogFeedPage(requestIndex, limit, refreshSeed);
+    } catch (catalogError: any) {
+      feedTelemetry.trackFeedNetworkError({
+        endpoint: 'catalog',
+        message: catalogError?.message || 'Failed to load fallback feed',
+      });
+    }
+  }
+
+  const message = response?.message || (requestError as any)?.message || 'Failed to load feed';
   if (requestError && isNetworkError(requestError)) {
-    const message = response?.message || (requestError as any)?.message || 'Failed to load feed';
     feedTelemetry.trackFeedNetworkError({ endpoint, message });
-    throw createFeedRequestError(message, {
-      endpoint,
-      loadOutcome: 'error' as FeedLoadOutcome,
-    });
   }
-
-  if (!FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback) {
-    const message = response?.message || 'Failed to load feed';
-    throw createFeedRequestError(message, {
-      endpoint,
-      loadOutcome: 'error' as FeedLoadOutcome,
-    });
-  }
-
-  const catalog = await postsApi.getAll(requestIndex, limit, {
-    featured_first: 'false',
-    status: 'active',
-  });
-
-  if (catalog.status !== 'success') {
-    const message = catalog.message || 'Failed to load fallback feed';
-    feedTelemetry.trackFeedNetworkError({ endpoint: 'catalog', message });
-    throw createFeedRequestError(message, {
-      endpoint: 'catalog',
-      loadOutcome: 'error' as FeedLoadOutcome,
-    });
-  }
-
-  return buildCatalogFallbackPage({
-    raw: catalog,
-    requestIndex,
-    limit,
-    refreshSeed,
+  throw createFeedRequestError(message, {
+    endpoint,
+    loadOutcome: 'error' as FeedLoadOutcome,
   });
 }
 
@@ -457,7 +523,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const isAuthenticated = !!user;
-  const userId = isAuthenticated ? user?.id : 'guest';
+  const userId = isAuthenticated && user?.id ? user.id : 'guest';
   const refreshSeed = options.refreshSeed;
   const feedLimit = options.limit ?? FEED_DEFAULT_PAGE_SIZE;
 
@@ -485,11 +551,57 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
 
         const currentParam = (pageParam as FeedPageParam | undefined) ?? { page: 1 };
         const page = Number(currentParam.page || 1);
-        const raw = await postsApi.getFollowing(page, 20);
+        const followingLimit = 20;
+        const loadCachedFollowingPage = () => readCachedFeedPage(tab, userId, page);
+        const loadFollowingCatalogPage = async () => {
+          try {
+            const catalogPage = await loadCatalogFeedPage(page, followingLimit, refreshSeed);
+            return {
+              ...catalogPage,
+              pipeline: 'following-catalog-fallback',
+              loadOutcome: catalogPage.posts.length > 0 ? 'degraded' : 'empty',
+            } satisfies FeedPage;
+          } catch (error: any) {
+            feedTelemetry.trackFeedNetworkError({
+              endpoint: 'catalog',
+              message: error?.message || 'Failed to load Following fallback feed',
+            });
+            return null;
+          }
+        };
+        let raw: any;
+        try {
+          raw = await postsApi.getFollowing(page, followingLimit);
+        } catch (error: any) {
+          feedTelemetry.trackFeedNetworkError({
+            endpoint: 'following',
+            message: error?.message || 'Failed to load following feed',
+          });
+          const catalogPage = await loadFollowingCatalogPage();
+          if (catalogPage && catalogPage.posts.length > 0) {
+            return catalogPage;
+          }
+          const cachedPage = await loadCachedFollowingPage();
+          if (cachedPage) {
+            return cachedPage;
+          }
+          throw createFeedRequestError(error?.message || 'Failed to load following feed', {
+            endpoint: 'following',
+            loadOutcome: 'error' as FeedLoadOutcome,
+          });
+        }
 
         if (raw.status !== 'success') {
           const message = raw.message || 'Failed to load following feed';
           feedTelemetry.trackFeedNetworkError({ endpoint: 'following', message });
+          const catalogPage = await loadFollowingCatalogPage();
+          if (catalogPage && catalogPage.posts.length > 0) {
+            return catalogPage;
+          }
+          const cachedPage = await loadCachedFollowingPage();
+          if (cachedPage) {
+            return cachedPage;
+          }
           throw createFeedRequestError(message, {
             endpoint: 'following',
             loadOutcome: 'error' as FeedLoadOutcome,
@@ -507,12 +619,24 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           filterSecondarySurfacePosts(allPosts.map((post) => normalizePost(post))),
         );
         if (filteredPosts.length === 0) {
-          return loadFallbackFollowingFeed(user!.id, page, 20);
+          const fallbackPage = await loadFallbackFollowingFeed(user!.id, page, followingLimit);
+          if (fallbackPage.posts.length > 0) {
+            return fallbackPage;
+          }
+          const catalogPage = await loadFollowingCatalogPage();
+          if (catalogPage && catalogPage.posts.length > 0) {
+            return catalogPage;
+          }
+          const cachedPage = await loadCachedFollowingPage();
+          if (cachedPage) {
+            return cachedPage;
+          }
+          return fallbackPage;
         }
 
         const pagination = raw?.data?.pagination;
-        const hasNext = pagination?.hasNext ?? (allPosts.length >= 20);
-        return {
+        const hasNext = pagination?.hasNext ?? (allPosts.length >= followingLimit);
+        const followingPage: FeedPage = {
           posts: filteredPosts,
           nextCursor: hasNext ? String(page + 1) : null,
           requestIndex: page,
@@ -524,16 +648,50 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           pagination,
           loadOutcome: 'success',
         };
+
+        if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (filteredPosts.length < followingLimit || !hasNext)) {
+          const catalogPage = await loadFollowingCatalogPage();
+          if (catalogPage && catalogPage.posts.length > 0) {
+            const mergedPosts = mergeUniquePosts(followingPage.posts, catalogPage.posts);
+            return {
+              ...followingPage,
+              posts: mergedPosts,
+              hasNext: followingPage.hasNext || catalogPage.hasNext,
+              nextCursor: followingPage.nextCursor ?? catalogPage.nextCursor,
+              pipeline: 'following-catalog-supplement',
+              loadOutcome: mergedPosts.length > followingPage.posts.length ? 'degraded' : followingPage.loadOutcome,
+            };
+          }
+        }
+
+        return followingPage;
       }
 
       const currentParam = (pageParam as FeedPageParam | undefined) ?? { page: 1 };
-      return loadForYouFeedPage({
-        isAuthenticated,
-        requestIndex: Number(currentParam.page || 1),
-        cursor: currentParam.cursor,
-        limit: feedLimit,
-        refreshSeed,
-      });
+      const requestIndex = Number(currentParam.page || 1);
+      let page: FeedPage;
+      try {
+        page = await loadForYouFeedPage({
+          isAuthenticated,
+          requestIndex,
+          cursor: currentParam.cursor,
+          limit: feedLimit,
+          refreshSeed,
+        });
+      } catch (error) {
+        const cachedPage = await readCachedFeedPage(tab, userId, requestIndex);
+        if (cachedPage) {
+          return cachedPage;
+        }
+        throw error;
+      }
+      if (page.posts.length === 0) {
+        const cachedPage = await readCachedFeedPage(tab, userId, requestIndex);
+        if (cachedPage) {
+          return cachedPage;
+        }
+      }
+      return page;
     },
     initialPageParam: { page: 1, cursor: null } as FeedPageParam,
     getNextPageParam: (lastPage) => {
@@ -589,6 +747,14 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
       uniqueItems: uniqueIds.size,
     });
   }, [firstPage?.endpoint, firstPage?.refresh, flattenedPosts, refreshSeed, tab]);
+
+  useEffect(() => {
+    if (!query.data?.pages?.some((page) => page.posts.length > 0)) {
+      return;
+    }
+
+    void persistFeedPages(tab, userId, query.data.pages);
+  }, [query.data?.pages, tab, userId]);
 
   const endpoint = firstPage?.endpoint ?? (tab === 'following' ? 'following' : isAuthenticated ? 'personalized' : 'public');
 

@@ -8,13 +8,13 @@
     "icon": "./assets/images/app-icon-square.png",
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/mobile-app-logo-1024.png",
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
     "ios": {
+      "newArchEnabled": false,
       "supportsTablet": true,
       "bundleIdentifier": "com.strongminds.talentix",
       "associatedDomains": [
@@ -25,6 +25,7 @@
       }
     },
     "android": {
+      "newArchEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"

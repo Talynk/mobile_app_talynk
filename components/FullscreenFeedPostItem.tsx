@@ -40,7 +40,6 @@ import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
 import { enterPlaybackMode } from '@/lib/media/audio-session';
 import { feedTelemetry } from '@/lib/feed-telemetry';
-import { disableVideoProxyForSession } from '@/lib/utils/video-proxy-state';
 import {
   acquireFeedVideoPlayer,
   createFeedVideoPlayerKey,
@@ -161,7 +160,7 @@ type NativeFeedVideoProps = {
   shouldPlay: boolean;
   postId: string;
   screenName: string;
-  sourceMode: 'ios_proxy' | 'direct' | 'android_cache';
+  sourceMode: 'direct' | 'android_cache';
   onFirstFrameRender: () => void;
   onStatusChange: (event: { status?: string; error?: unknown }) => void;
   onPlayingChange: (isPlaying: boolean) => void;
@@ -504,6 +503,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isMountedRef = useRef(true);
   const videoControllerRef = useRef<NativeFeedVideoHandle | null>(null);
   const videoMountRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoplayRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const videoMountRetryCountRef = useRef(0);
   const [managedPlayer, setManagedPlayer] = useState<VideoPlayer | null>(null);
   const [isPlayerValid, setIsPlayerValid] = useState(false);
@@ -545,6 +545,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const dragSeekPageXRef = useRef(0);
   const screenWidthRef = useRef(screenWidth);
   screenWidthRef.current = screenWidth;
+
+  const clearAutoplayRetryTimeouts = useCallback(() => {
+    autoplayRetryTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    autoplayRetryTimeoutsRef.current = [];
+  }, []);
 
   // Resume playback after any modal/popup dismisses.
   // Native players can auto-pause when a Modal/Alert overlays them, but React
@@ -608,17 +613,86 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       : null,
     [directVideoPlayerSource, playbackUrl, preferDirectVideoSource],
   );
-  const videoPlayerSourceUri =
-    typeof resolvedVideoSource === 'string'
-      ? resolvedVideoSource
-      : (typeof (resolvedVideoSource as any)?.uri === 'string' ? (resolvedVideoSource as any).uri : '');
   const videoSourceMode = Platform.OS === 'android'
     ? 'android_cache'
-    : videoPlayerSourceUri.includes('127.0.0.1:9000')
-      ? 'ios_proxy'
-      : 'direct';
+    : 'direct';
   const videoPoolKey = resolvedVideoSource ? createFeedVideoPlayerKey(item.id, resolvedVideoSource) : null;
   const screenName = 'fullscreen-feed-post';
+
+  const requestAutoplayPlayback = useCallback((reason: string) => {
+    clearAutoplayRetryTimeouts();
+
+    const shouldAttemptPlayback =
+      isVideo &&
+      isActive &&
+      !suspendPlayback &&
+      isAppActive &&
+      !decoderErrorDetected &&
+      !pausedByUser;
+
+    if (!shouldAttemptPlayback) {
+      return;
+    }
+
+    const attemptPlay = () => {
+      if (
+        !isMountedRef.current ||
+        !isActive ||
+        suspendPlayback ||
+        !isAppActive ||
+        decoderErrorDetected ||
+        pausedByUser
+      ) {
+        return;
+      }
+
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current) {
+        return;
+      }
+
+      try {
+        if (controller.isPlaying()) {
+          clearAutoplayRetryTimeouts();
+          return;
+        }
+
+        controller.setMuted(isMuted);
+        controller.play();
+      } catch (error) {
+        playerValidRef.current = false;
+        addFabricBreadcrumb('feed_video_autoplay_retry_failed', {
+          postId: item.id,
+          index,
+          reason,
+          message: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+    };
+
+    void enterPlaybackMode();
+    attemptPlay();
+
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+
+    [120, 350, 800, 1500].forEach((delay) => {
+      const timeoutId = setTimeout(attemptPlay, delay);
+      autoplayRetryTimeoutsRef.current.push(timeoutId);
+    });
+  }, [
+    clearAutoplayRetryTimeouts,
+    decoderErrorDetected,
+    index,
+    isActive,
+    isAppActive,
+    isMuted,
+    isVideo,
+    item.id,
+    pausedByUser,
+    suspendPlayback,
+  ]);
 
   const thumbnailOrPlaceholderUrl = getThumbnailUrl(item) || (isVideo ? null : mediaUrl) || null;
   const fallbackImageUrl =
@@ -647,14 +721,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (videoMountRetryTimeoutRef.current) {
         clearTimeout(videoMountRetryTimeoutRef.current);
       }
+      clearAutoplayRetryTimeouts();
     };
-  }, []);
+  }, [clearAutoplayRetryTimeouts]);
 
   // CRITICAL: Immediately mute and pause audio when scrolling away, minimizing
   // the app, or suspending playback. Checks ALL conditions that should stop audio.
   useEffect(() => {
     const shouldBeSilent = !isActive || suspendPlayback || !isAppActive;
     if (shouldBeSilent) {
+      clearAutoplayRetryTimeouts();
       const controller = videoControllerRef.current;
       if (controller) {
         try {
@@ -663,7 +739,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         } catch (_) {}
       }
     }
-  }, [isActive, suspendPlayback, isAppActive]);
+  }, [clearAutoplayRetryTimeouts, isActive, suspendPlayback, isAppActive]);
 
   // SAFETY NET: Poll every 500ms to catch any player that escaped the effects
   // (e.g., native auto-play, race conditions during rapid scrolling).
@@ -713,9 +789,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
+    clearAutoplayRetryTimeouts();
     firstPlaybackRequestedAtRef.current = null;
     stallCountRef.current = 0;
-  }, [item.id]);
+  }, [clearAutoplayRetryTimeouts, item.id]);
 
   useEffect(() => {
     if (!isVideo || !isActive || !isAppActive || suspendPlayback) {
@@ -797,9 +874,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
-      if (videoSourceMode === 'ios_proxy') {
-        disableVideoProxyForSession();
-      }
       setPreferDirectVideoSource(true);
       setVideoMountBoundaryKey((prev) => prev + 1);
       setCanMountVideoPlayer(true);
@@ -838,11 +912,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (isMountedRef.current) {
       setIsPlaying(nextPlaying);
       if (nextPlaying) {
+        clearAutoplayRetryTimeouts();
         setVideoReady(true);
         pauseIndicatorOpacity.setValue(0);
       }
     }
-  }, [pauseIndicatorOpacity]);
+  }, [clearAutoplayRetryTimeouts, pauseIndicatorOpacity]);
 
   const handleNativeStatusChange = useCallback((event: { status?: string; error?: unknown }) => {
     if (!isMountedRef.current) {
@@ -867,9 +942,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setIsPlaying(false);
       setVideoReady(false);
       if (Platform.OS === 'ios' && shouldLoadVideo && !preferDirectVideoSource) {
-        if (videoSourceMode === 'ios_proxy') {
-          disableVideoProxyForSession();
-        }
         setPreferDirectVideoSource(true);
         setVideoMountBoundaryKey((prev) => prev + 1);
         setCanMountVideoPlayer(true);
@@ -922,23 +994,40 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   useEffect(() => {
     const controller = videoControllerRef.current;
-    if (!controller || !playerValidRef.current) return;
-    try {
-      if (isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser) {
-        controller.setMuted(isMuted);
-        controller.play();
-      } else {
-        controller.setMuted(true);
-        controller.pause();
+    const shouldAutoplay = isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser;
+    if (!controller || !playerValidRef.current) {
+      if (shouldAutoplay) {
+        requestAutoplayPlayback('waiting_for_player');
       }
+      return;
+    }
+    try {
       if (isActive && !wasActiveRef.current) {
         controller.seekTo(0);
+      }
+      if (shouldAutoplay) {
+        requestAutoplayPlayback('active_item');
+      } else {
+        clearAutoplayRetryTimeouts();
+        controller.setMuted(true);
+        controller.pause();
       }
       wasActiveRef.current = isActive;
     } catch (e) {
       playerValidRef.current = false;
     }
-  }, [isActive, suspendPlayback, isAppActive, isMuted, decoderErrorDetected, index, pausedByUser, isPlayerValid, canMountVideoPlayer]);
+  }, [
+    canMountVideoPlayer,
+    clearAutoplayRetryTimeouts,
+    decoderErrorDetected,
+    isActive,
+    isAppActive,
+    isMuted,
+    isPlayerValid,
+    pausedByUser,
+    requestAutoplayPlayback,
+    suspendPlayback,
+  ]);
 
   // Poll video progress every 250ms for smooth progress bar animation.
   // Expo Video's native timeUpdate event is unreliable on many devices.
@@ -1001,9 +1090,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
-  // If an active video never renders first frame, aggressively remount up to 3 times.
-  // Critical for recovering black screens on iPhone X and low-memory Android devices.
-  // Each retry uses exponential backoff: 2s, 3s, 5s.
+  // If an active video never renders first frame, recover without tearing down
+  // the iOS VideoView. Remount churn is risky with expo-video SharedObjects on
+  // older iPhones, so iOS retries playback in-place while Android keeps the
+  // existing remount recovery path.
   useEffect(() => {
     if (!isVideo || !isActive || !shouldLoadVideo || videoReady || videoError || retryCount >= 3) {
       return;
@@ -1030,10 +1120,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         currentTime: lastPlaybackTimeRef.current,
       });
       setRetryCount((prev) => prev + 1);
-      if (Platform.OS === 'ios' && !preferDirectVideoSource && retryCount >= 1) {
-        if (videoSourceMode === 'ios_proxy') {
-          disableVideoProxyForSession();
+      if (Platform.OS === 'ios') {
+        if (!preferDirectVideoSource && retryCount >= 1) {
+          setPreferDirectVideoSource(true);
         }
+        requestAutoplayPlayback('stall_retry');
+        return;
+      }
+      if (!preferDirectVideoSource && retryCount >= 1) {
         setPreferDirectVideoSource(true);
       }
       // Only bump the boundary key. React's key reconciliation unmounts the
@@ -1045,7 +1139,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }, delay);
 
     return () => clearTimeout(timeoutId);
-  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource, item.id, screenName, videoSourceMode]);
+  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource, item.id, requestAutoplayPlayback, screenName, videoSourceMode]);
 
   const handleTapToPause = useCallback((e?: any) => {
     // Only pause/play when tapping the CENTER of the screen.

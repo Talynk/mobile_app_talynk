@@ -70,7 +70,7 @@ function configureFeedPlayer(player: VideoPlayer) {
       try {
         player.bufferOptions = {
           preferredForwardBufferDuration: 0,
-          waitsToMinimizeStalling: false,
+          waitsToMinimizeStalling: true,
         } as any;
       } catch {
         (player as any).preferredForwardBufferDuration = 0;
