@@ -55,7 +55,7 @@ function AnimatedRow({ children, index }: { children: React.ReactNode; index: nu
   const onPressIn = () => {
     Animated.spring(scale, {
       toValue: 0.97,
-      useNativeDriver: true,
+      useNativeDriver: false,
       speed: 50,
       bounciness: 4,
     }).start();
@@ -64,7 +64,7 @@ function AnimatedRow({ children, index }: { children: React.ReactNode; index: nu
   const onPressOut = () => {
     Animated.spring(scale, {
       toValue: 1,
-      useNativeDriver: true,
+      useNativeDriver: false,
       speed: 50,
       bounciness: 4,
     }).start();

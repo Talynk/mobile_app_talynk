@@ -7,6 +7,8 @@ import { useAppActive } from '@/lib/hooks/use-app-active';
 import { enterPlaybackMode } from '@/lib/media/audio-session';
 import { getVideoSource } from '@/lib/utils/video-source';
 
+const VIDEO_OVERLAY_ANIMATION_USES_NATIVE_DRIVER = false;
+
 interface VideoPlayerProps {
   source: string | { uri: string };
   style?: any;
@@ -74,6 +76,10 @@ export const VideoPlayer = ({
     } catch (_) {}
   }, [isAppActive, player, shouldPlay]);
 
+  React.useEffect(() => () => {
+    muteOpacity.stopAnimation();
+  }, [muteOpacity]);
+
   const handleVideoPress = () => {
     if (showMuteToggle) {
       toggleMute();
@@ -82,13 +88,13 @@ export const VideoPlayer = ({
         Animated.timing(muteOpacity, {
           toValue: 1,
           duration: 200,
-          useNativeDriver: true,
+          useNativeDriver: VIDEO_OVERLAY_ANIMATION_USES_NATIVE_DRIVER,
         }),
         Animated.delay(800),
         Animated.timing(muteOpacity, {
           toValue: 0,
           duration: 500,
-          useNativeDriver: true,
+          useNativeDriver: VIDEO_OVERLAY_ANIMATION_USES_NATIVE_DRIVER,
         }),
       ]).start();
     }

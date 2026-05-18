@@ -33,7 +33,7 @@ export default function NetworkBanner() {
       Animated.timing(translateY, {
         toValue: -140,
         duration: 220,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }).start(({ finished }) => {
         if (finished) {
           setBanner((current) => ({ ...current, visible: false }));
@@ -46,7 +46,7 @@ export default function NetworkBanner() {
       setBanner({ ...nextBanner, visible: true });
       Animated.spring(translateY, {
         toValue: 0,
-        useNativeDriver: true,
+        useNativeDriver: false,
         damping: 18,
         stiffness: 180,
       }).start();

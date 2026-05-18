@@ -47,6 +47,7 @@ import {
 } from '@/lib/feed-video-player-pool';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
+const FEED_ANIMATION_USES_NATIVE_DRIVER = false;
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -721,9 +722,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (videoMountRetryTimeoutRef.current) {
         clearTimeout(videoMountRetryTimeoutRef.current);
       }
+      muteOpacity.stopAnimation();
+      pauseIndicatorOpacity.stopAnimation();
+      likeScale.stopAnimation();
+      likeOpacity.stopAnimation();
+      thumbnailOpacity.stopAnimation();
+      scrubProgress.stopAnimation();
       clearAutoplayRetryTimeouts();
     };
-  }, [clearAutoplayRetryTimeouts]);
+  }, [clearAutoplayRetryTimeouts, likeOpacity, likeScale, muteOpacity, pauseIndicatorOpacity, scrubProgress, thumbnailOpacity]);
 
   // CRITICAL: Immediately mute and pause audio when scrolling away, minimizing
   // the app, or suspending playback. Checks ALL conditions that should stop audio.
@@ -1060,7 +1067,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         Animated.timing(thumbnailOpacity, {
           toValue: 0,
           duration: 200,
-          useNativeDriver: true,
+          useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER,
         }).start();
       }, 80);
       return () => clearTimeout(timerId);
@@ -1171,7 +1178,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
     muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
     muteOpacity.setValue(1);
-    Animated.timing(muteOpacity, { toValue: 0, duration: 800, delay: 300, useNativeDriver: true }).start();
+    Animated.timing(muteOpacity, {
+      toValue: 0,
+      duration: 800,
+      delay: 300,
+      useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER,
+    }).start();
   };
 
   const handleLike = async () => {
@@ -1188,13 +1200,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const currentIsLiked = isPostLiked;
     const newIsLiked = !currentIsLiked;
     Animated.sequence([
-      Animated.timing(likeScale, { toValue: 1.3, duration: 150, useNativeDriver: true }),
-      Animated.timing(likeScale, { toValue: 1, duration: 150, useNativeDriver: true }),
+      Animated.timing(likeScale, { toValue: 1.3, duration: 150, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
+      Animated.timing(likeScale, { toValue: 1, duration: 150, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
     ]).start();
     if (newIsLiked) {
       Animated.sequence([
-        Animated.timing(likeOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-        Animated.timing(likeOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(likeOpacity, { toValue: 1, duration: 200, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
+        Animated.timing(likeOpacity, { toValue: 0, duration: 300, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
       ]).start();
     }
     try {

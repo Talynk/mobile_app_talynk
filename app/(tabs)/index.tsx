@@ -60,6 +60,7 @@ const FEED_TABS = [
   { key: 'following', label: 'Following' },
   { key: 'challenges', label: 'Competitions' },
 ];
+const FEED_ANIMATION_USES_NATIVE_DRIVER = false;
 
 type FeedTab = 'foryou' | 'following' | 'challenges';
 
@@ -804,12 +805,17 @@ export default function FeedScreen() {
 
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
-    Animated.loop(
+    const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(shimmerAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
+        Animated.timing(shimmerAnim, { toValue: 0, duration: 800, useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER }),
       ])
-    ).start();
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      shimmerAnim.stopAnimation();
+    };
   }, [shimmerAnim]);
   const shimmerOpacity = shimmerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] });
 

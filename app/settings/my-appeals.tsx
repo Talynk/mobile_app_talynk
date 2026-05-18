@@ -160,8 +160,8 @@ export default function MyAppealsScreen() {
     if (!loading) return;
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        Animated.timing(shimmerAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 1, duration: 800, useNativeDriver: false }),
+        Animated.timing(shimmerAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
       ])
     );
     loop.start();

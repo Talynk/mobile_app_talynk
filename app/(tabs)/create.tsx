@@ -1851,13 +1851,13 @@ export default function CreatePostScreen() {
       Animated.timing(toastOpacity, {
         toValue: 1,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.delay(2500),
       Animated.timing(toastOpacity, {
         toValue: 0,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
     ]).start(() => {
       setToastMessage(null);

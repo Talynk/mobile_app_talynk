@@ -24,12 +24,12 @@ export default function DotsSpinner({
           Animated.timing(anim, {
             toValue: 1,
             duration: 400,
-            useNativeDriver: true,
+            useNativeDriver: false,
           }),
           Animated.timing(anim, {
             toValue: 0,
             duration: 400,
-            useNativeDriver: true,
+            useNativeDriver: false,
           }),
         ]);
       });

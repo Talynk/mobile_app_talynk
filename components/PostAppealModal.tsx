@@ -49,7 +49,7 @@ export const PostAppealModal: React.FC<PostAppealModalProps> = ({
       setErrorMessage('');
       Animated.spring(slideAnim, {
         toValue: 1,
-        useNativeDriver: true,
+        useNativeDriver: false,
         tension: 65,
         friction: 11,
       }).start();
@@ -69,9 +69,9 @@ export const PostAppealModal: React.FC<PostAppealModalProps> = ({
     setSubmitStatus(status);
     setErrorMessage(message);
     Animated.sequence([
-      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: false }),
       Animated.delay(2500),
-      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: false }),
     ]).start(() => {
       // Only reset submitStatus if it was an error toast, success is handled by isSuccess state
       if (status === 'error') {

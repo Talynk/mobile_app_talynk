@@ -253,14 +253,14 @@ export default function CommentsModal({
       Animated.parallel([
         Animated.spring(slideAnim, {
           toValue: 0,
-          useNativeDriver: true,
+          useNativeDriver: false,
           tension: 65,
           friction: 11,
         }),
         Animated.timing(fadeAnim, {
           toValue: 1,
           duration: 200,
-          useNativeDriver: true,
+          useNativeDriver: false,
         }),
       ]).start();
       
@@ -305,12 +305,12 @@ export default function CommentsModal({
       Animated.timing(slideAnim, {
         toValue: SCREEN_HEIGHT,
         duration: 250,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.timing(fadeAnim, {
         toValue: 0,
         duration: 200,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
     ]).start(() => {
       if (isMounted.current) {

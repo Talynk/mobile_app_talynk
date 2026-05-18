@@ -42,6 +42,8 @@ import { prefetchFollowingFeed, removeUserFromFollowingFeedCache, seedFollowingF
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { enterPlaybackMode } from '@/lib/media/audio-session';
 
+const POST_ANIMATION_USES_NATIVE_DRIVER = false;
+
 const timeAgo = (dateString?: string | null) => {
   if (!dateString) return '';
   const now = new Date();
@@ -425,7 +427,12 @@ export default function PostDetailScreen() {
     }
     muteIconRef.current = newMuted ? 'volume-x' : 'volume-2';
     muteOpacity.setValue(1);
-    Animated.timing(muteOpacity, { toValue: 0, duration: 800, delay: 300, useNativeDriver: true }).start();
+    Animated.timing(muteOpacity, {
+      toValue: 0,
+      duration: 800,
+      delay: 300,
+      useNativeDriver: POST_ANIMATION_USES_NATIVE_DRIVER,
+    }).start();
   };
 
   const isDraggingPostRef = useRef(false);
