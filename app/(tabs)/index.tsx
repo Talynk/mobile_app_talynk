@@ -116,6 +116,8 @@ export default function FeedScreen() {
   const followingAutoloadAttemptedRef = useRef(false);
   const lastFollowSyncUserIdRef = useRef<string | null>(null);
   const pendingLikeRequestsRef = useRef<Set<string>>(new Set());
+  const pendingLikeSyncTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingFollowSyncTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastAutoPaginationKeyRef = useRef<string | null>(null);
   const lastTabRef = useRef<FeedTab>('foryou');
   const didAdvanceForYouSessionRef = useRef(false);
@@ -144,6 +146,7 @@ export default function FeedScreen() {
     userPreferences,
     effectiveRefresh,
     feedEndpoint,
+    followingEmptyReason,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -155,7 +158,10 @@ export default function FeedScreen() {
     ? {}
     : feedTab === 'foryou'
       ? { refreshSeed: forYouRefreshSeed, limit: FEED_DEFAULT_PAGE_SIZE }
-      : {});
+      : {
+          followedUsersReady,
+          followedUsersCount: followedUsers.size,
+        });
   const visiblePosts = React.useMemo(
     () => activeTab === 'following' ? reorderFollowingPosts(posts, followingOrderSeed) : posts,
     [activeTab, followingOrderSeed, posts],
@@ -186,6 +192,10 @@ export default function FeedScreen() {
       clearTimeout(feedTransitionTimeoutRef.current);
       feedTransitionTimeoutRef.current = null;
     }
+    pendingLikeSyncTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    pendingLikeSyncTimeoutsRef.current.clear();
+    pendingFollowSyncTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    pendingFollowSyncTimeoutsRef.current.clear();
   }, []);
   const currentFeedSessionId = React.useMemo(
     () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
@@ -504,6 +514,45 @@ export default function FeedScreen() {
     });
   }, [queryClient]);
 
+  const scheduleLikeServerSync = useCallback((postId: string, desiredLiked: boolean, desiredCount: number) => {
+    const existing = pendingLikeSyncTimeoutsRef.current.get(postId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timeoutId = setTimeout(async () => {
+      pendingLikeSyncTimeoutsRef.current.delete(postId);
+      try {
+        const status = await likesApi.getStatus(postId);
+        const serverLiked = status.status === 'success' ? status.data?.isLiked : undefined;
+        if (serverLiked === desiredLiked) {
+          const serverCount = status.data?.likeCount ?? desiredCount;
+          dispatch(setPostLikeCount({ postId, count: serverCount }));
+          updateLikeInCache(postId, desiredLiked, serverCount);
+          return;
+        }
+
+        const retry = await likesApi.toggle(postId);
+        if (retry.status === 'success' && retry.data) {
+          const nextLiked = retry.data.isLiked;
+          const nextCount = retry.data.likeCount;
+          if (nextLiked) dispatch(addLikedPost(postId));
+          else dispatch(removeLikedPost(postId));
+          dispatch(setPostLikeCount({ postId, count: nextCount }));
+          updateLikeInCache(postId, nextLiked, nextCount);
+        }
+      } catch (error: any) {
+        addFabricBreadcrumb('feed_like_sync_retry_failed', {
+          postId,
+          desiredLiked,
+          message: error?.message || 'unknown',
+        });
+      }
+    }, 2500);
+
+    pendingLikeSyncTimeoutsRef.current.set(postId, timeoutId);
+  }, [dispatch, updateLikeInCache]);
+
   const updateCommentCountInCache = useCallback((postId: string, delta: number) => {
     if (!postId || delta === 0) {
       return;
@@ -579,21 +628,23 @@ export default function FeedScreen() {
           trackFeedEngagement(postId, 'like');
         }
       } else {
-        if (currentIsLiked) dispatch(addLikedPost(postId));
-        else dispatch(removeLikedPost(postId));
-        dispatch(setPostLikeCount({ postId, count: currentCount }));
-        updateLikeInCache(postId, currentIsLiked, currentCount);
+        addFabricBreadcrumb('feed_like_kept_optimistic_after_error', {
+          postId,
+          desiredLiked: newIsLiked,
+          message: response.message || 'toggle failed',
+        });
+        scheduleLikeServerSync(postId, newIsLiked, newCount);
       }
     } catch {
-      // Revert on failure
-      if (currentIsLiked) dispatch(addLikedPost(postId));
-      else dispatch(removeLikedPost(postId));
-      dispatch(setPostLikeCount({ postId, count: currentCount }));
-      updateLikeInCache(postId, currentIsLiked, currentCount);
+      addFabricBreadcrumb('feed_like_kept_optimistic_after_exception', {
+        postId,
+        desiredLiked: newIsLiked,
+      });
+      scheduleLikeServerSync(postId, newIsLiked, newCount);
     } finally {
       pendingLikeRequestsRef.current.delete(postId);
     }
-  }, [user, likedPosts, visiblePosts, postLikeCounts, dispatch, trackFeedEngagement, updateLikeInCache]);
+  }, [user, likedPosts, visiblePosts, postLikeCounts, dispatch, scheduleLikeServerSync, trackFeedEngagement, updateLikeInCache]);
 
   const updateFollowInCache = useCallback((userId: string, isFollowing: boolean) => {
     queryClient.setQueriesData({ queryKey: ['feed'] }, (old: any) => {
@@ -618,6 +669,50 @@ export default function FeedScreen() {
     });
   }, [queryClient]);
 
+  const scheduleFollowServerSync = useCallback((targetUserId: string, desiredFollowing: boolean) => {
+    if (!user?.id) {
+      return;
+    }
+
+    const existing = pendingFollowSyncTimeoutsRef.current.get(targetUserId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timeoutId = setTimeout(async () => {
+      pendingFollowSyncTimeoutsRef.current.delete(targetUserId);
+      try {
+        const status = await followsApi.checkFollowing(targetUserId);
+        const serverFollowing = status.status === 'success'
+          ? Boolean(status.data?.isFollowing)
+          : undefined;
+
+        if (serverFollowing === desiredFollowing) {
+          return;
+        }
+
+        const retry = desiredFollowing
+          ? await followsApi.follow(targetUserId)
+          : await followsApi.unfollow(targetUserId);
+
+        if (retry.status === 'success') {
+          void syncFollowedUsersFromServer();
+          if (desiredFollowing) {
+            void prefetchFollowingFeed(user.id);
+          }
+        }
+      } catch (error: any) {
+        addFabricBreadcrumb('feed_follow_sync_retry_failed', {
+          targetUserId,
+          desiredFollowing,
+          message: error?.message || 'unknown',
+        });
+      }
+    }, 2500);
+
+    pendingFollowSyncTimeoutsRef.current.set(targetUserId, timeoutId);
+  }, [syncFollowedUsersFromServer, user?.id]);
+
   const handleFollow = useCallback(async (userId: string) => {
     if (!user) return;
     setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
@@ -627,21 +722,22 @@ export default function FeedScreen() {
     try {
       const res = await followsApi.follow(userId);
       if (res.status !== 'success') {
-        setUserFollowStatus((prev) => ({ ...prev, [userId]: false }));
-        updateFollowInCache(userId, false);
-        updateFollowedUsers(userId, false);
-        removeUserFromFollowingFeedCache(user.id, userId);
+        addFabricBreadcrumb('feed_follow_kept_optimistic_after_error', {
+          targetUserId: userId,
+          message: res.message || 'follow failed',
+        });
+        scheduleFollowServerSync(userId, true);
       } else {
         void syncFollowedUsersFromServer();
         void prefetchFollowingFeed(user.id);
       }
     } catch {
-      setUserFollowStatus((prev) => ({ ...prev, [userId]: false }));
-      updateFollowInCache(userId, false);
-      updateFollowedUsers(userId, false);
-      removeUserFromFollowingFeedCache(user.id, userId);
+      addFabricBreadcrumb('feed_follow_kept_optimistic_after_exception', {
+        targetUserId: userId,
+      });
+      scheduleFollowServerSync(userId, true);
     }
-  }, [user, posts, syncFollowedUsersFromServer, updateFollowInCache, updateFollowedUsers]);
+  }, [user, posts, scheduleFollowServerSync, syncFollowedUsersFromServer, updateFollowInCache, updateFollowedUsers]);
 
   const handleUnfollow = useCallback(async (userId: string) => {
     if (!user) return;
@@ -652,20 +748,21 @@ export default function FeedScreen() {
     try {
       const res = await followsApi.unfollow(userId);
       if (res.status !== 'success') {
-        setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
-        updateFollowInCache(userId, true);
-        updateFollowedUsers(userId, true);
-        seedFollowingFeedCache(user.id, userId, posts);
+        addFabricBreadcrumb('feed_unfollow_kept_optimistic_after_error', {
+          targetUserId: userId,
+          message: res.message || 'unfollow failed',
+        });
+        scheduleFollowServerSync(userId, false);
       } else {
         void syncFollowedUsersFromServer();
       }
     } catch {
-      setUserFollowStatus((prev) => ({ ...prev, [userId]: true }));
-      updateFollowInCache(userId, true);
-      updateFollowedUsers(userId, true);
-      seedFollowingFeedCache(user.id, userId, posts);
+      addFabricBreadcrumb('feed_unfollow_kept_optimistic_after_exception', {
+        targetUserId: userId,
+      });
+      scheduleFollowServerSync(userId, false);
     }
-  }, [user, updateFollowInCache, updateFollowedUsers, syncFollowedUsersFromServer, posts]);
+  }, [user, updateFollowInCache, updateFollowedUsers, syncFollowedUsersFromServer, scheduleFollowServerSync]);
 
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
@@ -1060,6 +1157,23 @@ export default function FeedScreen() {
                     activeOpacity={0.8}
                   >
                     <Text style={styles.emptyLoginButtonText}>Log in / Sign up</Text>
+                  </TouchableOpacity>
+                </View>
+                ) : activeTab === 'following' && followingEmptyReason === 'not-following-anyone' ? (
+                <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
+                  <Feather name="users" size={64} color="#60a5fa" />
+                  <Text style={styles.emptyText}>
+                    No following posts yet
+                  </Text>
+                  <Text style={styles.emptySubtext}>
+                    Follow people to see their posts here.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.emptyLoginButton}
+                    onPress={() => router.push('/search' as any)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.emptyLoginButtonText}>Find creators</Text>
                   </TouchableOpacity>
                 </View>
                 ) : (

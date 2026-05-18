@@ -67,6 +67,7 @@ import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { safeRouterBack } from '@/lib/utils/navigation';
 import websocketService from '@/lib/websocket-service';
 import { enterPlaybackMode, enterRecordingMode } from '@/lib/media/audio-session';
+import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLORS = {
@@ -314,6 +315,7 @@ export default function CreatePostScreen() {
   const [editing, setEditing] = useState(false);
   const [hasOpenedCameraOnMount, setHasOpenedCameraOnMount] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [isCreateScreenFocused, setIsCreateScreenFocused] = useState(true);
   const [cameraMode, setCameraMode] = useState<'video' | 'picture'>('video');
   const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -382,6 +384,7 @@ export default function CreatePostScreen() {
   const shouldUseVisionCameraVideo = Platform.OS === 'android';
   const isUsingVisionCameraVideo = shouldUseVisionCameraVideo && cameraMode === 'video';
   const visionCameraDevice = useCameraDevice(cameraFacing);
+  const cameraShouldBeActive = showCamera && isAppActive && isCreateScreenFocused;
 
   // Track mount state to prevent state updates after unmount (fixes crash)
   const isMountedRef = useRef(true);
@@ -463,8 +466,12 @@ export default function CreatePostScreen() {
   const { setCreateFocused } = useCreateFocus();
   useFocusEffect(
     useCallback(() => {
+      setIsCreateScreenFocused(true);
       setCreateFocused(true);
-      return () => setCreateFocused(false);
+      return () => {
+        setIsCreateScreenFocused(false);
+        setCreateFocused(false);
+      };
     }, [setCreateFocused])
   );
 
@@ -1135,6 +1142,12 @@ export default function CreatePostScreen() {
       if (!isCameraReady && showCamera && cameraRetryCountRef.current < 1) {
         cameraRetryCountRef.current += 1;
         console.warn('[Camera] Watchdog: auto-retrying camera (attempt', cameraRetryCountRef.current, ')');
+        addFabricBreadcrumb('camera_preview_timeout_retry', {
+          mode: cameraMode,
+          platform: Platform.OS,
+          usingVisionCamera: isUsingVisionCameraVideo,
+          sessionKey: cameraSessionKey,
+        });
         remountCamera(cameraMode);
       }
     }, 6000);
@@ -1142,6 +1155,12 @@ export default function CreatePostScreen() {
     const finalWatchdog = setTimeout(() => {
       if (!isCameraReady && showCamera) {
         console.error('[Camera] Watchdog: camera did not become ready after retry');
+        addFabricBreadcrumb('camera_preview_timeout', {
+          mode: cameraMode,
+          platform: Platform.OS,
+          usingVisionCamera: isUsingVisionCameraVideo,
+          sessionKey: cameraSessionKey,
+        });
         try {
           const Sentry = require('@sentry/react-native');
           Sentry.captureMessage('Camera blank/dark: onCameraReady never fired after retry', {
@@ -1176,7 +1195,7 @@ export default function CreatePostScreen() {
     }, isUsingVisionCameraVideo ? 14000 : 14000);
 
     return () => { clearTimeout(autoRetry); clearTimeout(finalWatchdog); };
-  }, [showCamera, isCameraReady, remountCamera, cameraMode, isUsingVisionCameraVideo]);
+  }, [showCamera, isCameraReady, remountCamera, cameraMode, isUsingVisionCameraVideo, cameraSessionKey]);
 
   // --- CAMERA RECORDING ---
   const handleRecordVideo = useCallback(async () => {
@@ -1506,17 +1525,31 @@ export default function CreatePostScreen() {
 
     try {
       if (!isCameraReady) {
+        addFabricBreadcrumb('camera_record_start_blocked_not_ready', {
+          mode: cameraMode,
+          platform: Platform.OS,
+          usingVisionCamera: isUsingVisionCameraVideo,
+        });
         Alert.alert('Camera Starting', 'Please wait for the camera preview to finish loading.');
         return;
       }
 
       if (isUsingVisionCameraVideo) {
         if (!visionCameraRef.current || !visionCameraDevice) {
+          addFabricBreadcrumb('vision_camera_record_start_missing_ref', {
+            hasRef: !!visionCameraRef.current,
+            hasDevice: !!visionCameraDevice,
+            facing: cameraFacing,
+          });
           Alert.alert('Camera Error', 'The video camera is not ready yet. Please wait a moment and try again.');
           return;
         }
 
         const MAX_RECORDING_SECONDS = 120;
+        addFabricBreadcrumb('vision_camera_record_start', {
+          facing: cameraFacing,
+          hasAudio: hasVisionMicrophonePermission,
+        });
         setIsRecording(true);
         setRecordingDuration(0);
         recordingDurationRef.current = 0;
@@ -1564,6 +1597,10 @@ export default function CreatePostScreen() {
                 }
               } catch (error) {
                 console.error('[VisionCamera] Video file validation failed:', error);
+                captureFabricError(error, 'vision_camera_recording_validation_failed', {
+                  videoUri,
+                  duration: recordingDurationRef.current,
+                });
                 if (isMountedRef.current) {
                   Alert.alert('Recording failed', 'Failed to save video. Please try again.');
                   setShowCamera(false);
@@ -1611,6 +1648,10 @@ export default function CreatePostScreen() {
           },
           onRecordingError: (error) => {
             console.error('[VisionCamera] Recording error:', error);
+            captureFabricError(error, 'vision_camera_recording_error', {
+              facing: cameraFacing,
+              duration: recordingDurationRef.current,
+            });
             setTimeout(() => {
               if (!isMountedRef.current) return;
 
@@ -1637,9 +1678,18 @@ export default function CreatePostScreen() {
       }
 
       if (!cameraRef.current) {
+        addFabricBreadcrumb('expo_camera_record_start_missing_ref', {
+          mode: cameraMode,
+          platform: Platform.OS,
+        });
         return;
       }
 
+      addFabricBreadcrumb('expo_camera_record_start', {
+        platform: Platform.OS,
+        facing: cameraFacing,
+        muted: cameraMode === 'video' && !microphonePermission?.granted,
+      });
       setIsRecording(true);
       setRecordingDuration(0);
       recordingDurationRef.current = 0;
@@ -1696,6 +1746,12 @@ export default function CreatePostScreen() {
               const fileInfo = await FileSystem.getInfoAsync(video.uri);
               if (!fileInfo.exists || Number((fileInfo as any).size || 0) < 1024) {
                 console.error('[Recording] Video file does not exist:', video.uri);
+                captureFabricError(new Error('Expo Camera recording validation failed'), 'expo_camera_recording_validation_failed', {
+                  videoUri: video.uri,
+                  duration: recordingDurationRef.current,
+                  fileExists: fileInfo.exists,
+                  fileSize: fileInfo.exists ? (fileInfo as any).size : 0,
+                });
                 if (isMountedRef.current) {
                   Alert.alert('Error', 'Video file was not saved properly. Please try again.');
                   setShowCamera(false);
@@ -1758,6 +1814,11 @@ export default function CreatePostScreen() {
         }, 100); // Small delay to ensure camera is fully stopped
       }).catch((error: any) => {
         console.error('Recording promise error:', error);
+        captureFabricError(error, 'expo_camera_recording_promise_error', {
+          platform: Platform.OS,
+          facing: cameraFacing,
+          duration: recordingDurationRef.current,
+        });
 
         // CRITICAL FIX: Use setTimeout to prevent crash during error handling
         setTimeout(() => {
@@ -1788,6 +1849,11 @@ export default function CreatePostScreen() {
       });
     } catch (error: any) {
       console.error('Recording error:', error);
+      captureFabricError(error, 'camera_recording_start_error', {
+        platform: Platform.OS,
+        usingVisionCamera: isUsingVisionCameraVideo,
+        facing: cameraFacing,
+      });
       Alert.alert(
         'Recording error',
         shouldUseVisionCameraVideo
@@ -1804,7 +1870,7 @@ export default function CreatePostScreen() {
       clearRecordingTimers();
       recordingDurationRef.current = 0;
     }
-  }, [clearRecordingTimers, isRecording, isCameraReady, isUsingVisionCameraVideo, launchSystemCameraCapture, shouldUseVisionCameraVideo, stopVisionRecordingOnce, visionCameraDevice]);
+  }, [cameraFacing, cameraMode, clearRecordingTimers, hasVisionMicrophonePermission, isRecording, isCameraReady, isUsingVisionCameraVideo, launchSystemCameraCapture, microphonePermission?.granted, shouldUseVisionCameraVideo, stopVisionRecordingOnce, visionCameraDevice]);
 
   const stopRecording = () => {
     if (!isRecording) return;
@@ -2860,7 +2926,7 @@ export default function CreatePostScreen() {
               ref={visionCameraRef}
               style={styles.camera}
               device={visionCameraDevice}
-              isActive={showCamera && isAppActive}
+              isActive={cameraShouldBeActive}
               preview
               video
               audio={hasVisionMicrophonePermission}
@@ -2870,9 +2936,19 @@ export default function CreatePostScreen() {
               zoom={1}
               onInitialized={() => {
                 console.log('[VisionCamera] Session initialized');
+                addFabricBreadcrumb('vision_camera_initialized', {
+                  mode: cameraMode,
+                  facing: cameraFacing,
+                  sessionKey: cameraSessionKey,
+                });
               }}
               onPreviewStarted={() => {
                 console.log('[VisionCamera] Preview started');
+                addFabricBreadcrumb('vision_camera_preview_started', {
+                  mode: cameraMode,
+                  facing: cameraFacing,
+                  sessionKey: cameraSessionKey,
+                });
                 setIsCameraReady(true);
               }}
               onError={(error: any) => {
@@ -2899,6 +2975,7 @@ export default function CreatePostScreen() {
               key={`camera-${cameraSessionKey}-${cameraMode}-${cameraFacing}`}
               ref={cameraRef}
               style={styles.camera}
+              active={cameraShouldBeActive}
               facing={cameraFacing}
               mode={cameraMode}
               zoom={0}
@@ -2908,6 +2985,11 @@ export default function CreatePostScreen() {
               flash="off"
               onCameraReady={() => {
                 console.log('[Camera] Camera is ready');
+                addFabricBreadcrumb('expo_camera_ready', {
+                  mode: cameraMode,
+                  facing: cameraFacing,
+                  sessionKey: cameraSessionKey,
+                });
                 setIsCameraReady(true);
               }}
               onMountError={(error: any) => {

@@ -17,7 +17,7 @@ import {
   PanResponder,
   Modal,
 } from 'react-native';
-import { VideoView, type VideoPlayer } from 'expo-video';
+import { VideoView, useVideoPlayer, type VideoPlayer, type VideoSource } from 'expo-video';
 import { router } from 'expo-router';
 import { Post } from '@/types';
 import { useAuth } from '@/lib/auth-context';
@@ -169,6 +169,11 @@ type NativeFeedVideoProps = {
   onPlayToEnd: () => void;
   onPlayerReady: () => void;
   onPlayerInvalid: () => void;
+};
+
+type HookFeedVideoProps = Omit<NativeFeedVideoProps, 'player'> & {
+  source: VideoSource;
+  playerInstanceKey: string;
 };
 
 class VideoMountBoundary extends React.Component<
@@ -425,6 +430,64 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
 
 NativeFeedVideo.displayName = 'NativeFeedVideo';
 
+const HookFeedVideo = React.forwardRef<NativeFeedVideoHandle, HookFeedVideoProps>(
+  ({ source, playerInstanceKey, ...props }, ref) => {
+    const player = useVideoPlayer(source, (createdPlayer) => {
+      try {
+        createdPlayer.loop = true;
+        createdPlayer.muted = true;
+        createdPlayer.staysActiveInBackground = false;
+        createdPlayer.timeUpdateEventInterval = 0.25;
+        try {
+          (createdPlayer as any).audioMixingMode = 'doNotMix';
+        } catch (_) {}
+        if (Platform.OS === 'ios') {
+          try {
+            createdPlayer.bufferOptions = {
+              preferredForwardBufferDuration: 0,
+              waitsToMinimizeStalling: true,
+            } as any;
+          } catch {
+            (createdPlayer as any).preferredForwardBufferDuration = 0;
+          }
+        }
+        createdPlayer.pause();
+      } catch (_) {}
+    });
+
+    void playerInstanceKey;
+
+    return <NativeFeedVideo ref={ref} player={player} {...props} />;
+  },
+);
+
+HookFeedVideo.displayName = 'HookFeedVideo';
+
+type FeedVideoProps = NativeFeedVideoProps & {
+  source: VideoSource;
+  playerInstanceKey: string;
+};
+
+const FeedVideo = React.forwardRef<NativeFeedVideoHandle, FeedVideoProps>(
+  ({ source, playerInstanceKey, player, ...props }, ref) => {
+    if (Platform.OS === 'ios') {
+      return (
+        <HookFeedVideo
+          key={playerInstanceKey}
+          ref={ref}
+          source={source}
+          playerInstanceKey={playerInstanceKey}
+          {...props}
+        />
+      );
+    }
+
+    return <NativeFeedVideo ref={ref} player={player} {...props} />;
+  },
+);
+
+FeedVideo.displayName = 'FeedVideo';
+
 export interface FullscreenFeedPostItemProps {
   item: Post;
   index: number;
@@ -516,6 +579,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const { isMuted, toggleMute } = useMute();
   const [videoError, setVideoError] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+  const [firstFrameRendered, setFirstFrameRendered] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const [preferDirectVideoSource, setPreferDirectVideoSource] = useState(false);
@@ -530,6 +594,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const muteOpacity = useRef(new Animated.Value(0)).current;
   const muteIconRef = useRef<'volume-2' | 'volume-x'>('volume-2');
   const [pausedByUser, setPausedByUser] = useState(false);
+  const [iosVisualRecoveryKey, setIosVisualRecoveryKey] = useState(0);
   const pauseIndicatorOpacity = useRef(new Animated.Value(0)).current;
   const likeScale = useRef(new Animated.Value(1)).current;
   const likeOpacity = useRef(new Animated.Value(0)).current;
@@ -538,6 +603,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const lastPlaybackTimeRef = useRef(0);
   const firstPlaybackRequestedAtRef = useRef<number | null>(null);
   const stallCountRef = useRef(0);
+  const visualRecoveryAttemptedRef = useRef(false);
   // Animated value that drives the progress bar fill + thumb visually.
   // During drag we update this directly (no setState → no re-render lag).
   // When not dragging it mirrors the videoProgress state.
@@ -785,6 +851,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   useEffect(() => {
     setVideoError(false);
     setVideoReady(false);
+    setFirstFrameRendered(false);
     setIsPlaying(false);
     setDecoderErrorDetected(false);
     setPreferDirectVideoSource(false);
@@ -796,9 +863,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
+    setIosVisualRecoveryKey(0);
     clearAutoplayRetryTimeouts();
     firstPlaybackRequestedAtRef.current = null;
     stallCountRef.current = 0;
+    visualRecoveryAttemptedRef.current = false;
   }, [clearAutoplayRetryTimeouts, item.id]);
 
   useEffect(() => {
@@ -823,6 +892,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   useEffect(() => {
     if (!videoPoolKey || !resolvedVideoSource) {
+      return;
+    }
+
+    if (Platform.OS === 'ios') {
+      if (shouldLoadVideo) {
+        setManagedPlayer(null);
+        setCanMountVideoPlayer(true);
+      }
       return;
     }
 
@@ -1058,10 +1135,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     return () => clearInterval(interval);
   }, [isActive, isPlayerValid, pausedByUser, suspendPlayback]);
 
-  // Fade out thumbnail only after the video has buffered enough to play smoothly.
-  // Wait for readyToPlay status + isPlaying + a short delay so HLS segments load.
+  // Fade out thumbnail only after native confirms the first visual frame.
+  // Audio-only playback must never be treated as a rendered video frame.
   useEffect(() => {
-    if (isActive && isPlaying && videoReady) {
+    if (isActive && isPlaying && firstFrameRendered) {
       const timerId = setTimeout(() => {
         if (!isMountedRef.current) return;
         Animated.timing(thumbnailOpacity, {
@@ -1074,7 +1151,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     } else {
       thumbnailOpacity.setValue(1);
     }
-  }, [isActive, isPlaying, videoReady, thumbnailOpacity]);
+  }, [firstFrameRendered, isActive, isPlaying, thumbnailOpacity]);
 
   // Mirror videoProgress → scrubProgress Animated.Value while not dragging.
   // During a drag we write scrubProgress directly so this is suppressed.
@@ -1097,12 +1174,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
-  // If an active video never renders first frame, recover without tearing down
-  // the iOS VideoView. Remount churn is risky with expo-video SharedObjects on
-  // older iPhones, so iOS retries playback in-place while Android keeps the
-  // existing remount recovery path.
+  // If an active video plays audio/progress but never renders a frame, keep the
+  // thumbnail visible and recover the player. iOS uses hook-owned remounts only;
+  // Android keeps the existing pooled-player remount recovery path.
   useEffect(() => {
-    if (!isVideo || !isActive || !shouldLoadVideo || videoReady || videoError || retryCount >= 3) {
+    if (!isVideo || !isActive || !shouldLoadVideo || firstFrameRendered || videoError || retryCount >= 3) {
       return;
     }
 
@@ -1110,14 +1186,23 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const delay = delays[retryCount] ?? 2000;
 
     const timeoutId = setTimeout(() => {
-      if (!isMountedRef.current || videoReady || videoError) {
+      if (!isMountedRef.current || firstFrameRendered || videoError) {
         return;
       }
       stallCountRef.current += 1;
+      const audioOrProgressWithoutFrame = isPlaying || lastPlaybackTimeRef.current > 0.2;
       feedTelemetry.trackVideoStall({
         postId: item.id,
         screenName,
         count: stallCountRef.current,
+      });
+      addFabricBreadcrumb('feed_video_first_frame_timeout', {
+        postId: item.id,
+        retryCount,
+        sourceMode: videoSourceMode,
+        status: playbackStatusRef.current,
+        currentTime: lastPlaybackTimeRef.current,
+        isPlaying,
       });
       addFabricBreadcrumb('feed_video_stall_retry', {
         postId: item.id,
@@ -1128,8 +1213,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       });
       setRetryCount((prev) => prev + 1);
       if (Platform.OS === 'ios') {
-        if (!preferDirectVideoSource && retryCount >= 1) {
-          setPreferDirectVideoSource(true);
+        if (audioOrProgressWithoutFrame && !visualRecoveryAttemptedRef.current) {
+          visualRecoveryAttemptedRef.current = true;
+          addFabricBreadcrumb('feed_video_audio_without_frame', {
+            postId: item.id,
+            retryCount,
+            status: playbackStatusRef.current,
+            currentTime: lastPlaybackTimeRef.current,
+          });
+          setVideoReady(false);
+          setFirstFrameRendered(false);
+          setIosVisualRecoveryKey((prev) => prev + 1);
         }
         requestAutoplayPlayback('stall_retry');
         return;
@@ -1146,7 +1240,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }, delay);
 
     return () => clearTimeout(timeoutId);
-  }, [isActive, isVideo, retryCount, shouldLoadVideo, videoError, videoReady, preferDirectVideoSource, item.id, requestAutoplayPlayback, screenName, videoSourceMode]);
+  }, [
+    firstFrameRendered,
+    isActive,
+    isPlaying,
+    isVideo,
+    retryCount,
+    shouldLoadVideo,
+    videoError,
+    preferDirectVideoSource,
+    item.id,
+    requestAutoplayPlayback,
+    screenName,
+    videoSourceMode,
+  ]);
 
   const handleTapToPause = useCallback((e?: any) => {
     // Only pause/play when tapping the CENTER of the screen.
@@ -1333,15 +1440,17 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 />
               ) : null}
 
-              {canMountVideoPlayer && shouldLoadVideo && !videoError && managedPlayer && (
+              {canMountVideoPlayer && shouldLoadVideo && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || managedPlayer) && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
                   <VideoMountBoundary
-                    boundaryKey={`${item.id}:${videoMountBoundaryKey}`}
+                    boundaryKey={`${item.id}:${videoMountBoundaryKey}:${iosVisualRecoveryKey}`}
                     onError={handleNativePlayerMountError}
                   >
-                    <NativeFeedVideo
+                    <FeedVideo
                       ref={videoControllerRef}
                       player={managedPlayer}
+                      source={resolvedVideoSource}
+                      playerInstanceKey={`${item.id}:${iosVisualRecoveryKey}`}
                       contentFit={mediaContentFit}
                       isMuted={isMuted}
                       shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}
@@ -1350,6 +1459,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       sourceMode={videoSourceMode}
                       onFirstFrameRender={() => {
                         setVideoReady(true);
+                        setFirstFrameRendered(true);
                         const firstRequestedAt = firstPlaybackRequestedAtRef.current;
                         if (firstRequestedAt) {
                           feedTelemetry.trackVideoTimeToFirstFrame({

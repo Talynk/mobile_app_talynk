@@ -23,6 +23,8 @@ const FEED_CACHE_MAX_POSTS_PER_PAGE = 40;
 type UseFeedQueryOptions = {
   refreshSeed?: number;
   limit?: number;
+  followedUsersReady?: boolean;
+  followedUsersCount?: number;
 };
 
 type FeedPageParam = {
@@ -43,6 +45,7 @@ interface FeedPage {
   pagination?: Partial<FeedPagination>;
   loadOutcome: FeedLoadOutcome;
   errorMessage?: string;
+  followingEmptyReason?: 'not-following-anyone';
 }
 
 function createFeedRequestError(message: string, extras?: Record<string, unknown>) {
@@ -526,10 +529,17 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
   const userId = isAuthenticated && user?.id ? user.id : 'guest';
   const refreshSeed = options.refreshSeed;
   const feedLimit = options.limit ?? FEED_DEFAULT_PAGE_SIZE;
+  const followingEmptyReason =
+    tab === 'following' &&
+    isAuthenticated &&
+    options.followedUsersReady === true &&
+    options.followedUsersCount === 0
+      ? 'not-following-anyone' as const
+      : undefined;
 
   const queryKey = tab === 'foryou'
     ? ['feed', tab, userId, refreshSeed]
-    : ['feed', tab, userId];
+    : ['feed', tab, userId, followingEmptyReason ?? 'active'];
 
   const query = useInfiniteQuery<FeedPage>({
     queryKey,
@@ -546,6 +556,21 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             userPreferences: [],
             cached: false,
             loadOutcome: 'empty',
+          } satisfies FeedPage;
+        }
+
+        if (followingEmptyReason === 'not-following-anyone') {
+          return {
+            posts: [],
+            nextCursor: null,
+            requestIndex: 1,
+            hasNext: false,
+            endpoint: 'following',
+            refresh: null,
+            userPreferences: [],
+            cached: false,
+            loadOutcome: 'empty',
+            followingEmptyReason,
           } satisfies FeedPage;
         }
 
@@ -799,6 +824,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
     feedEndpoint: firstPage?.endpoint === 'following' ? null : firstPage?.endpoint ?? null,
     feedCached: firstPage?.cached ?? false,
     loadOutcome,
+    followingEmptyReason: firstPage?.followingEmptyReason ?? followingEmptyReason ?? null,
     errorMessage,
     queryKey,
     hardRefetch,

@@ -1,4 +1,5 @@
 import { Image as ExpoImage } from 'expo-image';
+import { Platform } from 'react-native';
 import { Post } from '@/types';
 import { getPlaybackUrl, getPostMediaUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { primePostDetailsCache, getPostDetailsCached } from '@/lib/post-details-cache';
@@ -52,22 +53,24 @@ export function warmFeedWindow(posts: Post[], centerIndex: number, options?: { r
     releasePrewarmedPlayers.delete(key);
   }
 
-  targets.forEach((post) => {
-    const playbackUrl = getPlaybackUrl(post);
-    if (!playbackUrl) {
-      return;
-    }
+  if (Platform.OS !== 'ios') {
+    targets.forEach((post) => {
+      const playbackUrl = getPlaybackUrl(post);
+      if (!playbackUrl) {
+        return;
+      }
 
-    const source = getVideoSource(playbackUrl);
-    const sourceKey = createFeedVideoPlayerKey(post.id, source);
+      const source = getVideoSource(playbackUrl);
+      const sourceKey = createFeedVideoPlayerKey(post.id, source);
 
-    if (releasePrewarmedPlayers.has(sourceKey)) {
-      return;
-    }
+      if (releasePrewarmedPlayers.has(sourceKey)) {
+        return;
+      }
 
-    const release = prewarmFeedVideoPlayer(sourceKey, source);
-    releasePrewarmedPlayers.set(sourceKey, release);
-  });
+      const release = prewarmFeedVideoPlayer(sourceKey, source);
+      releasePrewarmedPlayers.set(sourceKey, release);
+    });
+  }
 
   const freshTargets = targets.filter((post) => {
     const warmedAt = warmedPostIds.get(post.id) || 0;
