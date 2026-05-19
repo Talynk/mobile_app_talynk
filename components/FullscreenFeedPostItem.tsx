@@ -48,6 +48,7 @@ import {
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
 const FEED_ANIMATION_USES_NATIVE_DRIVER = false;
+const VIDEO_VISUAL_READY_SECONDS = 0.08;
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -580,6 +581,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [videoError, setVideoError] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [firstFrameRendered, setFirstFrameRendered] = useState(false);
+  const [videoVisualReady, setVideoVisualReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [decoderErrorDetected, setDecoderErrorDetected] = useState(false);
   const [preferDirectVideoSource, setPreferDirectVideoSource] = useState(false);
@@ -859,6 +861,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setVideoError(false);
     setVideoReady(false);
     setFirstFrameRendered(false);
+    setVideoVisualReady(false);
     setIsPlaying(false);
     setDecoderErrorDetected(false);
     setPreferDirectVideoSource(false);
@@ -935,6 +938,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (!shouldMountVideoPlayer) {
       setCanMountVideoPlayer(false);
       setManagedPlayer(null);
+      setVideoReady(false);
+      setFirstFrameRendered(false);
+      setVideoVisualReady(false);
+      setIsPlaying(false);
       playerValidRef.current = false;
       videoControllerRef.current = null;
       if (isMountedRef.current) {
@@ -1002,6 +1009,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (isMountedRef.current) {
       setCanMountVideoPlayer(false);
       setVideoReady(false);
+      setFirstFrameRendered(false);
+      setVideoVisualReady(false);
       setIsPlaying(false);
     }
 
@@ -1052,9 +1061,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         clearAutoplayRetryTimeouts();
         setVideoReady(true);
         pauseIndicatorOpacity.setValue(0);
+        if (firstFrameRendered && lastPlaybackTimeRef.current > VIDEO_VISUAL_READY_SECONDS) {
+          setVideoVisualReady(true);
+        }
       }
     }
-  }, [clearAutoplayRetryTimeouts, pauseIndicatorOpacity]);
+  }, [clearAutoplayRetryTimeouts, firstFrameRendered, pauseIndicatorOpacity]);
 
   const handleNativeStatusChange = useCallback((event: { status?: string; error?: unknown }) => {
     if (!isMountedRef.current) {
@@ -1101,12 +1113,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const currentTime = payload.currentTime || 0;
     const duration = payload.duration || 0;
     lastPlaybackTimeRef.current = currentTime;
+    if (firstFrameRendered && isPlaying && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+      setVideoVisualReady(true);
+    }
 
     // Don't update progress while user is dragging the progress bar
     if (duration > 0 && !isDraggingRef.current) {
       setVideoProgress(currentTime / duration);
     }
-  }, []);
+  }, [firstFrameRendered, isPlaying]);
 
   const handleNativePlayToEnd = useCallback(() => {
     if (!isMountedRef.current) {
@@ -1180,31 +1195,35 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         const currentTime = controller.getCurrentTime?.() ?? 0;
         const duration = controller.getDuration?.() ?? 0;
         if (duration > 0 && isMountedRef.current) {
+          if (firstFrameRendered && controller.isPlaying() && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+            setVideoVisualReady(true);
+          }
           setVideoProgress(currentTime / duration);
         }
       } catch (_) {}
     }, 250);
 
     return () => clearInterval(interval);
-  }, [isActive, isPlayerValid, pausedByUser, suspendPlayback]);
+  }, [firstFrameRendered, isActive, isPlayerValid, pausedByUser, suspendPlayback]);
 
-  // Fade out thumbnail only after native confirms the first visual frame.
-  // Audio-only playback must never be treated as a rendered video frame.
+  // Fade out the thumbnail only after playback has advanced past the native
+  // startup frame. onFirstFrameRender can still correspond to a grey native
+  // surface on some devices, so it is not enough by itself.
   useEffect(() => {
-    if (isActive && isPlaying && firstFrameRendered) {
+    if (isActive && isPlaying && videoVisualReady) {
       const timerId = setTimeout(() => {
         if (!isMountedRef.current) return;
         Animated.timing(thumbnailOpacity, {
           toValue: 0,
-          duration: 200,
+          duration: 45,
           useNativeDriver: FEED_ANIMATION_USES_NATIVE_DRIVER,
         }).start();
-      }, 80);
+      }, 0);
       return () => clearTimeout(timerId);
     } else {
       thumbnailOpacity.setValue(1);
     }
-  }, [firstFrameRendered, isActive, isPlaying, thumbnailOpacity]);
+  }, [isActive, isPlaying, thumbnailOpacity, videoVisualReady]);
 
   // Mirror videoProgress → scrubProgress Animated.Value while not dragging.
   // During a drag we write scrubProgress directly so this is suppressed.
@@ -1220,6 +1239,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       const delay = Math.pow(2, retryCount) * 1000;
       setTimeout(() => {
         setVideoError(false);
+        setVideoReady(false);
+        setFirstFrameRendered(false);
+        setVideoVisualReady(false);
         setCanMountVideoPlayer(true);
         setVideoMountBoundaryKey((prev) => prev + 1);
         setRetryCount(prev => prev + 1);
@@ -1498,7 +1520,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                   pointerEvents="none"
                   style={[
                     styles.videoLayer,
-                    { opacity: firstFrameRendered ? 1 : 0.01 },
+                    { opacity: videoVisualReady ? 1 : 0.001 },
                   ]}
                 >
                   <VideoMountBoundary
@@ -1519,6 +1541,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       onFirstFrameRender={() => {
                         setVideoReady(true);
                         setFirstFrameRendered(true);
+                        if (isPlaying && lastPlaybackTimeRef.current > VIDEO_VISUAL_READY_SECONDS) {
+                          setVideoVisualReady(true);
+                        }
                         const firstRequestedAt = firstPlaybackRequestedAtRef.current;
                         if (firstRequestedAt) {
                           feedTelemetry.trackVideoTimeToFirstFrame({
