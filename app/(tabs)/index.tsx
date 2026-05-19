@@ -944,11 +944,20 @@ export default function FeedScreen() {
       disableIntervalMomentum
       decelerationRate="fast"
       showsVerticalScrollIndicator={false}
-      bounces={false}
-      alwaysBounceVertical={false}
+      bounces
+      alwaysBounceVertical
       scrollEnabled
+      refreshControl={
+        <RefreshControl
+          refreshing={pullRefreshing || isRefetching}
+          onRefresh={() => {
+            void handleRefresh();
+          }}
+          tintColor="#60a5fa"
+        />
+      }
     />
-  ), [renderSkeletonItem, verticalPageHeight]);
+  ), [handleRefresh, isRefetching, pullRefreshing, renderSkeletonItem, verticalPageHeight]);
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
@@ -1108,8 +1117,8 @@ export default function FeedScreen() {
               removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
               scrollEventThrottle={16}
               scrollEnabled={true}
-              bounces={false}
-              alwaysBounceVertical={false}
+              bounces
+              alwaysBounceVertical
               refreshControl={
                 <RefreshControl
                   refreshing={pullRefreshing || isRefetching}

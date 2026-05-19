@@ -839,6 +839,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [isActive, suspendPlayback, isAppActive, pausedByUser, decoderErrorDetected]);
 
   useEffect(() => {
+    if (Platform.OS === 'ios') {
+      return;
+    }
+
     if (!managedPlayer) {
       playerValidRef.current = false;
       videoControllerRef.current = null;
@@ -880,6 +884,52 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
     void enterPlaybackMode();
   }, [isActive, isAppActive, isVideo, suspendPlayback]);
+
+  useEffect(() => {
+    const shouldKeepPlaying =
+      isVideo &&
+      isActive &&
+      !suspendPlayback &&
+      isAppActive &&
+      !decoderErrorDetected &&
+      !pausedByUser;
+
+    if (!shouldKeepPlaying) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current || !isMountedRef.current) {
+        return;
+      }
+
+      try {
+        if (!controller.isPlaying()) {
+          controller.setMuted(isMuted);
+          controller.play();
+        }
+      } catch (error) {
+        addFabricBreadcrumb('feed_video_keepalive_play_failed', {
+          postId: item.id,
+          index,
+          message: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+    }, 650);
+
+    return () => clearInterval(interval);
+  }, [
+    decoderErrorDetected,
+    index,
+    isActive,
+    isAppActive,
+    isMuted,
+    isVideo,
+    item.id,
+    pausedByUser,
+    suspendPlayback,
+  ]);
 
   useEffect(() => {
     if (!shouldMountVideoPlayer) {

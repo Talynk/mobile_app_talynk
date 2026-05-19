@@ -331,6 +331,17 @@ function mergePrimaryWithCatalog(primaryPage: FeedPage, catalogPage: FeedPage): 
   };
 }
 
+function keepForYouPageContinuable(page: FeedPage): FeedPage {
+  if (page.posts.length === 0) {
+    return page;
+  }
+
+  return {
+    ...page,
+    hasNext: true,
+  };
+}
+
 function normalizeFeedPage(args: {
   response: Extract<FeedApiResponse, { status: 'success' }>;
   endpoint: 'public' | 'personalized';
@@ -518,9 +529,11 @@ async function loadForYouFeedPage(args: {
 
     if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (primaryPage.posts.length < limit || !primaryPage.hasNext)) {
       try {
-        return mergePrimaryWithCatalog(
-          primaryPage,
-          await loadCatalogFeedPage(requestIndex, limit, refreshSeed),
+        return keepForYouPageContinuable(
+          mergePrimaryWithCatalog(
+            primaryPage,
+            await loadCatalogFeedPage(requestIndex, limit, refreshSeed),
+          ),
         );
       } catch (catalogError: any) {
         feedTelemetry.trackFeedNetworkError({
@@ -530,20 +543,20 @@ async function loadForYouFeedPage(args: {
       }
     }
 
-    return primaryPage;
+    return keepForYouPageContinuable(primaryPage);
   }
 
   if (isAuthenticated && shouldUseRecommendationsFallback(requestError, response)) {
     try {
       const recommendations = await feedApi.getRecommendations(options);
       if (isSuccessfulFeedResponse(recommendations)) {
-        return normalizeFeedPage({
+        return keepForYouPageContinuable(normalizeFeedPage({
           response: recommendations,
           endpoint: 'personalized',
           requestIndex,
           limit,
           refreshSeed,
-        });
+        }));
       }
     } catch {
       // Fall through to configured fallback handling.
@@ -552,7 +565,7 @@ async function loadForYouFeedPage(args: {
 
   if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback) {
     try {
-      return await loadCatalogFeedPage(requestIndex, limit, refreshSeed);
+      return keepForYouPageContinuable(await loadCatalogFeedPage(requestIndex, limit, refreshSeed));
     } catch (catalogError: any) {
       feedTelemetry.trackFeedNetworkError({
         endpoint: 'catalog',
