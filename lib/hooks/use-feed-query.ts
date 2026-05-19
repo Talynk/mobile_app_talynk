@@ -16,7 +16,7 @@ type FeedTab = 'foryou' | 'following';
 type FeedEndpoint = 'public' | 'personalized' | 'following' | 'catalog';
 type FeedLoadOutcome = 'success' | 'empty' | 'error' | 'degraded';
 
-const FEED_CACHE_KEY_PREFIX = 'talentix:feed-cache:v1';
+const FEED_CACHE_KEY_PREFIX = 'talentix:feed-cache:v2';
 const FEED_CACHE_MAX_PAGES = 8;
 const FEED_CACHE_MAX_POSTS_PER_PAGE = 40;
 
@@ -25,6 +25,7 @@ type UseFeedQueryOptions = {
   limit?: number;
   followedUsersReady?: boolean;
   followedUsersCount?: number;
+  followedUserIds?: Iterable<string>;
 };
 
 type FeedPageParam = {
@@ -45,7 +46,7 @@ interface FeedPage {
   pagination?: Partial<FeedPagination>;
   loadOutcome: FeedLoadOutcome;
   errorMessage?: string;
-  followingEmptyReason?: 'not-following-anyone';
+  followingEmptyReason?: 'not-following-anyone' | 'no-posts-from-following';
 }
 
 function createFeedRequestError(message: string, extras?: Record<string, unknown>) {
@@ -75,6 +76,19 @@ function extractFollowingUsers(raw: any): string[] {
   return following
     .map((item: any) => item?.following?.id || item?.id || null)
     .filter((id: string | null): id is string => !!id);
+}
+
+function getPostAuthorId(post: any): string | null {
+  return post?.user?.id || post?.user_id || post?.userId || post?.author?.id || null;
+}
+
+function markTrustedFollowingPosts(posts: Post[], followedUserIds: Set<string>) {
+  return posts
+    .filter((post) => {
+      const authorId = getPostAuthorId(post);
+      return !!authorId && followedUserIds.has(authorId);
+    })
+    .map((post) => ({ ...post, is_following_author: true }));
 }
 
 function extractApprovedPosts(raw: any): Post[] {
@@ -120,7 +134,12 @@ function asCachedFeedPage(page: FeedPage): FeedPage {
   };
 }
 
-async function readCachedFeedPage(tab: FeedTab, userId: string, requestIndex: number): Promise<FeedPage | null> {
+async function readCachedFeedPage(
+  tab: FeedTab,
+  userId: string,
+  requestIndex: number,
+  allowedFollowingAuthorIds?: Set<string>,
+): Promise<FeedPage | null> {
   try {
     const raw = await AsyncStorage.getItem(getFeedCacheKey(tab, userId));
     if (!raw) {
@@ -134,7 +153,27 @@ async function readCachedFeedPage(tab: FeedTab, userId: string, requestIndex: nu
       return null;
     }
 
-    return asCachedFeedPage(page);
+    const cachedPage = asCachedFeedPage(page);
+    if (tab !== 'following') {
+      return cachedPage;
+    }
+
+    if (!allowedFollowingAuthorIds || allowedFollowingAuthorIds.size === 0) {
+      return null;
+    }
+
+    const trustedPosts = markTrustedFollowingPosts(cachedPage.posts, allowedFollowingAuthorIds);
+    if (trustedPosts.length === 0) {
+      return null;
+    }
+
+    return {
+      ...cachedPage,
+      posts: trustedPosts,
+      hasNext: false,
+      nextCursor: null,
+      endpoint: 'following',
+    };
   } catch {
     return null;
   }
@@ -350,9 +389,16 @@ function normalizeFeedPage(args: {
   };
 }
 
-async function loadFallbackFollowingFeed(viewerUserId: string, page: number, limit: number): Promise<FeedPage> {
-  const followingResponse = await followsApi.getFollowingUsers(viewerUserId, 1, 200);
-  const followingUserIds = extractFollowingUsers(followingResponse);
+async function loadFallbackFollowingFeed(
+  viewerUserId: string,
+  page: number,
+  limit: number,
+  knownFollowingUserIds?: Set<string>,
+): Promise<FeedPage> {
+  const followingUserIds = knownFollowingUserIds && knownFollowingUserIds.size > 0
+    ? Array.from(knownFollowingUserIds)
+    : extractFollowingUsers(await followsApi.getFollowingUsers(viewerUserId, 1, 200));
+  const trustedFollowingUserIds = new Set(followingUserIds);
 
   if (followingUserIds.length === 0) {
     return {
@@ -365,6 +411,7 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
       userPreferences: [],
       cached: false,
       loadOutcome: 'empty',
+      followingEmptyReason: 'not-following-anyone',
     };
   }
 
@@ -375,9 +422,10 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
   const merged = new Map<string, Post>();
 
   approvedResponses.forEach((response) => {
-    const approvedPosts = extractApprovedPosts(response)
-      .map((post: any) => normalizePost({ ...post, is_following_author: true }))
-      .map((post: any) => ({ ...post, is_following_author: true }));
+    const approvedPosts = markTrustedFollowingPosts(
+      extractApprovedPosts(response).map((post: any) => normalizePost(post)),
+      trustedFollowingUserIds,
+    );
 
     filterSecondarySurfacePosts(approvedPosts).forEach((post) => {
       if (post?.id && !merged.has(post.id)) {
@@ -403,6 +451,7 @@ async function loadFallbackFollowingFeed(viewerUserId: string, page: number, lim
     userPreferences: [],
     cached: false,
     loadOutcome: pagePosts.length > 0 ? 'degraded' : 'empty',
+    followingEmptyReason: pagePosts.length > 0 ? undefined : 'no-posts-from-following',
   };
 }
 
@@ -529,6 +578,14 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
   const userId = isAuthenticated && user?.id ? user.id : 'guest';
   const refreshSeed = options.refreshSeed;
   const feedLimit = options.limit ?? FEED_DEFAULT_PAGE_SIZE;
+  const followedUserIdSet = useMemo(
+    () => new Set(Array.from(options.followedUserIds ?? []).filter((id): id is string => typeof id === 'string' && id.length > 0)),
+    [options.followedUserIds],
+  );
+  const followedUsersSignature = useMemo(
+    () => Array.from(followedUserIdSet).sort().join(','),
+    [followedUserIdSet],
+  );
   const followingEmptyReason =
     tab === 'following' &&
     isAuthenticated &&
@@ -539,7 +596,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
 
   const queryKey = tab === 'foryou'
     ? ['feed', tab, userId, refreshSeed]
-    : ['feed', tab, userId, followingEmptyReason ?? 'active'];
+    : ['feed', tab, userId, followingEmptyReason ?? 'active', followedUsersSignature];
 
   const query = useInfiniteQuery<FeedPage>({
     queryKey,
@@ -577,23 +634,39 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
         const currentParam = (pageParam as FeedPageParam | undefined) ?? { page: 1 };
         const page = Number(currentParam.page || 1);
         const followingLimit = 20;
-        const loadCachedFollowingPage = () => readCachedFeedPage(tab, userId, page);
-        const loadFollowingCatalogPage = async () => {
+        const resolveTrustedFollowingUserIds = async () => {
+          if (followedUserIdSet.size > 0 || options.followedUsersReady === true) {
+            return followedUserIdSet;
+          }
+
           try {
-            const catalogPage = await loadCatalogFeedPage(page, followingLimit, refreshSeed);
-            return {
-              ...catalogPage,
-              pipeline: 'following-catalog-fallback',
-              loadOutcome: catalogPage.posts.length > 0 ? 'degraded' : 'empty',
-            } satisfies FeedPage;
-          } catch (error: any) {
+            return new Set(extractFollowingUsers(await followsApi.getFollowingUsers(user!.id, 1, 200)));
+          } catch (error) {
             feedTelemetry.trackFeedNetworkError({
-              endpoint: 'catalog',
-              message: error?.message || 'Failed to load Following fallback feed',
+              endpoint: 'following',
+              message: (error as any)?.message || 'Failed to verify followed users',
             });
-            return null;
+            return followedUserIdSet;
           }
         };
+        const trustedFollowingUserIds = await resolveTrustedFollowingUserIds();
+        const loadCachedFollowingPage = () => readCachedFeedPage(tab, userId, page, trustedFollowingUserIds);
+
+        if (trustedFollowingUserIds.size === 0) {
+          return {
+            posts: [],
+            nextCursor: null,
+            requestIndex: page,
+            hasNext: false,
+            endpoint: 'following',
+            refresh: null,
+            userPreferences: [],
+            cached: false,
+            loadOutcome: 'empty',
+            followingEmptyReason: 'not-following-anyone',
+          } satisfies FeedPage;
+        }
+
         let raw: any;
         try {
           raw = await postsApi.getFollowing(page, followingLimit);
@@ -602,9 +675,9 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             endpoint: 'following',
             message: error?.message || 'Failed to load following feed',
           });
-          const catalogPage = await loadFollowingCatalogPage();
-          if (catalogPage && catalogPage.posts.length > 0) {
-            return catalogPage;
+          const fallbackPage = await loadFallbackFollowingFeed(user!.id, page, followingLimit, trustedFollowingUserIds);
+          if (fallbackPage.posts.length > 0 || fallbackPage.followingEmptyReason) {
+            return fallbackPage;
           }
           const cachedPage = await loadCachedFollowingPage();
           if (cachedPage) {
@@ -619,9 +692,9 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
         if (raw.status !== 'success') {
           const message = raw.message || 'Failed to load following feed';
           feedTelemetry.trackFeedNetworkError({ endpoint: 'following', message });
-          const catalogPage = await loadFollowingCatalogPage();
-          if (catalogPage && catalogPage.posts.length > 0) {
-            return catalogPage;
+          const fallbackPage = await loadFallbackFollowingFeed(user!.id, page, followingLimit, trustedFollowingUserIds);
+          if (fallbackPage.posts.length > 0 || fallbackPage.followingEmptyReason) {
+            return fallbackPage;
           }
           const cachedPage = await loadCachedFollowingPage();
           if (cachedPage) {
@@ -633,10 +706,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           });
         }
 
-        const allPosts = extractPosts(raw).map((post) => ({
-          ...post,
-          is_following_author: true,
-        }));
+        const allPosts = markTrustedFollowingPosts(extractPosts(raw), trustedFollowingUserIds);
 
         primePostDetailsCache(allPosts);
 
@@ -644,13 +714,9 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           filterSecondarySurfacePosts(allPosts.map((post) => normalizePost(post))),
         );
         if (filteredPosts.length === 0) {
-          const fallbackPage = await loadFallbackFollowingFeed(user!.id, page, followingLimit);
+          const fallbackPage = await loadFallbackFollowingFeed(user!.id, page, followingLimit, trustedFollowingUserIds);
           if (fallbackPage.posts.length > 0) {
             return fallbackPage;
-          }
-          const catalogPage = await loadFollowingCatalogPage();
-          if (catalogPage && catalogPage.posts.length > 0) {
-            return catalogPage;
           }
           const cachedPage = await loadCachedFollowingPage();
           if (cachedPage) {
@@ -673,21 +739,6 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           pagination,
           loadOutcome: 'success',
         };
-
-        if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (filteredPosts.length < followingLimit || !hasNext)) {
-          const catalogPage = await loadFollowingCatalogPage();
-          if (catalogPage && catalogPage.posts.length > 0) {
-            const mergedPosts = mergeUniquePosts(followingPage.posts, catalogPage.posts);
-            return {
-              ...followingPage,
-              posts: mergedPosts,
-              hasNext: followingPage.hasNext || catalogPage.hasNext,
-              nextCursor: followingPage.nextCursor ?? catalogPage.nextCursor,
-              pipeline: 'following-catalog-supplement',
-              loadOutcome: mergedPosts.length > followingPage.posts.length ? 'degraded' : followingPage.loadOutcome,
-            };
-          }
-        }
 
         return followingPage;
       }

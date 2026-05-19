@@ -141,6 +141,7 @@ export default function FeedScreen() {
   const { height: screenHeight } = useWindowDimensions();
 
   const feedTab = activeTab === 'challenges' ? 'foryou' : activeTab as 'foryou' | 'following';
+  const followedUserIds = React.useMemo(() => Array.from(followedUsers), [followedUsers]);
   const {
     posts,
     userPreferences,
@@ -161,6 +162,7 @@ export default function FeedScreen() {
       : {
           followedUsersReady,
           followedUsersCount: followedUsers.size,
+          followedUserIds,
         });
   const visiblePosts = React.useMemo(
     () => activeTab === 'following' ? reorderFollowingPosts(posts, followingOrderSeed) : posts,
@@ -962,7 +964,7 @@ export default function FeedScreen() {
     // stays consistent when switching between the For You and Following tabs.
     const isFollowing = optimisticFollowStatus !== undefined
       ? optimisticFollowStatus
-      : (cachedFollowStatus || item.is_following_author === true || activeTab === 'following');
+      : (cachedFollowStatus || item.is_following_author === true);
 
     return (
       <FullscreenFeedPostItem
@@ -976,7 +978,7 @@ export default function FeedScreen() {
         onUnfollow={handleUnfollow}
         isLiked={isLiked}
         isFollowing={isFollowing}
-        isFollowStateReady={!user || followedUsersReady || activeTab === 'following' || item.is_following_author === true}
+        isFollowStateReady={!user || followedUsersReady || item.is_following_author === true}
         isActive={isActive}
         suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
         shouldPreload={shouldPreload}
@@ -1175,6 +1177,16 @@ export default function FeedScreen() {
                   >
                     <Text style={styles.emptyLoginButtonText}>Find creators</Text>
                   </TouchableOpacity>
+                </View>
+                ) : activeTab === 'following' && (followingEmptyReason === 'no-posts-from-following' || loadOutcome === 'empty') ? (
+                <View style={[styles.emptyContainer, { height: verticalPageHeight - 100 }]}>
+                  <Feather name="video" size={64} color="#60a5fa" />
+                  <Text style={styles.emptyText}>
+                    No posts from following yet
+                  </Text>
+                  <Text style={styles.emptySubtext}>
+                    Posts from people you follow will appear here when they publish.
+                  </Text>
                 </View>
                 ) : (
                   renderScrollableSkeletonFeed(8)

@@ -1,5 +1,5 @@
 import type { InfiniteData } from '@tanstack/react-query';
-import { postsApi } from '@/lib/api';
+import { followsApi, postsApi } from '@/lib/api';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { queryClient } from '@/lib/query-client';
 import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
@@ -22,6 +22,23 @@ function extractPosts(raw: any): Post[] {
   if (Array.isArray(raw?.posts)) return raw.posts;
   if (Array.isArray(raw?.data)) return raw.data;
   return [];
+}
+
+function extractFollowingUsers(raw: any): Set<string> {
+  const following = raw?.data?.following;
+  if (!Array.isArray(following)) {
+    return new Set();
+  }
+
+  return new Set(
+    following
+      .map((item: any) => item?.following?.id || item?.id || null)
+      .filter((id: string | null): id is string => !!id),
+  );
+}
+
+function getPostAuthorId(post: any): string | null {
+  return post?.user?.id || post?.user_id || post?.userId || post?.author?.id || null;
 }
 
 function mergeFollowingFeedPosts(currentPosts: Post[], incomingPosts: Post[]) {
@@ -56,11 +73,24 @@ function normalizeSeedPosts(posts: Post[], targetUserId: string) {
 function fetchFollowingFeedPage(viewerUserId: string) {
   return async ({ pageParam }: { pageParam: unknown }) => {
     const page = pageParam ? Number(pageParam) : 1;
+    const followedUserIds = extractFollowingUsers(await followsApi.getFollowingUsers(viewerUserId, 1, 200));
+    if (followedUserIds.size === 0) {
+      return {
+        posts: [],
+        nextCursor: null,
+      } satisfies FeedPage;
+    }
+
     const raw = await postsApi.getFollowing(page, FOLLOWING_FEED_LIMIT);
-    const allPosts = extractPosts(raw).map((post) => ({
-      ...post,
-      is_following_author: true,
-    }));
+    const allPosts = extractPosts(raw)
+      .filter((post) => {
+        const authorId = getPostAuthorId(post);
+        return !!authorId && followedUserIds.has(authorId);
+      })
+      .map((post) => ({
+        ...post,
+        is_following_author: true,
+      }));
 
     primePostDetailsCache(allPosts);
     const hlsPosts = filterSecondarySurfacePosts(allPosts);
@@ -80,7 +110,7 @@ export function seedFollowingFeedCache(viewerUserId: string, targetUserId: strin
     return;
   }
 
-  queryClient.setQueryData<InfiniteData<FeedPage>>(getFollowingFeedQueryKey(viewerUserId), (existing) => {
+  queryClient.setQueriesData<InfiniteData<FeedPage>>({ queryKey: getFollowingFeedQueryKey(viewerUserId) }, (existing) => {
     const currentPages = existing?.pages ?? [];
     const firstPage = currentPages[0] ?? { posts: [], nextCursor: null };
 
@@ -98,7 +128,7 @@ export function seedFollowingFeedCache(viewerUserId: string, targetUserId: strin
 }
 
 export function removeUserFromFollowingFeedCache(viewerUserId: string, targetUserId: string) {
-  queryClient.setQueryData<InfiniteData<FeedPage>>(getFollowingFeedQueryKey(viewerUserId), (existing) => {
+  queryClient.setQueriesData<InfiniteData<FeedPage>>({ queryKey: getFollowingFeedQueryKey(viewerUserId) }, (existing) => {
     if (!existing?.pages?.length) {
       return existing;
     }

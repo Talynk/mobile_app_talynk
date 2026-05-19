@@ -237,7 +237,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         postId,
         screenName,
       });
-      if (__DEV__ && mountedFeedPlayerCount > 1) {
+      if (__DEV__ && Platform.OS !== 'ios' && mountedFeedPlayerCount > 1) {
         console.warn('[FeedVideo] More than one fullscreen player mounted', {
           mountedFeedPlayerCount,
           postId,
@@ -444,11 +444,11 @@ const HookFeedVideo = React.forwardRef<NativeFeedVideoHandle, HookFeedVideoProps
         if (Platform.OS === 'ios') {
           try {
             createdPlayer.bufferOptions = {
-              preferredForwardBufferDuration: 0,
-              waitsToMinimizeStalling: true,
+              preferredForwardBufferDuration: 6,
+              waitsToMinimizeStalling: false,
             } as any;
           } catch {
-            (createdPlayer as any).preferredForwardBufferDuration = 0;
+            (createdPlayer as any).preferredForwardBufferDuration = 6;
           }
         }
         createdPlayer.pause();
@@ -664,6 +664,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isActive &&
     !videoError;
   const shouldPrewarmVideo = isVideo && hlsReady && isAppActive && shouldPreload && !isActive && !videoError;
+  const shouldMountVideoPlayer = Platform.OS === 'ios'
+    ? shouldLoadVideo || shouldPrewarmVideo
+    : shouldLoadVideo;
   const directVideoPlayerSource = React.useMemo(
     () => playbackUrl
       ? {
@@ -879,7 +882,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [isActive, isAppActive, isVideo, suspendPlayback]);
 
   useEffect(() => {
-    if (!shouldLoadVideo) {
+    if (!shouldMountVideoPlayer) {
       setCanMountVideoPlayer(false);
       setManagedPlayer(null);
       playerValidRef.current = false;
@@ -888,7 +891,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         setIsPlayerValid(false);
       }
     }
-  }, [shouldLoadVideo]);
+  }, [shouldMountVideoPlayer]);
 
   useEffect(() => {
     if (!videoPoolKey || !resolvedVideoSource) {
@@ -896,7 +899,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     if (Platform.OS === 'ios') {
-      if (shouldLoadVideo) {
+      if (shouldMountVideoPlayer) {
         setManagedPlayer(null);
         setCanMountVideoPlayer(true);
       }
@@ -918,7 +921,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     return;
-  }, [resolvedVideoSource, shouldLoadVideo, shouldPrewarmVideo, videoPoolKey]);
+  }, [resolvedVideoSource, shouldLoadVideo, shouldMountVideoPlayer, shouldPrewarmVideo, videoPoolKey]);
 
   const handleNativePlayerReady = useCallback(() => {
     playerValidRef.current = true;
@@ -1440,7 +1443,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 />
               ) : null}
 
-              {canMountVideoPlayer && shouldLoadVideo && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || managedPlayer) && (
+              {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || managedPlayer) && (
                 <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
                   <VideoMountBoundary
                     boundaryKey={`${item.id}:${videoMountBoundaryKey}:${iosVisualRecoveryKey}`}
@@ -1474,7 +1477,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                         // inside the native callback can race with player teardown on iOS.
                         setTimeout(() => {
                           const controller = videoControllerRef.current;
-                          if (controller && playerValidRef.current && isMountedRef.current) {
+                          if (
+                            controller &&
+                            playerValidRef.current &&
+                            isMountedRef.current &&
+                            isActive &&
+                            !suspendPlayback &&
+                            isAppActive &&
+                            !decoderErrorDetected &&
+                            !pausedByUser
+                          ) {
                             try { controller.setMuted(isMuted); controller.play(); } catch (_) {}
                           }
                         }, 0);
