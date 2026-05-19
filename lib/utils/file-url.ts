@@ -108,6 +108,12 @@ export function getThumbnailUrl(post: any): string | null {
 
     if (hlsUrl && hlsUrl.toLowerCase().includes('.m3u8')) {
       const normalizedHlsUrl = hlsUrl.split('?')[0];
+      const uploadedHlsMatch = normalizedHlsUrl.match(/^(https?:\/\/[^/]+)\/uploads\/hls\/([^/]+)\/[^/]+\.m3u8$/i);
+      if (uploadedHlsMatch) {
+        const [, origin, videoId] = uploadedHlsMatch;
+        return `${origin}/uploads/thumbnails/${videoId}_thumbnail.jpg`;
+      }
+
       const hlsMatch = normalizedHlsUrl.match(/^(https?:\/\/[^/]+)\/hls\/([^/]+)\/[^/]+\.m3u8$/i);
       if (hlsMatch) {
         const [, origin, videoId] = hlsMatch;

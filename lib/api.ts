@@ -990,6 +990,7 @@ export const postsApi = {
     title: string;
     caption?: string;
     post_category: string;
+    category_id?: number;
     status?: 'active' | 'draft';
   }): Promise<ApiResponse<{
     postId: string;

@@ -1494,7 +1494,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               ) : null}
 
               {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || managedPlayer) && (
-                <View pointerEvents="none" style={{ position: 'absolute', zIndex: 2, width: '100%', height: '100%' }}>
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.videoLayer,
+                    { opacity: firstFrameRendered ? 1 : 0.01 },
+                  ]}
+                >
                   <VideoMountBoundary
                     boundaryKey={`${item.id}:${videoMountBoundaryKey}:${iosVisualRecoveryKey}`}
                     onError={handleNativePlayerMountError}
@@ -1980,6 +1986,13 @@ const styles = StyleSheet.create({
     zIndex: 1,
     width: '100%',
     height: '100%',
+  },
+  videoLayer: {
+    position: 'absolute',
+    zIndex: 2,
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'transparent',
   },
   errorOverlay: {
     ...StyleSheet.absoluteFillObject,

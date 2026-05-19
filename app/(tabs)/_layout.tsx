@@ -6,6 +6,7 @@ import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import { useNotificationBadge } from '@/lib/notification-badge-context';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { requestHomeFeedRefresh } from '@/lib/home-feed-events';
 
 function CustomTabBar({ state, descriptors, navigation }: { state: any; descriptors: any; navigation: any }) {
   const insets = useSafeAreaInsets();
@@ -37,6 +38,15 @@ function CustomTabBar({ state, descriptors, navigation }: { state: any; descript
       {state.routes.map((route: any, idx: number) => {
         const isFocused = state.index === idx;
         const onPress = () => {
+          if (idx === 0) {
+            pauseAllVideos();
+            requestHomeFeedRefresh();
+            if (!isFocused) {
+              navigation.navigate(route.name);
+            }
+            return;
+          }
+
           if (!isFocused) {
             pauseAllVideos();
             navigation.navigate(route.name);

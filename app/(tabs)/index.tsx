@@ -47,6 +47,10 @@ import {
 } from '@/lib/utils/video-feed';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import {
+  getHomeFeedRefreshRequestId,
+  subscribeHomeFeedRefresh,
+} from '@/lib/home-feed-events';
+import {
   createFeedRefreshSeed,
   createNextFeedRefreshSeed,
   FEED_DEFAULT_PAGE_SIZE,
@@ -123,6 +127,7 @@ export default function FeedScreen() {
   const didAdvanceForYouSessionRef = useRef(false);
   const seenResetRecoveryAttemptedRef = useRef(false);
   const feedTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastHandledHomeRefreshRequestRef = useRef(0);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
@@ -264,6 +269,23 @@ export default function FeedScreen() {
 
     hardRefreshForYou(reason, backgroundDurationMs);
   }, [forYouRefreshSeed, hardRefreshForYou, user]);
+
+  const refreshForYouFromHomeTab = useCallback((requestId: number) => {
+    if (requestId <= lastHandledHomeRefreshRequestRef.current) {
+      return;
+    }
+
+    lastHandledHomeRefreshRequestRef.current = requestId;
+    pauseAllVideos();
+    setActiveTab('foryou');
+    setPullRefreshing(true);
+    seenResetRecoveryAttemptedRef.current = false;
+    setForYouRecoveryAttempts(0);
+    resetFeedViewportToTop();
+    void resetSeenAndRefreshForYou('manual');
+  }, [resetFeedViewportToTop, resetSeenAndRefreshForYou]);
+
+  React.useEffect(() => subscribeHomeFeedRefresh(refreshForYouFromHomeTab), [refreshForYouFromHomeTab]);
 
   const hardRefreshFollowing = useCallback((reason: 'resume' | 'manual', backgroundDurationMs = 0) => {
     const nextSeed = createNextFeedRefreshSeed(followingOrderSeed);
@@ -486,6 +508,7 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
+      refreshForYouFromHomeTab(getHomeFeedRefreshRequestId());
       if (lastActiveIndexRef.current >= 0) {
         setCurrentIndex(lastActiveIndexRef.current);
       }
@@ -495,7 +518,7 @@ export default function FeedScreen() {
         lastActiveIndexRef.current = savedIndex;
         pauseAllVideos();
       };
-    }, [])
+    }, [refreshForYouFromHomeTab])
   );
 
   // Keep currentIndexRef in sync

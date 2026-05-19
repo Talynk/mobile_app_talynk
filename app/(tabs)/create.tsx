@@ -147,6 +147,7 @@ async function _legacyMultipartUpload(
   registerActiveXhr?: (xhr: XMLHttpRequest | null) => void,
   uploadWasCancelled?: () => boolean,
   onMultipartProgress?: (info: { percent: number; loaded: number; total: number; startedAt: number }) => void,
+  challengeId?: string | null,
 ): Promise<void> {
   return new Promise<void>((resolveUpload) => {
     const formData = new FormData();
@@ -155,6 +156,9 @@ async function _legacyMultipartUpload(
     formData.append('post_category', categoryName);
     formData.append('category_id', categoryId);
     formData.append('status', status);
+    if (challengeId) {
+      formData.append('challenge_id', challengeId);
+    }
     formData.append('file', fileData as any);
 
     const xhr = new XMLHttpRequest();
@@ -2648,11 +2652,62 @@ export default function CreatePostScreen() {
           title: autoTitle,
           caption: caption,
           post_category: categoryName,
+          category_id: Number(selectedCategoryId) || undefined,
           status: status,
         });
 
         if (createRes.status !== 'success' || !createRes.data?.uploadUrl) {
-          throw new Error(createRes.message || 'Upload service is currently unavailable');
+          addFabricBreadcrumb('video_signed_upload_session_failed_falling_back', {
+            message: createRes.message || 'Upload service is currently unavailable',
+            categoryName,
+            selectedCategoryId,
+            hasChallenge: Boolean(effectiveSelectedChallengeId),
+          });
+          updateUploadUi(24, {
+            stage: 'Opening backup upload path...',
+            force: true,
+            filename: fileName,
+          });
+          await _legacyMultipartUpload(
+            mediaUri,
+            fileName,
+            fileType,
+            autoTitle,
+            categoryName,
+            status,
+            fileData,
+            getSelectedCategoryId(),
+            uploadNotificationService,
+            setUploading,
+            setUploadProgress,
+            setServerMediaUrl,
+            setCaption,
+            setSelectedGroup,
+            setSelectedCategoryId as any,
+            setRecordedVideoUri,
+            setEditedVideoUri,
+            setThumbnailUri,
+            setIsVideoPlaying,
+            setCapturedImageUri,
+            (xhr) => {
+              activeXhrRef.current = xhr;
+            },
+            () => uploadCancelledRef.current,
+            ({ loaded, total, startedAt, percent }) => {
+              const elapsedSec = Math.max((Date.now() - startedAt) / 1000, 0.001);
+              const bps = loaded / elapsedSec;
+              const etaSec = bps > 0 && total > loaded ? (total - loaded) / bps : 0;
+              updateUploadUi(percent, {
+                stage: 'Uploading through backup path...',
+                filename: fileName,
+                speedBytesPerSecond: bps,
+                etaSeconds: etaSec,
+              });
+            },
+            effectiveSelectedChallengeId,
+          );
+          await cleanupPreparedVideo(preparedVideo);
+          return;
         }
 
         if (uploadCancelledRef.current) {
@@ -2890,6 +2945,7 @@ export default function CreatePostScreen() {
             etaSeconds: etaSec,
           });
         },
+        null,
       );
     } catch (error: any) {
       await cleanupPreparedVideo(preparedVideo);
