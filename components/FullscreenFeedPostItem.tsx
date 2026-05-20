@@ -605,6 +605,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const lastPlaybackTimeRef = useRef(0);
   const firstPlaybackRequestedAtRef = useRef<number | null>(null);
   const stallCountRef = useRef(0);
+  const playbackStallCountRef = useRef(0);
+  const playbackStallProbeRef = useRef({ time: 0, checkedAt: 0 });
+  const iosPrewarmKickedRef = useRef(false);
   const visualRecoveryAttemptedRef = useRef(false);
   // Animated value that drives the progress bar fill + thumb visually.
   // During drag we update this directly (no setState → no re-render lag).
@@ -878,6 +881,9 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     clearAutoplayRetryTimeouts();
     firstPlaybackRequestedAtRef.current = null;
     stallCountRef.current = 0;
+    playbackStallCountRef.current = 0;
+    playbackStallProbeRef.current = { time: 0, checkedAt: 0 };
+    iosPrewarmKickedRef.current = false;
     visualRecoveryAttemptedRef.current = false;
   }, [clearAutoplayRetryTimeouts, item.id]);
 
@@ -933,6 +939,160 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     item.id,
     pausedByUser,
     suspendPlayback,
+  ]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !shouldPrewarmVideo || isActive || iosPrewarmKickedRef.current) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current || !isMountedRef.current || isActive || !shouldPrewarmVideo) {
+        return;
+      }
+
+      iosPrewarmKickedRef.current = true;
+      try {
+        controller.setMuted(true);
+        controller.play();
+      } catch {
+        return;
+      }
+
+      setTimeout(() => {
+        const latest = videoControllerRef.current;
+        if (!latest || !playerValidRef.current || !isMountedRef.current || isActive) {
+          return;
+        }
+        try {
+          latest.setMuted(true);
+          latest.pause();
+          latest.seekTo(0);
+        } catch (_) {}
+      }, 320);
+    }, 80);
+
+    return () => clearTimeout(timeoutId);
+  }, [isActive, isPlayerValid, shouldPrewarmVideo]);
+
+  useEffect(() => {
+    const canRecoverActivePlayback =
+      isVideo &&
+      isActive &&
+      shouldLoadVideo &&
+      firstFrameRendered &&
+      isPlayerValid &&
+      !suspendPlayback &&
+      isAppActive &&
+      !decoderErrorDetected &&
+      !pausedByUser &&
+      !anyInternalModalOpen &&
+      !videoError;
+
+    if (!canRecoverActivePlayback) {
+      playbackStallCountRef.current = 0;
+      playbackStallProbeRef.current = {
+        time: lastPlaybackTimeRef.current,
+        checkedAt: Date.now(),
+      };
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current || !isMountedRef.current || isDraggingRef.current) {
+        return;
+      }
+
+      try {
+        const currentTime = controller.getCurrentTime?.() ?? lastPlaybackTimeRef.current;
+        const duration = controller.getDuration?.() ?? 0;
+        const now = Date.now();
+        const previous = playbackStallProbeRef.current;
+        const advanced = currentTime > previous.time + 0.04 || currentTime < previous.time - 0.5;
+        const nearEnd = duration > 0 && currentTime >= duration - 0.45;
+        const oldEnough = now - previous.checkedAt >= 850;
+
+        if (!oldEnough) {
+          return;
+        }
+
+        playbackStallProbeRef.current = { time: currentTime, checkedAt: now };
+
+        if (advanced || nearEnd) {
+          playbackStallCountRef.current = 0;
+          return;
+        }
+
+        playbackStallCountRef.current += 1;
+        const count = playbackStallCountRef.current;
+        feedTelemetry.trackVideoStall({
+          postId: item.id,
+          screenName,
+          count,
+        });
+        addFabricBreadcrumb('feed_video_post_frame_stall_retry', {
+          postId: item.id,
+          count,
+          currentTime,
+          duration,
+          status: playbackStatusRef.current,
+          sourceMode: videoSourceMode,
+        });
+
+        controller.setMuted(isMuted);
+
+        if (count === 1) {
+          controller.play();
+          return;
+        }
+
+        if (count === 2) {
+          controller.seekTo(Math.max(0, currentTime + 0.01));
+          controller.play();
+          return;
+        }
+
+        if (count <= 4) {
+          setVideoReady(false);
+          setFirstFrameRendered(false);
+          setVideoVisualReady(false);
+          if (Platform.OS === 'ios') {
+            setIosVisualRecoveryKey((prev) => prev + 1);
+          } else if (!preferDirectVideoSource) {
+            setPreferDirectVideoSource(true);
+          }
+          setVideoMountBoundaryKey((prev) => prev + 1);
+          requestAutoplayPlayback('post_frame_stall_retry');
+        }
+      } catch (error) {
+        addFabricBreadcrumb('feed_video_post_frame_stall_recovery_failed', {
+          postId: item.id,
+          message: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+    }, 900);
+
+    return () => clearInterval(interval);
+  }, [
+    anyInternalModalOpen,
+    decoderErrorDetected,
+    firstFrameRendered,
+    isActive,
+    isAppActive,
+    isMuted,
+    isPlayerValid,
+    isVideo,
+    item.id,
+    pausedByUser,
+    preferDirectVideoSource,
+    requestAutoplayPlayback,
+    screenName,
+    shouldLoadVideo,
+    suspendPlayback,
+    videoError,
+    videoSourceMode,
   ]);
 
   useEffect(() => {

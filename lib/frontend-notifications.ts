@@ -51,6 +51,18 @@ function buildVideoReadyMessage(input: VideoReadyNotificationInput): string {
   return 'Your video is ready.';
 }
 
+function buildVideoFailedMessage(input: VideoReadyNotificationInput): string {
+  if (input.destination === 'draft') {
+    return 'Your draft video could not be processed. Please try uploading it again.';
+  }
+
+  if (input.challengeName) {
+    return `Your competition post in ${input.challengeName} could not be processed. Please try again.`;
+  }
+
+  return 'Your video could not be processed. Please try uploading it again.';
+}
+
 function buildChallengeStatusMessage(input: ChallengeStatusNotificationInput): string {
   const challengeLabel = input.challengeName || 'A competition';
 
@@ -98,6 +110,40 @@ export const frontendNotifications = {
         challengeId: input.challengeId,
         challengeName: input.challengeName,
         status: input.destination,
+      },
+      related_post_id: input.postId,
+    };
+
+    await writeNotifications(input.userId, [notification, ...notifications]);
+    localNotificationEvents.emitChanged();
+    return notification;
+  },
+
+  async addVideoFailedNotification(input: VideoReadyNotificationInput): Promise<Notification> {
+    const notifications = await readNotifications(input.userId);
+    const existing = notifications.find(
+      (notification) =>
+        notification.type === 'video_processing_failed' &&
+        notification.metadata?.postId === input.postId
+    );
+
+    if (existing) {
+      return existing;
+    }
+
+    const notification: Notification = {
+      id: -Date.now(),
+      userID: input.userId,
+      message: buildVideoFailedMessage(input),
+      type: 'video_processing_failed',
+      isRead: false,
+      createdAt: new Date().toISOString(),
+      metadata: {
+        postId: input.postId,
+        challengeId: input.challengeId,
+        challengeName: input.challengeName,
+        status: input.destination,
+        reason: 'processing_failed',
       },
       related_post_id: input.postId,
     };

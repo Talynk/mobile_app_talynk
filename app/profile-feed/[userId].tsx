@@ -37,7 +37,7 @@ import RealtimeProvider from '@/lib/realtime-context';
 import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import ReportModal from '@/components/ReportModal';
 import CommentsModal from '@/components/CommentsModal';
-import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { filterSecondarySurfacePosts, shouldHideOutsideForYou } from '@/lib/utils/post-filter';
 import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import { useCreateFocus } from '@/lib/create-focus-context';
 import { getPostMediaUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl, isVideoProcessing } from '@/lib/utils/file-url';
@@ -389,7 +389,7 @@ function ProfileFeedContent({
           },
         });
       });
-      postsArray = filterSecondarySurfacePosts(postsArray);
+      postsArray = postsArray.filter((post: any) => !shouldHideOutsideForYou(post));
       primePostDetailsCache(postsArray);
 
       if (response?.status === 'success' && postsArray.length >= 0) {
@@ -487,6 +487,8 @@ function ProfileFeedContent({
             console.log(`✅ [ProfileFeed] Enriched ${enrichMap.size} posts with HLS data`);
           }
         }
+
+        postsArray = filterSecondarySurfacePosts(postsArray);
 
         // Bail out if a newer loadPosts call has started while we were enriching
         if (thisVersion !== loadVersionRef.current) {

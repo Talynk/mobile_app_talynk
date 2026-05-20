@@ -31,7 +31,7 @@ import { useLikesManager } from '@/lib/hooks/use-likes-manager';
 import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
 import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getFileUrl, getThumbnailUrl, getProfilePictureUrl } from '@/lib/utils/file-url';
+import { getFileUrl, getThumbnailUrl, getProfilePictureUrl, getPlaybackUrl } from '@/lib/utils/file-url';
 import { sharePost } from '@/lib/post-share';
 import { Avatar } from '@/components/Avatar';
 import { getChallengePostMeta } from '@/lib/utils/challenge-post';
@@ -334,11 +334,7 @@ const hasRenderableMedia = (p: any) => {
 
   if (!isVideo) return hasImage;
 
-  const hasHls =
-    typeof p.fullUrl === 'string' &&
-    p.fullUrl.toLowerCase().includes('.m3u8');
-
-  return hasHls || hasImage;
+  return !!getPlaybackUrl(p);
 };
 const persistentProfilePostsCache: Record<string, Post[]> = {
   active: [],
@@ -676,13 +672,13 @@ export default function ProfileScreen() {
           }
         }
 
-        // posts_count is set by loadPosts() to published-only count (not backend total/drafts)
+        // posts_count is set by loadPosts() to ready visible cards only.
         setProfile((prev: any) => ({
           ...userData,
           name: userData.username,
           followers_count: userData.follower_count || userData.followers_count || userData.followersCount || 0,
           following_count: followingCount,
-          posts_count: publishedPostsCountRef.current || prev?.posts_count || userData.posts_count || userData.postsCount || 0,
+          posts_count: Math.max(0, publishedPostsCountRef.current),
           phone1: userData.phone1 || '',
           phone2: userData.phone2 || '',
           email: userData.email || '',
@@ -880,11 +876,14 @@ export default function ProfileScreen() {
             if (post?.id) enrichedById.set(post.id, post);
           });
           const refreshedPosts = filterSecondarySurfacePosts(sortPostsNewestFirst(Array.from(enrichedById.values())));
+          const refreshedPostCount = Math.max(0, refreshedPosts.length);
           primePostDetailsCache(refreshedPosts);
           postsCacheRef.current[activeTab] = refreshedPosts;
           persistentProfilePostsCache[activeTab] = refreshedPosts;
           prefetchProfileThumbnails(refreshedPosts);
           setPosts(refreshedPosts);
+          publishedPostsCountRef.current = refreshedPostCount;
+          setProfile((prev: any) => (prev ? { ...prev, posts_count: refreshedPostCount } : null));
 
           const refreshedLikes = refreshedPosts.reduce((sum: number, post: any) => {
             const cachedCount = postLikeCounts[post.id];
@@ -1579,7 +1578,7 @@ export default function ProfileScreen() {
               {/* Stats */}
               <View style={styles.statsContainer}>
                 <TouchableOpacity style={styles.stat}>
-                  <Text style={styles.statValue}>{profile.posts_count || 0}</Text>
+                  <Text style={styles.statValue}>{Math.max(0, profile.posts_count || 0)}</Text>
                   <Text style={styles.statLabel}>Posts</Text>
                 </TouchableOpacity>
                 <TouchableOpacity

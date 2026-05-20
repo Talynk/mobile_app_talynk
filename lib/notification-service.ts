@@ -192,6 +192,33 @@ export class UploadNotificationService {
     }
   }
 
+  async showVideoProcessingFailed(destination: 'post' | 'draft' | 'challenge', challengeName?: string): Promise<void> {
+    if (isExpoGo) {
+      console.log(`Video processing failed: ${destination}`);
+      return;
+    }
+
+    const body =
+      destination === 'draft'
+        ? 'Your draft video could not be processed. Please try uploading it again.'
+        : challengeName
+          ? `Your competition post in ${challengeName} could not be processed. Please try again.`
+          : 'Your video could not be processed. Please try uploading it again.';
+
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Video Processing Failed',
+          body,
+          data: { type: 'video-processing-failed' },
+        },
+        trigger: null,
+      });
+    } catch (error) {
+      console.warn('Failed to show video processing failure notification:', error);
+    }
+  }
+
   async showUploadError(error: string, filename?: string): Promise<void> {
     if (isExpoGo) {
       console.error(`Upload error: ${filename || 'file'} - ${error}`);

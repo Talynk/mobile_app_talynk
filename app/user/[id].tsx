@@ -156,8 +156,6 @@ const getExternalProfilePostCardMeta = (post: any) => {
     };
   }
 
-  // Only block genuinely processing posts — others should be openable
-  // because the profile-feed will enrich them with HLS data on load.
   if (
     processingStatus.includes('pending') ||
     processingStatus.includes('processing') ||
@@ -172,13 +170,10 @@ const getExternalProfilePostCardMeta = (post: any) => {
     };
   }
 
-  // CRITICAL FIX: Allow opening even without HLS. The profile-feed page
-  // will enrich the post with hls_url from the individual post endpoint.
-  // Previously this returned canOpen:false, blocking all un-enriched videos.
   return {
     isVideo: true,
-    canOpen: true,
-    statusLabel: null,
+    canOpen: false,
+    statusLabel: 'Unavailable',
     thumbnailUrl,
   };
 };
@@ -620,13 +615,13 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
     if (cached.profile) {
       const hydratedProfile = {
         ...cached.profile,
-        posts_count: Math.max(cached.profile.posts_count || 0, cached.totalCount || 0),
+        posts_count: Math.max(0, cached.posts.length),
       };
       profileSnapshotRef.current = hydratedProfile;
       setProfile(hydratedProfile);
       setLoadingProfile(false);
       setProfileError(null);
-      if ((cached.totalCount || 0) > 0) {
+      if (cached.posts.length > 0) {
         setInitialPostCountResolved(true);
       }
     }
@@ -694,24 +689,14 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
       setProfileError(null);
       setError(null);
       try {
-        const cachedTotal = !Array.isArray(id) && id ? externalProfileCache[id]?.totalCount || 0 : 0;
-        const [response, exactTotal] = await Promise.all([
-          userApi.getUserById(id as string),
-          cachedTotal > 0 ? Promise.resolve(cachedTotal) : resolveExactApprovedPostsTotal(id as string),
-        ]);
+        const response = await userApi.getUserById(id as string);
         if (response.status === 'success' && response.data) {
           const nextProfile = buildProfileFromApi(
             response.data,
             id as string,
-            Math.max(approvedPostsRef.current.length, cachedTotal, exactTotal, profileSnapshotRef.current?.posts_count || 0),
-          );
-          const stableTotalCount = Math.max(
-            cachedTotal,
-            exactTotal,
-            nextProfile.posts_count || 0,
             approvedPostsRef.current.length,
-            profileSnapshotRef.current?.posts_count || 0,
           );
+          const stableTotalCount = Math.max(0, approvedPostsRef.current.length);
           const stableProfile = {
             ...nextProfile,
             posts_count: stableTotalCount,
@@ -810,13 +795,6 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const rawPosts = Array.isArray(response.data)
           ? response.data
           : (response.data as any)?.posts || [];
-        const cachedTotal = !Array.isArray(id) && id ? externalProfileCache[id]?.totalCount || 0 : 0;
-        const currentKnownTotal = Math.max(
-          profileSnapshotRef.current?.posts_count ?? 0,
-          approvedPostsRef.current.length,
-          cachedTotal,
-        );
-        const totalApprovedPosts = getApprovedPostsTotal(response.data, currentKnownTotal);
         const normalizedPage = (rawPosts as any[]).map((post: any) =>
           normalizeUserProfilePost(post, fallbackProfile ?? undefined),
         );
@@ -825,26 +803,24 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const visiblePagePosts = buildRenderableApprovedPosts(normalizedPage, fallbackProfile);
         prefetchRenderableThumbnails(visiblePagePosts);
 
-        let nextVisiblePosts: Post[] = [];
-        setApprovedPosts((prev) => {
-          nextVisiblePosts = isReset
-            ? ((options?.background || approvedPostsRef.current.length > 0)
-                ? mergeApprovedPostsNewestFirst(prev, visiblePagePosts)
-                : visiblePagePosts)
-            : mergeApprovedPostsNewestFirst(prev, visiblePagePosts);
-          return nextVisiblePosts;
-        });
+        const nextVisiblePosts = isReset
+          ? ((options?.background || approvedPostsRef.current.length > 0)
+              ? mergeApprovedPostsNewestFirst(approvedPostsRef.current, visiblePagePosts)
+              : visiblePagePosts)
+          : mergeApprovedPostsNewestFirst(approvedPostsRef.current, visiblePagePosts);
+        const visiblePostCount = Math.max(0, nextVisiblePosts.length);
+        setApprovedPosts(nextVisiblePosts);
         setHasMorePosts(rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT);
         setNextPostsPage(page + 1);
-        setProfile((prev) => prev ? { ...prev, posts_count: totalApprovedPosts } : prev);
+        setProfile((prev) => prev ? { ...prev, posts_count: visiblePostCount } : prev);
         externalProfileCache[id as string] = {
           profile: profileSnapshotRef.current
-            ? { ...profileSnapshotRef.current, posts_count: totalApprovedPosts }
+            ? { ...profileSnapshotRef.current, posts_count: visiblePostCount }
             : null,
           posts: nextVisiblePosts,
           hasMore: rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT,
           nextPage: page + 1,
-          totalCount: totalApprovedPosts,
+          totalCount: visiblePostCount,
         };
         setLoadingPosts(false);
 
@@ -856,24 +832,22 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
         const enrichedVisiblePagePosts = buildRenderableApprovedPosts(enrichedPage, fallbackProfile);
         prefetchRenderableThumbnails(enrichedVisiblePagePosts);
 
-        let nextEnrichedPosts: Post[] = [];
-        setApprovedPosts((prev) => {
-          nextEnrichedPosts = isReset
-            ? ((options?.background || approvedPostsRef.current.length > 0)
-                ? mergeApprovedPostsNewestFirst(prev, enrichedVisiblePagePosts)
-                : enrichedVisiblePagePosts)
-            : mergeApprovedPostsNewestFirst(prev, enrichedVisiblePagePosts);
-          return nextEnrichedPosts;
-        });
-        setProfile((prev) => prev ? { ...prev, posts_count: totalApprovedPosts } : prev);
+        const nextEnrichedPosts = isReset
+          ? ((options?.background || approvedPostsRef.current.length > 0)
+              ? mergeApprovedPostsNewestFirst(nextVisiblePosts, enrichedVisiblePagePosts)
+              : enrichedVisiblePagePosts)
+          : mergeApprovedPostsNewestFirst(nextVisiblePosts, enrichedVisiblePagePosts);
+        const enrichedPostCount = Math.max(0, nextEnrichedPosts.length);
+        setApprovedPosts(nextEnrichedPosts);
+        setProfile((prev) => prev ? { ...prev, posts_count: enrichedPostCount } : prev);
         externalProfileCache[id as string] = {
           profile: profileSnapshotRef.current
-            ? { ...profileSnapshotRef.current, posts_count: totalApprovedPosts }
+            ? { ...profileSnapshotRef.current, posts_count: enrichedPostCount }
             : null,
           posts: nextEnrichedPosts,
           hasMore: rawPosts.length >= EXTERNAL_PROFILE_PAGE_LIMIT,
           nextPage: page + 1,
-          totalCount: totalApprovedPosts,
+          totalCount: enrichedPostCount,
         };
       } else {
         setPostsError(response.message || 'Failed to fetch posts');

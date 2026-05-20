@@ -41,6 +41,20 @@ export function VideoReadyWatcher() {
         const processing = status.data?.processing;
         const isReady =
           processing?.hlsReady === true || processing?.status === 'completed';
+        const isFailed = processing?.status === 'failed';
+
+        if (isFailed) {
+          await frontendNotifications.addVideoFailedNotification({
+            userId: user.id,
+            postId: entry.postId,
+            destination: entry.destination,
+            challengeId: entry.challengeId,
+            challengeName: entry.challengeName,
+          });
+          await videoReadyTracker.untrack(user.id, entry.postId);
+          await uploadNotificationService.showVideoProcessingFailed(entry.destination, entry.challengeName);
+          continue;
+        }
 
         if (!isReady) {
           continue;
