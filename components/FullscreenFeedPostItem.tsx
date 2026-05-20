@@ -522,7 +522,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   index,
   onLike,
   onComment,
-  onShare,
   onReport,
   onFollow,
   onUnfollow,
@@ -543,6 +542,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   showBottomFooter = false,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
+  const [showShareComingSoonModal, setShowShareComingSoonModal] = useState(false);
   const isAppActive = useAppActive();
   const showBestButton = likesDuringChallenge !== undefined && likesDuringChallenge !== null;
   const { width: screenWidth } = useWindowDimensions();
@@ -640,7 +640,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   }, [isActive, suspendPlayback, isAppActive, decoderErrorDetected, pausedByUser, isMuted]);
 
   // Watch all internal modal states — resume playback when they ALL close.
-  const anyInternalModalOpen = showUnfollowModal || showFollowLoginModal || showBestModal || showAppealModal;
+  const anyInternalModalOpen =
+    showUnfollowModal || showFollowLoginModal || showBestModal || showAppealModal || showShareComingSoonModal;
   const prevModalOpenRef = useRef(false);
   useEffect(() => {
     if (anyInternalModalOpen) {
@@ -1703,7 +1704,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             <Text style={styles.actionCount}>{formatNumber(comments)}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionButton} onPress={() => onShare(item.id)}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => setShowShareComingSoonModal(true)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Feather name="share-2" size={24} color="#fff" />
           </TouchableOpacity>
 
@@ -1851,6 +1857,32 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowFollowLoginModal(false)}>
               <Text style={styles.followLoginDismissText}>Not now</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={showShareComingSoonModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowShareComingSoonModal(false)}
+      >
+        <Pressable style={styles.bestModalOverlay} onPress={() => setShowShareComingSoonModal(false)}>
+          <View style={styles.shareComingSoonModal}>
+            <View style={styles.shareComingSoonIconWrap}>
+              <Feather name="send" size={30} color="#60a5fa" />
+            </View>
+            <Text style={styles.shareComingSoonTitle}>Coming soon</Text>
+            <Text style={styles.shareComingSoonMessage}>
+              Sharing Talentix posts is being polished and will be available soon.
+            </Text>
+            <TouchableOpacity
+              style={styles.shareComingSoonButton}
+              onPress={() => setShowShareComingSoonModal(false)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.shareComingSoonButtonText}>Got it</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -2205,6 +2237,56 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  shareComingSoonModal: {
+    width: '100%',
+    maxWidth: 330,
+    backgroundColor: '#0f172a',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.35)',
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#60a5fa',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  shareComingSoonIconWrap: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    backgroundColor: 'rgba(96, 165, 250, 0.16)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  shareComingSoonTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  shareComingSoonMessage: {
+    color: '#cbd5e1',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  shareComingSoonButton: {
+    width: '100%',
+    backgroundColor: '#60a5fa',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  shareComingSoonButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   followLoginModal: {
     width: '100%',

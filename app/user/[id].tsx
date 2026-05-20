@@ -1296,13 +1296,10 @@ function ProfileContent(props: { id: string | string[] | undefined, currentUser:
                       />
                     )
                   ) : (
-                    <ExpoImage
-                      source={{ uri: 'https://via.placeholder.com/300' }}
-                      style={styles.overlayMedia}
-                      contentFit="contain"
-                      cachePolicy="memory-disk"
-                      transition={0}
-                    />
+                    <View style={[styles.overlayMedia, styles.noMediaPlaceholder]}>
+                      <MaterialIcons name="image-not-supported" size={54} color="#6b7280" />
+                      <Text style={styles.noMediaText}>Media unavailable</Text>
+                    </View>
                   )}
                   <View style={styles.overlayActions}>
                     <TouchableOpacity style={styles.overlayAction} onPress={handleSharePost}>
@@ -1614,5 +1611,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  noMediaText: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginTop: 10,
   },
 });

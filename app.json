@@ -17,9 +17,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.strongminds.talentix",
-      "associatedDomains": [
-        "applinks:links.talentix.net"
-      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
       }
@@ -40,23 +37,6 @@
         "android.permission.ACCESS_MEDIA_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO"
-      ],
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "https",
-              "host": "links.talentix.net",
-              "pathPrefix": "/post"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
       ]
     },
     "web": {

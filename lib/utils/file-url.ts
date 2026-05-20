@@ -14,8 +14,8 @@ function isImagePost(post: any): boolean {
  * getFileUrl("/uploads/file.mp4") 
  * // Returns: "https://api.talentix.net/uploads/file.mp4"
  * 
- * getFileUrl("https://example.com/file.jpg")
- * // Returns: "https://example.com/file.jpg" (already full URL)
+ * getFileUrl("https://media.talentix.net/file.jpg")
+ * // Returns: "https://media.talentix.net/file.jpg" (already full URL)
  */
 export function getFileUrl(relativePath: string | null | undefined): string | null {
   if (!relativePath || typeof relativePath !== 'string' || relativePath.trim() === '') {

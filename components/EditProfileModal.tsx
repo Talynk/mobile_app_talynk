@@ -185,12 +185,16 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
             {/* Profile Picture */}
             <View style={styles.profilePictureSection}>
               <View style={styles.profilePictureContainer}>
-                <Image
-                  source={{
-                    uri: profileImage || user?.profile_picture || 'https://via.placeholder.com/100',
-                  }}
-                  style={styles.profilePicture}
-                />
+                {profileImage || user?.profile_picture ? (
+                  <Image
+                    source={{ uri: profileImage || user?.profile_picture || '' }}
+                    style={styles.profilePicture}
+                  />
+                ) : (
+                  <View style={[styles.profilePicture, styles.profilePictureFallback]}>
+                    <Feather name="user" size={40} color="#9ca3af" />
+                  </View>
+                )}
                 {uploadingImage && (
                   <View style={styles.uploadingOverlay}>
                     <ActivityIndicator size="small" color="#fff" />
@@ -374,6 +378,12 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     backgroundColor: '#232326',
+  },
+  profilePictureFallback: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#374151',
   },
   uploadingOverlay: {
     position: 'absolute',
