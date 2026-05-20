@@ -1,0 +1,22 @@
+diff --git a/node_modules/expo-video/ios/VideoPlayerItem.swift b/node_modules/expo-video/ios/VideoPlayerItem.swift
+index 9653b08..4612bd4 100644
+--- a/node_modules/expo-video/ios/VideoPlayerItem.swift
++++ b/node_modules/expo-video/ios/VideoPlayerItem.swift
+@@ -61,12 +61,11 @@ class VideoPlayerItem: AVPlayerItem {
+       }
+ 
+       if isHls {
+-        do {
+-          tracks = try await self.fetchHlsVideoTracks()
+-        } catch {
+-          tracks = []
+-          log.warn("Failed to fetch HLS video tracks, this is not required for playback, but `expo-video` will have no knowledge of the available tracks: \(error.localizedDescription)")
+-        }
++        // Talentix only needs HLS playback, not client-side track metadata.
++        // On iOS this background parser can outlive fast feed player churn and
++        // has crashed inside Swift's Sequence.reduce while parsing master
++        // playlists. Returning no tracks keeps AVPlayer playback untouched.
++        return []
+       } else {
+         let avAssetTracks = (try? await asset.loadTracks(withMediaType: .video)) ?? []
+         for avAssetTrack in avAssetTracks {
