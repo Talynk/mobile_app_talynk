@@ -2,7 +2,7 @@ module.exports = {
   project: {
     ios: {},
     android: {
-      packageName: 'com.strongminds.talynksocial'
+      packageName: 'com.ihirwe.talynksocial'
     }
   }
 };

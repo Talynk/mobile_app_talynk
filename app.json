@@ -16,7 +16,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.strongminds.talentix",
+      "bundleIdentifier": "com.ihirwe.talentix",
       "infoPlist": {
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
       }
@@ -26,7 +26,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.strongminds.talentix",
+      "package": "com.ihirwe.talentix",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
