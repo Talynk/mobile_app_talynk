@@ -34,6 +34,7 @@ interface EditProfileModalProps {
   onClose: () => void;
   user: User | null;
   onProfileUpdated: (updatedUser: User) => void;
+  requirePrimaryPhone?: boolean;
 }
 
 const BIO_MAX_LENGTH = 150;
@@ -58,6 +59,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   onClose,
   user,
   onProfileUpdated,
+  requirePrimaryPhone = false,
 }) => {
   const [bio, setBio] = useState('');
   const [phone1, setPhone1] = useState('');
@@ -67,28 +69,54 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user && isVisible) {
       setBio(user.bio ?? '');
       setPhone1(user.phone1 || '');
       setPhone2(user.phone2 || '');
-      setPhone1Editing(false);
+      setPhone1Editing(requirePrimaryPhone && !user.phone1);
       setPhone2Editing(false);
       setProfileImage(null);
+      setPhoneError(null);
     }
-  }, [user, isVisible]);
+  }, [user, isVisible, requirePrimaryPhone]);
 
   const handleSave = async () => {
+    const compactPhone = (value: string) => value.trim().replace(/[\s()-]/g, '');
+    const trimmedPhone1 = compactPhone(phone1);
+    const trimmedPhone2 = compactPhone(phone2);
+    const validPhonePattern = /^\+?\d{6,15}$/;
+
+    if (!trimmedPhone1 && !trimmedPhone2) {
+      setPhoneError('Add your primary phone number before saving your profile.');
+      setPhone1Editing(true);
+      return;
+    }
+    if (requirePrimaryPhone && !trimmedPhone1) {
+      setPhoneError('Your primary phone number is required.');
+      setPhone1Editing(true);
+      return;
+    }
+    if (trimmedPhone1 && !validPhonePattern.test(trimmedPhone1)) {
+      setPhoneError('Enter a valid primary phone number with 6 to 15 digits.');
+      setPhone1Editing(true);
+      return;
+    }
+    if (trimmedPhone2 && !validPhonePattern.test(trimmedPhone2)) {
+      setPhoneError('Enter a valid secondary phone number with 6 to 15 digits.');
+      setPhone2Editing(true);
+      return;
+    }
+
+    setPhoneError(null);
     setLoading(true);
     try {
       const updateData: any = {};
 
       // Always send bio — even if empty, so it clears on the backend
       updateData.bio = bio.trim().slice(0, BIO_MAX_LENGTH);
-
-      const trimmedPhone1 = phone1.trim();
-      const trimmedPhone2 = phone2.trim();
 
       if (trimmedPhone1 !== (user?.phone1 || '')) {
         updateData.phone1 = trimmedPhone1;
@@ -242,19 +270,23 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
               <View style={styles.inputGroup}>
                 <View style={styles.labelRow}>
                   <Feather name="phone" size={15} color="#9ca3af" style={{ marginRight: 6 }} />
-                  <Text style={styles.label}>Primary Phone</Text>
+                  <Text style={styles.label}>Primary Phone{requirePrimaryPhone ? ' *' : ''}</Text>
                 </View>
                 {phone1 || phone1Editing ? (
                   <TextInput
                     style={styles.input}
                     value={phone1}
-                    onChangeText={setPhone1}
+                    onChangeText={(value) => {
+                      setPhone1(value);
+                      setPhoneError(null);
+                    }}
                     onFocus={() => setPhone1Editing(true)}
                     onBlur={() => setPhone1Editing(false)}
                     placeholder="e.g. +250780000000"
                     placeholderTextColor="#4b5563"
                     keyboardType="phone-pad"
                     autoCorrect={false}
+                    autoFocus={requirePrimaryPhone && !user.phone1}
                   />
                 ) : (
                   <TouchableOpacity
@@ -265,6 +297,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     <Text style={styles.addPhoneText}>No primary phone set — tap to add</Text>
                   </TouchableOpacity>
                 )}
+                {phoneError ? <Text style={styles.phoneError}>{phoneError}</Text> : null}
               </View>
 
               {/* Secondary Phone — editable */}
@@ -277,7 +310,10 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   <TextInput
                     style={styles.input}
                     value={phone2}
-                    onChangeText={setPhone2}
+                    onChangeText={(value) => {
+                      setPhone2(value);
+                      setPhoneError(null);
+                    }}
                     onFocus={() => setPhone2Editing(true)}
                     onBlur={() => setPhone2Editing(false)}
                     placeholder="e.g. +250780000000"
@@ -484,5 +520,11 @@ const styles = StyleSheet.create({
     color: '#60a5fa',
     fontSize: 14,
     marginLeft: 10,
+  },
+  phoneError: {
+    color: '#fca5a5',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
   },
 });

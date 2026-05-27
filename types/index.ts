@@ -38,7 +38,7 @@ export interface RegisterCompletePayload {
   country_id: number;
   date_of_birth: string;
   email?: string;
-  phone1?: string;
+  phone1: string;
   phone2?: string;
 }
 

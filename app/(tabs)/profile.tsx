@@ -1518,6 +1518,10 @@ export default function ProfileScreen() {
     );
   }
 
+  const hasNoPhoneNumber =
+    !String(profile.phone1 || '').trim() &&
+    !String(profile.phone2 || '').trim();
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -1574,6 +1578,23 @@ export default function ProfileScreen() {
                   <Feather name={profile.bio?.trim() ? 'edit-3' : 'plus'} size={14} color="#60a5fa" />
                 </View>
               </TouchableOpacity>
+
+              {hasNoPhoneNumber && (
+                <TouchableOpacity
+                  style={styles.phoneRequiredNotice}
+                  activeOpacity={0.86}
+                  onPress={() => setEditModalVisible(true)}
+                >
+                  <Feather name="phone-call" size={16} color="#fbbf24" />
+                  <View style={styles.phoneRequiredCopy}>
+                    <Text style={styles.phoneRequiredTitle}>Phone number required</Text>
+                    <Text style={styles.phoneRequiredText}>
+                      Add your primary phone number to complete your profile.
+                    </Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="#fbbf24" />
+                </TouchableOpacity>
+              )}
 
               {/* Stats */}
               <View style={styles.statsContainer}>
@@ -2087,6 +2108,7 @@ export default function ProfileScreen() {
         isVisible={editModalVisible}
         onClose={() => setEditModalVisible(false)}
         user={profile}
+        requirePrimaryPhone={hasNoPhoneNumber}
         onProfileUpdated={(updatedUser) => {
           setProfile(updatedUser);
           setEditModalVisible(false);
@@ -2240,6 +2262,33 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(96, 165, 250, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  phoneRequiredNotice: {
+    width: '92%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.4)',
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  phoneRequiredCopy: {
+    flex: 1,
+  },
+  phoneRequiredTitle: {
+    color: '#fef3c7',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  phoneRequiredText: {
+    color: '#d1d5db',
+    fontSize: 12,
+    lineHeight: 17,
   },
   bioModalOverlay: {
     flex: 1,

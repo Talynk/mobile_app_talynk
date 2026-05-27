@@ -680,7 +680,7 @@ export default function RegisterScreen() {
 
     const code = getCountryDialCode(selectedCountry).replace('+', '');
     const digitsOnly = (v: string) => v.replace(/\D/g, '');
-    const fullPhone1 = phone1.trim() ? code + digitsOnly(phone1) : undefined;
+    const fullPhone1 = code + digitsOnly(phone1);
     const fullPhone2 = phone2.trim() ? code + digitsOnly(phone2) : undefined;
 
     const payload = {
@@ -696,6 +696,23 @@ export default function RegisterScreen() {
     };
 
     return payload;
+  };
+
+  const getPhoneValidationError = (rawValue: string, label: string, required = false) => {
+    const localDigits = rawValue.replace(/\D/g, '');
+    if (!localDigits) {
+      return required ? `${label} phone number is required` : null;
+    }
+    if (localDigits.length < 6) {
+      return `${label} phone must be at least 6 digits`;
+    }
+    const dialDigits = selectedCountry
+      ? getCountryDialCode(selectedCountry).replace(/\D/g, '')
+      : '';
+    if (`${dialDigits}${localDigits}`.length > 15) {
+      return `${label} phone number is too long`;
+    }
+    return null;
   };
 
   const handleRegister = async () => {
@@ -760,9 +777,10 @@ export default function RegisterScreen() {
       errors.agreed = 'You must agree to the Terms and Conditions';
     }
 
-    const digitsOnly = (v: string) => v.replace(/\D/g, '');
-    if (phone1.trim() && digitsOnly(phone1).length < 6) errors.phone1 = 'Enter a valid phone number (at least 6 digits)';
-    if (phone2.trim() && digitsOnly(phone2).length < 6) errors.phone2 = 'Enter a valid phone number (at least 6 digits)';
+    const primaryPhoneError = getPhoneValidationError(phone1, 'Primary', true);
+    const secondaryPhoneError = getPhoneValidationError(phone2, 'Secondary');
+    if (primaryPhoneError) errors.phone1 = primaryPhoneError;
+    if (secondaryPhoneError) errors.phone2 = secondaryPhoneError;
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
@@ -865,9 +883,10 @@ export default function RegisterScreen() {
       }
       const dobError = getDobValidationError();
       if (dobError) return dobError;
-      const digitsOnly = (v: string) => v.replace(/\D/g, '');
-      if (phone1.trim() && digitsOnly(phone1).length < 6) return 'Primary phone must be at least 6 digits';
-      if (phone2.trim() && digitsOnly(phone2).length < 6) return 'Secondary phone must be at least 6 digits';
+      const primaryPhoneError = getPhoneValidationError(phone1, 'Primary', true);
+      if (primaryPhoneError) return primaryPhoneError;
+      const secondaryPhoneError = getPhoneValidationError(phone2, 'Secondary');
+      if (secondaryPhoneError) return secondaryPhoneError;
       return null;
     }
     return null;
@@ -1284,7 +1303,14 @@ export default function RegisterScreen() {
           {/* Step 4: Profile / Onboarding */}
           {step === 4 && (
             <View>
-              <Text style={[styles.label, { color: C.text }]}>Display name</Text>
+              <View style={[styles.requiredLegend, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
+                <Text style={[styles.requiredLegendAsterisk, { color: C.primary }]}>*</Text>
+                <Text style={[styles.requiredLegendText, { color: C.textSecondary }]}>
+                  indicates a required field
+                </Text>
+              </View>
+
+              <Text style={[styles.label, { color: C.text }]}>Display name *</Text>
               <TextInput
                 style={[
                   styles.input,
@@ -1315,7 +1341,7 @@ export default function RegisterScreen() {
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.name}</Text>
               )}
 
-              <Text style={[styles.label, { color: C.text }]}>Username</Text>
+              <Text style={[styles.label, { color: C.text }]}>Username *</Text>
               <TextInput
                 style={[
                   styles.input,
@@ -1351,7 +1377,7 @@ export default function RegisterScreen() {
                 </Text>
               )}
 
-              <Text style={[styles.label, { color: C.text }]}>Country</Text>
+              <Text style={[styles.label, { color: C.text }]}>Country *</Text>
               <TouchableOpacity
                 onPress={() => {
                   setCountryModalOpen(true);
@@ -1384,7 +1410,7 @@ export default function RegisterScreen() {
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.country}</Text>
               ) : null}
 
-              <Text style={[styles.label, { color: C.text }]}>Date of birth</Text>
+              <Text style={[styles.label, { color: C.text }]}>Date of birth *</Text>
               <TouchableOpacity
                 onPress={() => {
                   if (!isFormBusy && !ageGateLocked) {
@@ -1434,7 +1460,7 @@ export default function RegisterScreen() {
               )}
 
               <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
-                <Text style={[styles.label, { color: C.text }]}>Primary Phone (Optional)</Text>
+                <Text style={[styles.label, { color: C.text }]}>Primary Phone *</Text>
               </View>
               <View style={styles.phoneInputRow}>
                 <View style={[styles.dialBox, { backgroundColor: C.input, borderColor: C.inputBorder }]}>
@@ -1460,7 +1486,9 @@ export default function RegisterScreen() {
               </View>
               {fieldErrors.phone1 ? (
                 <Text style={[styles.fieldError, { color: '#fecaca' }]}>{fieldErrors.phone1}</Text>
-              ) : null}
+              ) : (
+                <Text style={[styles.helperText, { color: C.textSecondary }]}>Required for your account.</Text>
+              )}
 
               <View style={[styles.phoneRow, { marginTop: 16, marginBottom: 12 }]}>
                 <Text style={[styles.label, { color: C.text }]}>Secondary Phone (Optional)</Text>
@@ -1765,6 +1793,26 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 6,
   },
+  requiredLegend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 18,
+  },
+  requiredLegendAsterisk: {
+    fontSize: 20,
+    lineHeight: 20,
+    fontWeight: '700',
+    marginRight: 7,
+  },
+  requiredLegendText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
   input: {
     borderWidth: 1,
     borderRadius: 8,
@@ -2058,4 +2106,4 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
   },
-}); 
+});
