@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: talynk-backend
+  namespace: talynk
+  labels:
+    app: talynk-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: talynk-backend
+  template:
+    metadata:
+      labels:
+        app: talynk-backend
+    spec:
+      containers:
+      - name: api
+        image: YOUR_REGISTRY/talynk-backend:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: talynk-config
+        - secretRef:
+            name: talynk-secrets
+        ports:
+        - containerPort: 3000
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/storage
+      volumes:
+      - name: uploads
+        persistentVolumeClaim:
+          claimName: talynk-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: talynk-backend
+  namespace: talynk
+spec:
+  selector:
+    app: talynk-backend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+  type: ClusterIP

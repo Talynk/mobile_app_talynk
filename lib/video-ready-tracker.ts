@@ -6,6 +6,10 @@ export interface PendingVideoEntry {
   challengeId?: string;
   challengeName?: string;
   createdAt: string;
+  lastCheckedAt?: string;
+  pollStartedAt?: string;
+  checkCount?: number;
+  lastKnownStatus?: string;
 }
 
 const storageKey = (userId: string) => `@pending_video_posts:${userId}`;
@@ -31,7 +35,21 @@ export const videoReadyTracker = {
 
   async track(userId: string, entry: Omit<PendingVideoEntry, 'createdAt'>) {
     const entries = await readEntries(userId);
-    if (entries.some((item) => item.postId === entry.postId)) {
+    const existing = entries.find((item) => item.postId === entry.postId);
+    if (existing) {
+      await writeEntries(
+        userId,
+        entries.map((item) =>
+          item.postId === entry.postId
+            ? {
+                ...item,
+                ...entry,
+                createdAt: item.createdAt,
+                pollStartedAt: item.pollStartedAt ?? new Date().toISOString(),
+              }
+            : item
+        )
+      );
       return;
     }
 
@@ -39,9 +57,28 @@ export const videoReadyTracker = {
       {
         ...entry,
         createdAt: new Date().toISOString(),
+        pollStartedAt: new Date().toISOString(),
+        checkCount: 0,
       },
       ...entries,
     ]);
+  },
+
+  async update(userId: string, postId: string, patch: Partial<PendingVideoEntry>) {
+    const entries = await readEntries(userId);
+    await writeEntries(
+      userId,
+      entries.map((item) =>
+        item.postId === postId
+          ? {
+              ...item,
+              ...patch,
+              postId: item.postId,
+              createdAt: item.createdAt,
+            }
+          : item
+      )
+    );
   },
 
   async untrack(userId: string, postId: string) {

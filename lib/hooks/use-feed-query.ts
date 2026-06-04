@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo } from 'react';
 
-import { feedApi, followsApi, postsApi, userApi } from '@/lib/api';
+import { authApi, feedApi, followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { FEED_DEFAULT_PAGE_SIZE, FEED_INTEGRATION_CONFIG } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
@@ -10,7 +10,7 @@ import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { FeedApiResponse, FeedPagination, Post, UserPreferenceHint } from '@/types';
 import { normalizePost } from '@/lib/utils/normalize-post';
 import { isNetworkError } from '@/lib/utils/network-error-handler';
-import { filterHlsReady, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { filterFeedPlayable, filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
 
 type FeedTab = 'foryou' | 'following';
 type FeedEndpoint = 'public' | 'personalized' | 'following' | 'catalog';
@@ -41,6 +41,7 @@ interface FeedPage {
   endpoint: FeedEndpoint;
   refresh: number | null;
   pipeline?: string;
+  legacyPipeline: boolean;
   userPreferences: UserPreferenceHint[];
   cached: boolean;
   pagination?: Partial<FeedPagination>;
@@ -113,7 +114,7 @@ function sortFeedPostsByLikesThenRecent(posts: Post[]) {
 }
 
 function normalizeForYouPosts(rawPosts: any[]) {
-  return filterHlsReady(rawPosts.map((post) => normalizePost(post)));
+  return filterFeedPlayable(rawPosts.map((post) => normalizePost(post)));
 }
 
 type CachedFeedPayload = {
@@ -128,6 +129,7 @@ function getFeedCacheKey(tab: FeedTab, userId: string) {
 function asCachedFeedPage(page: FeedPage): FeedPage {
   return {
     ...page,
+    legacyPipeline: page.legacyPipeline ?? false,
     cached: true,
     loadOutcome: page.posts.length > 0 ? 'degraded' : page.loadOutcome,
     errorMessage: undefined,
@@ -238,6 +240,26 @@ function extractHasNextFromPagination(pagination: any, requestIndex: number, ret
   return returnedCount >= limit;
 }
 
+function detectLegacyPipeline(data: any, nextCursor: string | null) {
+  const pipeline = typeof data?.feed_meta?.pipeline === 'string' ? data.feed_meta.pipeline : undefined;
+  return nextCursor !== null || (typeof pipeline === 'string' && pipeline !== 'tiktok-lite');
+}
+
+async function refreshAuthTokenForFeed() {
+  const refreshToken = await AsyncStorage.getItem('talynk_refresh_token');
+  if (!refreshToken) {
+    return false;
+  }
+
+  const response = await authApi.refresh(refreshToken);
+  if (response.status !== 'success' || !response.data?.accessToken) {
+    return false;
+  }
+
+  await AsyncStorage.setItem('talynk_token', response.data.accessToken);
+  return true;
+}
+
 function sanitizeUserPreferences(raw: unknown): UserPreferenceHint[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -287,6 +309,7 @@ function buildCatalogFallbackPage(args: {
     endpoint: 'catalog',
     refresh: refreshSeed ?? null,
     pipeline: 'catalog-fallback',
+    legacyPipeline: true,
     userPreferences: [],
     cached: false,
     pagination,
@@ -355,8 +378,11 @@ function normalizeFeedPage(args: {
   const posts = normalizeForYouPosts(rawPosts);
   const pagination = response.pagination ?? {};
   const nextCursor = typeof data.nextCursor === 'string' && data.nextCursor.length > 0 ? data.nextCursor : null;
+  const legacyPipeline = detectLegacyPipeline(data, nextCursor);
   const hasNext =
-    nextCursor !== null || extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
+    legacyPipeline && nextCursor !== null
+      ? true
+      : extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
   const userPreferences = sanitizeUserPreferences((data as any).userPreferences);
   const refresh = typeof data.refresh === 'number' ? data.refresh : refreshSeed ?? null;
   const pipeline = typeof data.feed_meta?.pipeline === 'string' ? data.feed_meta.pipeline : undefined;
@@ -393,6 +419,7 @@ function normalizeFeedPage(args: {
     endpoint,
     refresh,
     pipeline,
+    legacyPipeline,
     userPreferences,
     cached: response.cached === true,
     pagination,
@@ -423,6 +450,7 @@ async function loadFallbackFollowingFeed(
       cached: false,
       loadOutcome: 'empty',
       followingEmptyReason: 'not-following-anyone',
+      legacyPipeline: true,
     };
   }
 
@@ -463,6 +491,7 @@ async function loadFallbackFollowingFeed(
     cached: false,
     loadOutcome: pagePosts.length > 0 ? 'degraded' : 'empty',
     followingEmptyReason: pagePosts.length > 0 ? undefined : 'no-posts-from-following',
+    legacyPipeline: true,
   };
 }
 
@@ -490,12 +519,16 @@ async function loadForYouFeedPage(args: {
   refreshSeed?: number;
 }): Promise<FeedPage> {
   const { isAuthenticated, requestIndex, cursor, limit, refreshSeed } = args;
-  const options = {
-    cursor: cursor || undefined,
+  const homeOptions = {
     limit,
-    page: requestIndex,
     refresh: refreshSeed,
   };
+  const legacyOptions = {
+    cursor: cursor || undefined,
+    limit,
+    refresh: refreshSeed,
+  };
+  const requestOptions = cursor ? legacyOptions : homeOptions;
 
   let endpoint: 'public' | 'personalized' = isAuthenticated ? 'personalized' : 'public';
   let response: FeedApiResponse;
@@ -503,12 +536,17 @@ async function loadForYouFeedPage(args: {
 
   try {
     response = isAuthenticated
-      ? await feedApi.getPersonalized(options)
-      : await feedApi.getPublic(options);
+      ? await feedApi.getPersonalized(requestOptions)
+      : await feedApi.getPublic(requestOptions);
   } catch (error: any) {
     if (isAuthenticated && error?.response?.status === 401) {
-      endpoint = 'public';
-      response = await feedApi.getPublic(options);
+      const refreshed = await refreshAuthTokenForFeed().catch(() => false);
+      if (refreshed) {
+        response = await feedApi.getPersonalized(requestOptions);
+      } else {
+        endpoint = 'public';
+        response = await feedApi.getPublic(requestOptions);
+      }
     } else {
       requestError = error;
       response = {
@@ -527,7 +565,11 @@ async function loadForYouFeedPage(args: {
       refreshSeed,
     });
 
-    if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && (primaryPage.posts.length < limit || !primaryPage.hasNext)) {
+    if (
+      FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback &&
+      primaryPage.legacyPipeline &&
+      (primaryPage.posts.length < limit || !primaryPage.hasNext)
+    ) {
       try {
         return keepForYouPageContinuable(
           mergePrimaryWithCatalog(
@@ -543,12 +585,12 @@ async function loadForYouFeedPage(args: {
       }
     }
 
-    return keepForYouPageContinuable(primaryPage);
+    return primaryPage;
   }
 
   if (isAuthenticated && shouldUseRecommendationsFallback(requestError, response)) {
     try {
-      const recommendations = await feedApi.getRecommendations(options);
+      const recommendations = await feedApi.getRecommendations(requestOptions);
       if (isSuccessfulFeedResponse(recommendations)) {
         return keepForYouPageContinuable(normalizeFeedPage({
           response: recommendations,
@@ -626,6 +668,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             userPreferences: [],
             cached: false,
             loadOutcome: 'empty',
+            legacyPipeline: true,
           } satisfies FeedPage;
         }
 
@@ -641,6 +684,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             cached: false,
             loadOutcome: 'empty',
             followingEmptyReason,
+            legacyPipeline: true,
           } satisfies FeedPage;
         }
 
@@ -677,12 +721,13 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
             cached: false,
             loadOutcome: 'empty',
             followingEmptyReason: 'not-following-anyone',
+            legacyPipeline: true,
           } satisfies FeedPage;
         }
 
         let raw: any;
         try {
-          raw = await postsApi.getFollowing(page, followingLimit);
+          raw = await postsApi.getFollowing(page, followingLimit, 'newest');
         } catch (error: any) {
           feedTelemetry.trackFeedNetworkError({
             endpoint: 'following',
@@ -751,6 +796,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
           cached: false,
           pagination,
           loadOutcome: 'success',
+          legacyPipeline: true,
         };
 
         return followingPage;
@@ -790,7 +836,7 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
 
       return {
         page: lastPage.requestIndex + 1,
-        cursor: lastPage.nextCursor,
+        cursor: lastPage.legacyPipeline ? lastPage.nextCursor : null,
       } satisfies FeedPageParam;
     },
     placeholderData: (prev: any) => prev,

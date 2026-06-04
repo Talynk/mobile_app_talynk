@@ -385,20 +385,27 @@ export const categoriesApi = {
   },
 };
 
-// Feed API (optimized endpoints with cursor pagination)
-export type FeedRequestOptions = {
-  cursor?: string | null;
+// Feed API (home/public use Redis seen-set pagination; legacy endpoints may still use cursor/page)
+export type HomeFeedRequestOptions = {
   limit?: number;
   refresh?: number;
-  page?: number;
 };
+
+export type LegacyFeedRequestOptions = {
+  cursor?: string | null;
+  page?: number;
+  limit?: number;
+  refresh?: number;
+};
+
+export type FeedRequestOptions = HomeFeedRequestOptions | LegacyFeedRequestOptions;
 
 function buildFeedParams(options: FeedRequestOptions = {}) {
   const params = new URLSearchParams();
   params.set('limit', String(options.limit ?? 10));
-  if (options.cursor) params.set('cursor', options.cursor);
+  if ('cursor' in options && options.cursor) params.set('cursor', options.cursor);
   if (typeof options.refresh === 'number') params.set('refresh', String(options.refresh));
-  if (typeof options.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
+  if ('page' in options && typeof options.page === 'number' && Number.isFinite(options.page) && options.page > 0) {
     params.set('page', String(options.page));
   }
   return params;
@@ -515,9 +522,22 @@ export const postsApi = {
     }
   },
 
-  getFollowing: async (page = 1, limit = 20, timestamp = ''): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
+  getFollowing: async (
+    page = 1,
+    limit = 20,
+    sort = 'newest',
+    timestamp = ''
+  ): Promise<ApiResponse<{ posts: Post[], pagination: any, filters: any }>> => {
     try {
-      const url = `/api/follows/posts?page=${page}&limit=${limit}${timestamp ? `&t=${timestamp}` : ''}`;
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+        sort,
+      });
+      if (timestamp) {
+        params.set('t', timestamp);
+      }
+      const url = `/api/follows/posts?${params.toString()}`;
       const response = await apiClient.get(url);
       const apiResponse = response.data;
 

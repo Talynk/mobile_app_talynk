@@ -20,7 +20,6 @@ import { StatusBar } from 'expo-status-bar';
 import { Linking } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { postsApi, challengesApi } from '@/lib/api';
-import { apiClient } from '@/lib/api-client';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { uploadNotificationService } from '@/lib/notification-service';
@@ -68,6 +67,13 @@ import { safeRouterBack } from '@/lib/utils/navigation';
 import websocketService from '@/lib/websocket-service';
 import { enterPlaybackMode, enterRecordingMode } from '@/lib/media/audio-session';
 import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
+import {
+  getPendingDirectUploadSessions,
+  PendingDirectUploadSession,
+  removePendingDirectUploadSession,
+  updatePendingDirectUploadSession,
+  upsertPendingDirectUploadSession,
+} from '@/lib/upload-session-store';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLORS = {
@@ -101,6 +107,7 @@ const COLORS = {
 const BEAUTY_CONTENT_WARNING =
   'Posting nudity or exposing private parts is not permitted on this platform.';
 
+const MAX_MULTIPART_VIDEO_BYTES = 50 * 1024 * 1024;
 const IOS_CAMERA_READY_SETTLE_MS = 350;
 const IOS_CAMERA_REMOUNT_DELAY_MS = 320;
 const IOS_CAMERA_SESSION_RESET_MAX_RETRIES = 3;
@@ -421,6 +428,8 @@ export default function CreatePostScreen() {
   const uploadCancelledRef = useRef(false);
   const uploadAbortControllerRef = useRef<AbortController | null>(null);
   const activeXhrRef = useRef<XMLHttpRequest | null>(null);
+  const directUploadCompleteInFlightRef = useRef<Set<string>>(new Set());
+  const directUploadRecoveryPromptedRef = useRef(false);
 
   useEffect(() => {
     if (!uploading) {
@@ -440,6 +449,96 @@ export default function CreatePostScreen() {
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
   }, [uploading]);
+
+  const finalizeDirectUploadSession = useCallback(async (session: PendingDirectUploadSession) => {
+    if (!user?.id || directUploadCompleteInFlightRef.current.has(session.postId)) {
+      return;
+    }
+
+    directUploadCompleteInFlightRef.current.add(session.postId);
+    try {
+      if (session.step === 'put_done') {
+        await updatePendingDirectUploadSession(user.id, session.postId, { step: 'complete_called' });
+        const completeRes = await postsApi.completeUpload(session.postId);
+        if (completeRes.status !== 'success') {
+          const message = String(completeRes.message || '').toLowerCase();
+          if (message.includes('file not found')) {
+            await updatePendingDirectUploadSession(user.id, session.postId, { step: 'put_done' });
+            Alert.alert('Upload Not Finished', 'The server could not find the uploaded video. Please retry the upload from Create.');
+            return;
+          }
+          if (message.includes('expired')) {
+            await removePendingDirectUploadSession(user.id, session.postId);
+            Alert.alert('Upload Expired', 'That upload session expired. Please start the upload again.');
+            return;
+          }
+          await removePendingDirectUploadSession(user.id, session.postId);
+          Alert.alert('Processing Failed', completeRes.message || 'Upload finished, but processing could not be queued. Open your profile to retry processing.');
+          router.replace('/(tabs)/profile');
+          return;
+        }
+      } else if (session.step === 'complete_called') {
+        const statusRes = await postsApi.getProcessingStatus(session.postId);
+        if (statusRes.status !== 'success') {
+          return;
+        }
+      }
+
+      await videoReadyTracker.track(user.id, {
+        postId: session.postId,
+        destination: session.destination,
+      });
+      await updatePendingDirectUploadSession(user.id, session.postId, { step: 'tracking_processing' });
+      await removePendingDirectUploadSession(user.id, session.postId);
+      await uploadNotificationService.showUploadQueued(session.destination);
+    } finally {
+      directUploadCompleteInFlightRef.current.delete(session.postId);
+    }
+  }, [user?.id]);
+
+  const recoverDirectUploadSessions = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
+
+    const sessions = await getPendingDirectUploadSessions(user.id);
+    const now = Date.now();
+    for (const session of sessions) {
+      const expiresAt = new Date(session.expiresAt).getTime();
+      if (Number.isFinite(expiresAt) && expiresAt <= now) {
+        await removePendingDirectUploadSession(user.id, session.postId);
+        if (!directUploadRecoveryPromptedRef.current) {
+          directUploadRecoveryPromptedRef.current = true;
+          Alert.alert('Upload Expired', 'An interrupted upload expired. Please start that upload again.');
+        }
+        continue;
+      }
+
+      if (session.step === 'put_done' || session.step === 'complete_called') {
+        await finalizeDirectUploadSession(session);
+        continue;
+      }
+
+      if (!directUploadRecoveryPromptedRef.current) {
+        directUploadRecoveryPromptedRef.current = true;
+        Alert.alert('Upload Interrupted', 'A previous upload was interrupted. Your selected local file must be uploaded again from Create.');
+      }
+    }
+  }, [finalizeDirectUploadSession, user?.id]);
+
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && user?.id) {
+      void recoverDirectUploadSessions();
+    }
+  }, [authLoading, isAuthenticated, recoverDirectUploadSessions, user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!authLoading && isAuthenticated && user?.id) {
+        void recoverDirectUploadSessions();
+      }
+    }, [authLoading, isAuthenticated, recoverDirectUploadSessions, user?.id]),
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -2414,7 +2513,7 @@ export default function CreatePostScreen() {
       // We don't convert to base64 for FormData as it expects the native file object
       // FormData will read the file from the URI automatically
 
-      if (effectiveSelectedChallengeId && !isVideo) {
+      if (effectiveSelectedChallengeId && status !== 'draft') {
         const formData = new FormData();
         formData.append('title', caption.trim().substring(0, 50) || 'My Post');
         formData.append('caption', caption);
@@ -2567,6 +2666,15 @@ export default function CreatePostScreen() {
               resetUploadUi();
 
               const isImagePost = createdType === 'image' || createdType === 'photo' || !createdType;
+              if (!isImagePost && createdPostId) {
+                await videoReadyTracker.track(user.id, {
+                  postId: createdPostId,
+                  destination: 'challenge',
+                  challengeId: challengeIdToOpen || undefined,
+                  challengeName: selectedChallengeName,
+                });
+                await uploadNotificationService.showUploadQueued('challenge', selectedChallengeName);
+              }
               const successBody = isImagePost
                 ? 'Post uploaded successfully to the competition and is ready to view.'
                 : 'Video uploaded to the competition. It is being processed for streaming; you will receive a notification when it is ready to watch.';
@@ -2575,6 +2683,7 @@ export default function CreatePostScreen() {
                 {
                   text: 'View challenge',
                   onPress: () => {
+                    void cleanupPreparedVideo(preparedVideo);
                     if (challengeIdToOpen) {
                       router.replace(`/challenges/${challengeIdToOpen}` as any);
                     } else {
@@ -2582,7 +2691,13 @@ export default function CreatePostScreen() {
                     }
                   },
                 },
-                { text: 'Done', onPress: () => safeRouterBack(router, '/(tabs)/create' as any) },
+                {
+                  text: 'Done',
+                  onPress: () => {
+                    void cleanupPreparedVideo(preparedVideo);
+                    safeRouterBack(router, '/(tabs)/create' as any);
+                  },
+                },
               ]);
             } else {
               const errorMsg = response.message || 'Failed to create post in challenge';
@@ -2661,8 +2776,20 @@ export default function CreatePostScreen() {
             message: createRes.message || 'Upload service is currently unavailable',
             categoryName,
             selectedCategoryId,
-            hasChallenge: Boolean(effectiveSelectedChallengeId),
+            hasChallenge: false,
           });
+          const uploadBytes = Number(mediaInfo.size ?? preparedVideo?.uploadSizeBytes ?? 0);
+          if (uploadBytes > MAX_MULTIPART_VIDEO_BYTES) {
+            setUploading(false);
+            resetUploadUi();
+            await uploadNotificationService.showUploadError('Direct upload is temporarily unavailable.', fileName);
+            Alert.alert(
+              'Upload Unavailable',
+              'Large videos need direct upload, but that service is temporarily unavailable. Please try again later or choose a smaller video.',
+            );
+            await cleanupPreparedVideo(preparedVideo);
+            return;
+          }
           updateUploadUi(24, {
             stage: 'Opening backup upload path...',
             force: true,
@@ -2704,7 +2831,7 @@ export default function CreatePostScreen() {
                 etaSeconds: etaSec,
               });
             },
-            effectiveSelectedChallengeId,
+            null,
           );
           await cleanupPreparedVideo(preparedVideo);
           return;
@@ -2718,6 +2845,29 @@ export default function CreatePostScreen() {
         }
 
         const { postId, uploadUrl } = createRes.data;
+        const expiresIn = Number(createRes.data.expiresIn ?? 600);
+        const expiresAtMs = Date.now() + Math.max(1, expiresIn) * 1000;
+        const directSession: PendingDirectUploadSession = {
+          id: `${user.id}:${postId}`,
+          userId: user.id,
+          postId,
+          uploadUrl,
+          videoUrl: createRes.data.videoUrl,
+          expiresAt: new Date(expiresAtMs).toISOString(),
+          fileUri: mediaUri,
+          fileName,
+          mimeType: 'video/mp4',
+          title: autoTitle,
+          caption,
+          postCategory: categoryName,
+          categoryId: Number(selectedCategoryId) || undefined,
+          status,
+          destination: status === 'draft' ? 'draft' : 'post',
+          step: 'created',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await upsertPendingDirectUploadSession(user.id, directSession);
         console.log('[Upload] Got signed URL for post:', postId);
 
         if (uploadCancelledRef.current) {
@@ -2728,6 +2878,16 @@ export default function CreatePostScreen() {
         }
 
         // Step 2: Upload video directly to R2 via signed URL
+        if (Date.now() >= expiresAtMs) {
+          await removePendingDirectUploadSession(user.id, postId);
+          setUploading(false);
+          resetUploadUi();
+          Alert.alert('Upload Expired', 'The upload session expired before the video upload could start. Please try again.');
+          await cleanupPreparedVideo(preparedVideo);
+          return;
+        }
+
+        await updatePendingDirectUploadSession(user.id, postId, { step: 'putting' });
         {
           const bytes = preparedVideo?.uploadSizeBytes ?? 0;
           const warm = estimateWarmupUploadBytesPerSecond(bytes);
@@ -2772,6 +2932,7 @@ export default function CreatePostScreen() {
             uploadAbortControllerRef.current?.signal
           );
           console.log('[Upload] R2 upload complete (compressed/native upload)');
+          await updatePendingDirectUploadSession(user.id, postId, { step: 'put_done' });
         } catch (uploadError: any) {
           console.error('[Upload] R2 upload failed:', uploadError?.message);
           if (uploadCancelledRef.current || uploadError?.name === 'AbortError') {
@@ -2795,43 +2956,49 @@ export default function CreatePostScreen() {
         });
         console.log('[Upload] Notifying backend upload complete for post:', postId);
 
-        const completeRes = await postsApi.completeUpload(postId);
+        if (directUploadCompleteInFlightRef.current.has(postId)) {
+          return;
+        }
+
+        directUploadCompleteInFlightRef.current.add(postId);
+        let completeRes;
+        try {
+          await updatePendingDirectUploadSession(user.id, postId, { step: 'complete_called' });
+          completeRes = await postsApi.completeUpload(postId);
+        } finally {
+          directUploadCompleteInFlightRef.current.delete(postId);
+        }
 
         if (completeRes.status !== 'success') {
           console.error('[Upload] Complete upload failed:', completeRes.message);
           setUploading(false);
           resetUploadUi();
-          await uploadNotificationService.showUploadError('Failed to finish the upload.', fileName);
-          Alert.alert('Error', 'Video upload finished, but the app could not finalize it. Please try again.');
-          return;
-        }
-
-        let challengeLinkFailed = false;
-        let challengeLinkErrorCode: string | undefined;
-        let challengeLinkCap: number | undefined;
-        if (effectiveSelectedChallengeId && status !== 'draft') {
-          const linkRes = await challengesApi.addPostToChallenge(effectiveSelectedChallengeId, postId);
-          if (linkRes.status !== 'success') {
-            challengeLinkFailed = true;
-            console.warn('[Upload] Failed to link uploaded post to challenge:', linkRes.message, (linkRes as any)?.code);
-
-            challengeLinkErrorCode = (linkRes as any)?.code;
-            if (challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED') {
-              challengeLinkCap =
-                Number((linkRes as any)?.data?.max_content_per_account) ||
-                Number((linkRes as any)?.data?.challenge_max_content_per_account) ||
-                Number((linkRes as any)?.data?.challenge_max_posts_per_account) ||
-                5;
-            }
+          const completeMessage = String(completeRes.message || '').toLowerCase();
+          if (completeMessage.includes('file not found')) {
+            await updatePendingDirectUploadSession(user.id, postId, { step: 'put_done' });
+            await uploadNotificationService.showUploadError('Failed to finish the upload.', fileName);
+            Alert.alert('Finish Upload', 'Video upload finished, but the server could not find it yet. Tap Publish again later to retry finalizing.');
+            return;
           }
+          if (completeMessage.includes('expired')) {
+            await removePendingDirectUploadSession(user.id, postId);
+            await uploadNotificationService.showUploadError('Upload session expired.', fileName);
+            Alert.alert('Upload Expired', 'The upload session expired. Please start the upload again.');
+            return;
+          }
+          await removePendingDirectUploadSession(user.id, postId);
+          await uploadNotificationService.showUploadError('Processing could not be queued.', fileName);
+          Alert.alert('Processing Failed', completeRes.message || 'Upload finished, but processing could not be queued. Open your profile to retry processing.');
+          router.replace('/(tabs)/profile');
+          return;
         }
 
         await videoReadyTracker.track(user.id, {
           postId,
-          destination: status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
-          challengeId: effectiveSelectedChallengeId || undefined,
-          challengeName: selectedChallengeName,
+          destination: status === 'draft' ? 'draft' : 'post',
         });
+        await updatePendingDirectUploadSession(user.id, postId, { step: 'tracking_processing' });
+        await removePendingDirectUploadSession(user.id, postId);
 
         updateUploadUi(100, {
           stage: 'Upload complete',
@@ -2839,69 +3006,12 @@ export default function CreatePostScreen() {
           filename: fileName,
         });
         await uploadNotificationService.showUploadQueued(
-          status === 'draft' ? 'draft' : (effectiveSelectedChallengeId ? 'challenge' : 'post'),
-          selectedChallengeName
+          status === 'draft' ? 'draft' : 'post'
         );
-
-        if (effectiveSelectedChallengeId && !challengeLinkFailed) {
-          incrementChallengePostCount(effectiveSelectedChallengeId);
-        }
-
-        if (
-          challengeLinkFailed &&
-          challengeLinkErrorCode === 'MAX_CHALLENGE_POSTS_REACHED' &&
-          effectiveSelectedChallengeId
-        ) {
-          setUploading(false);
-          setUploadProgress(0);
-          Alert.alert(
-            'Competition Limit Reached',
-            `Your content was uploaded but could not be linked to the competition because you've reached the maximum (${challengeLinkCap ?? 5} posts). What would you like to do?`,
-            [
-              {
-                text: 'Keep on Main Feed',
-                onPress: () => {
-                  void cleanupPreparedVideo(preparedVideo);
-                  resetComposerState();
-                  router.replace('/(tabs)/profile');
-                },
-              },
-              {
-                text: 'Save as Draft',
-                onPress: async () => {
-                  try {
-                    const response = await apiClient.put(`/api/posts/${postId}/status`, { status: 'draft' });
-                    if (__DEV__) console.log('[Upload] Moved to draft:', response.status);
-                  } catch { /* best effort */ }
-                  void cleanupPreparedVideo(preparedVideo);
-                  resetComposerState();
-                  router.replace('/(tabs)/profile');
-                },
-              },
-              {
-                text: 'Delete Post',
-                style: 'destructive',
-                onPress: async () => {
-                  try {
-                    await postsApi.deletePost(postId);
-                  } catch { /* best effort */ }
-                  void cleanupPreparedVideo(preparedVideo);
-                  resetComposerState();
-                },
-              },
-            ],
-            { cancelable: false },
-          );
-          return;
-        }
 
         const successMessage = status === 'draft'
           ? 'Draft uploaded. You will be notified when it is ready.'
-          : effectiveSelectedChallengeId
-            ? challengeLinkFailed
-              ? 'Video uploaded. It will appear on your profile when ready, but adding it to the competition failed.'
-              : 'Video uploaded. You will be notified when the competition post is ready.'
-            : 'Video uploaded. You will be notified when it is ready.';
+          : 'Video uploaded. You will be notified when it is ready.';
 
         Alert.alert('Upload complete', successMessage, [
           {

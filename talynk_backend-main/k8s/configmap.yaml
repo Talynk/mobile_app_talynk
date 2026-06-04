@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: talynk-config
+  namespace: talynk
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  SUPABASE_URL: "http://minio.talynk.svc.cluster.local:9000" # placeholder when using on-server storage
+  SUPABASE_BUCKET_NAME: "posts"

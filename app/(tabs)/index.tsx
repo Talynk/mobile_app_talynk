@@ -58,6 +58,7 @@ import {
 } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
 import { addFabricBreadcrumb } from '@/lib/utils/fabric-diagnostics';
+import { isAdPost } from '@/lib/utils/post-filter';
 
 const FEED_TABS = [
   { key: 'foryou', label: 'For You' },
@@ -500,7 +501,12 @@ export default function FeedScreen() {
       }
 
       if (activeTab === 'foryou') {
-        hardRefreshForYou('resume', backgroundDurationMs);
+        feedTelemetry.trackResumeHardReset({
+          screenName: 'feed:foryou',
+          endpoint: feedEndpoint ?? 'public',
+          backgroundDurationMs,
+        });
+        void runQuerySafely(() => refetch(), 'feed hard resume refetch');
       }
     },
   });
@@ -609,6 +615,11 @@ export default function FeedScreen() {
   }, [queryClient]);
 
   const handleLike = useCallback(async (postId: string) => {
+    const post = visiblePosts.find(p => p.id === postId);
+    if (isAdPost(post)) {
+      return;
+    }
+
     if (!user) {
       Alert.alert(
         'Login Required',
@@ -628,7 +639,6 @@ export default function FeedScreen() {
 
     pendingLikeRequestsRef.current.add(postId);
 
-    const post = visiblePosts.find(p => p.id === postId);
     const currentIsLiked = likedPosts.includes(postId) || post?.is_liked === true;
     const currentCount = postLikeCounts[postId] ?? post?.like_count ?? post?.likes ?? 0;
     const newIsLiked = !currentIsLiked;
@@ -792,6 +802,9 @@ export default function FeedScreen() {
   const handleComment = useCallback((postId: string) => {
     if (!postId) return;
     const post = visiblePosts.find(p => p.id === postId);
+    if (isAdPost(post)) {
+      return;
+    }
     setCommentsPostId(postId);
     setCommentsPostTitle(post?.title || post?.description || '');
     setCommentsPostAuthor(post?.user?.username || '');
@@ -818,6 +831,9 @@ export default function FeedScreen() {
 
   const handleShare = useCallback(async (postId: string) => {
     const post = visiblePosts.find(p => p.id === postId);
+    if (isAdPost(post)) {
+      return;
+    }
     if (post) {
       try {
         const result = await sharePost(post);
@@ -870,13 +886,18 @@ export default function FeedScreen() {
   }, [activeTab, feedEndpoint, followingOrderSeed, forYouRefreshSeed, refetch, resetFeedViewportToTop, user]);
 
   const handleReport = useCallback((postId: string) => {
+    const post = visiblePosts.find(p => p.id === postId);
+    if (isAdPost(post)) {
+      return;
+    }
+
     if (!user) {
       router.push({ pathname: '/auth/login' as any });
       return;
     }
     setReportPostId(postId);
     setReportModalVisible(true);
-  }, [user]);
+  }, [user, visiblePosts]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
@@ -1019,6 +1040,36 @@ export default function FeedScreen() {
     );
   }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
 
+  const renderListFooter = useCallback(() => {
+    if (isFetchingNextPage) {
+      return (
+        <View style={styles.loadMoreContainer}>
+          <ActivityIndicator size="small" color="#60a5fa" />
+          <Text style={styles.loadMoreText}>Loading more posts...</Text>
+        </View>
+      );
+    }
+
+    if (activeTab === 'foryou' && visiblePosts.length > 0 && !hasNextPage) {
+      return (
+        <View style={styles.loadMoreContainer}>
+          <Text style={styles.loadMoreText}>You're all caught up.</Text>
+          <TouchableOpacity
+            style={styles.caughtUpButton}
+            onPress={() => {
+              void handleRefresh();
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.emptyLoginButtonText}>Refresh feed</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return null;
+  }, [activeTab, handleRefresh, hasNextPage, isFetchingNextPage, visiblePosts.length]);
+
   React.useEffect(() => {
     if (activeTab !== 'following' || !user) {
       followingAutoloadAttemptedRef.current = false;
@@ -1157,14 +1208,7 @@ export default function FeedScreen() {
               onMomentumScrollEnd={handlePagerMomentumScrollEnd}
               onEndReached={onEndReached}
               onEndReachedThreshold={0.5}
-              ListFooterComponent={
-                isFetchingNextPage ? (
-                  <View style={styles.loadMoreContainer}>
-                    <ActivityIndicator size="small" color="#60a5fa" />
-                    <Text style={styles.loadMoreText}>Loading more posts...</Text>
-                  </View>
-                ) : null
-              }
+              ListFooterComponent={renderListFooter}
               onViewableItemsChanged={onViewableItemsChanged}
               viewabilityConfig={viewabilityConfig}
               ListEmptyComponent={
@@ -1346,6 +1390,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     marginBottom: 12,
+  },
+  caughtUpButton: {
+    backgroundColor: '#60a5fa',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 10,
   },
   skeletonItem: {
     width: '100%',

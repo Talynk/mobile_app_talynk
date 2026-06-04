@@ -1,0 +1,89 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: talynk-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-talynk}
+    # Do not publish Postgres in production; API reaches it over internal Docker network
+    expose:
+      - "5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: talynk-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    # Do not publish Redis in production; API reaches it over internal Docker network
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    # Use image from GHCR to allow Watchtower auto-updates; uncomment build for local builds
+    image: ghcr.io/ihirwepatrick/talynk-backend:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    container_name: talynk-api
+    # Disable image/Dockerfile HEALTHCHECK probes (avoids stacked node healthcheck PIDs when the API stalls)
+    healthcheck:
+      disable: true
+    env_file:
+      - .env
+    environment:
+      # Database URL from .env with connection pool settings
+      # Uses POSTGRES_PASSWORD from .env automatically
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      DATABASE_LOCAL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      # Redis URL
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Temporary load-shedding toggles to reduce timeout risk while investigating origin stalls
+      DISABLE_REQUEST_LOGGER: "true"
+      DISABLE_REALTIME: "true"
+      # Other settings inherited from .env via env_file
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - tmp_data:/app/tmp
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_DISABLE_CONTAINERS=false
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  uploads_data:
+  redis_data:
+  tmp_data:
+
+
+

@@ -48,9 +48,10 @@ import {
   needsChallengeMetaEnrichment,
   needsRenderableMediaEnrichment,
 } from '@/lib/utils/post-detail-enrichment';
-import { filterSecondarySurfacePosts } from '@/lib/utils/post-filter';
+import { shouldHideOutsideForYou } from '@/lib/utils/post-filter';
 import { useResumeRefresh } from '@/lib/hooks/use-resume-refresh';
 import { feedTelemetry } from '@/lib/feed-telemetry';
+import { videoReadyTracker } from '@/lib/video-ready-tracker';
 
 const { width: screenWidth } = Dimensions.get('window');
 const POST_ITEM_SIZE = (screenWidth - 4) / 3; // 3 columns with 2px gaps
@@ -68,9 +69,10 @@ interface VideoThumbnailProps {
   onSubmitToCompetitionPress?: () => void;
   onUseContentPress?: () => void;
   onViewsPress?: () => void;
+  onRetryProcessingPress?: () => void;
 }
 
-const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onUseContentPress, onViewsPress }: VideoThumbnailProps) => {
+const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPress, onSubmitToCompetitionPress, onUseContentPress, onViewsPress, onRetryProcessingPress }: VideoThumbnailProps) => {
   const [imageError, setImageError] = useState(false);
   const [showAppealModal, setShowAppealModal] = useState(false);
   const isSuspended = (post.status as string) === 'suspended' || (post.status as string) === 'rejected' || (post.status as string) === 'reported';
@@ -86,6 +88,7 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
       processingStatus === 'processing' ||
       processingStatus === 'uploading'
     );
+  const showFailedBadge = isVideo && processingStatus === 'failed';
 
   // THUMBNAIL:
   // - Video posts: ONLY use server-generated thumbnail_url (or enriched assets).
@@ -214,6 +217,20 @@ const VideoThumbnail = ({ post, isActive, onPress, onOptionsPress, onPublishPres
           </View>
         )}
 
+      {showFailedBadge && (
+        <TouchableOpacity
+          style={[styles.processingBadge, styles.processingFailedBadge]}
+          activeOpacity={0.85}
+          onPress={(event) => {
+            event.stopPropagation();
+            onRetryProcessingPress?.();
+          }}
+        >
+          <Feather name="refresh-ccw" size={12} color="#fff" />
+          <Text style={styles.processingBadgeText}>Retry</Text>
+        </TouchableOpacity>
+      )}
+
       {challengeMeta.isChallengePost && (
         <LinearGradient
           colors={['rgba(14, 116, 144, 0.95)', 'rgba(37, 99, 235, 0.95)']}
@@ -325,6 +342,7 @@ const sortPostsNewestFirst = (items: Post[]) => [...items].sort((a, b) => getPos
 
 const hasRenderableMedia = (p: any) => {
   const isVideo = p.type === 'video' || p.mediaType === 'video';
+  const processingStatus = String(p.processing_status ?? p.processingStatus ?? '').toLowerCase();
   const hasImage =
     !!p.image ||
     !!p.imageUrl ||
@@ -333,9 +351,15 @@ const hasRenderableMedia = (p: any) => {
     !!p.thumbnailUrl;
 
   if (!isVideo) return hasImage;
+  if (['uploading', 'pending', 'processing', 'failed'].includes(processingStatus)) {
+    return true;
+  }
 
-  return !!getPlaybackUrl(p);
+  return !!getPlaybackUrl(p) || hasImage || !!p.video_url || !!p.videoUrl || !!p.playback_url;
 };
+
+const filterProfileSurfacePosts = (items: Post[]) =>
+  items.filter((post: any) => !shouldHideOutsideForYou(post));
 const persistentProfilePostsCache: Record<string, Post[]> = {
   active: [],
   draft: [],
@@ -842,7 +866,7 @@ export default function ProfileScreen() {
           if (!id) return;
           if (!byId.has(id)) byId.set(id, p);
         });
-        const fresh = filterSecondarySurfacePosts(Array.from(byId.values()).filter(hasRenderableMedia));
+        const fresh = filterProfileSurfacePosts(Array.from(byId.values()).filter(hasRenderableMedia));
 
         if (__DEV__) {
           console.log('📥 [loadPosts] Profile posts (completed, deduped, with media only):', {
@@ -875,7 +899,7 @@ export default function ProfileScreen() {
           enrichedPosts.forEach((post: any) => {
             if (post?.id) enrichedById.set(post.id, post);
           });
-          const refreshedPosts = filterSecondarySurfacePosts(sortPostsNewestFirst(Array.from(enrichedById.values())));
+          const refreshedPosts = filterProfileSurfacePosts(sortPostsNewestFirst(Array.from(enrichedById.values())).filter(hasRenderableMedia));
           const refreshedPostCount = Math.max(0, refreshedPosts.length);
           primePostDetailsCache(refreshedPosts);
           postsCacheRef.current[activeTab] = refreshedPosts;
@@ -1315,6 +1339,36 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleRetryProcessing = async (postId: string) => {
+    if (!user?.id) {
+      return;
+    }
+
+    try {
+      const response = await postsApi.retryProcessing(postId);
+      if (response.status !== 'success') {
+        Alert.alert('Retry Failed', response.message || 'Failed to retry video processing.');
+        return;
+      }
+
+      setPosts((prev) =>
+        prev.map((post: any) =>
+          post.id === postId
+            ? { ...post, processing_status: 'pending', processingStatus: 'pending' }
+            : post
+        )
+      );
+      await videoReadyTracker.track(user.id, {
+        postId,
+        destination: activeTab === 'draft' ? 'draft' : 'post',
+      });
+      Alert.alert('Retry Started', 'Your video has been queued for processing again.');
+      await loadPosts(false);
+    } catch (error: any) {
+      Alert.alert('Retry Failed', error?.message || 'Failed to retry video processing.');
+    }
+  };
+
   const handleDeletePost = async (postId: string) => {
     const postToDelete = posts.find(p => p.id === postId);
 
@@ -1449,6 +1503,7 @@ export default function ProfileScreen() {
           setPostOptionsModalVisible(true);
         }}
         onPublishPress={() => handlePublishDraft(item.id)}
+        onRetryProcessingPress={() => handleRetryProcessing(item.id)}
         onUseContentPress={() => {
           Alert.alert(
             'Use Content',
@@ -2636,6 +2691,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 2,
+  },
+  processingFailedBadge: {
+    backgroundColor: 'rgba(127, 29, 29, 0.78)',
   },
   processingBadgeText: {
     color: '#fff',

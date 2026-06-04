@@ -16,6 +16,9 @@
   ],
   "exclude": [
     "node_modules",
-    "expo-video-cache-main/example"
+    "expo-video-cache-main/example",
+    "react-native-video-master",
+    "talynk_backend-main",
+    "tiktok-clone-main"
   ]
 }
