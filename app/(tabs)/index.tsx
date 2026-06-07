@@ -184,7 +184,6 @@ export default function FeedScreen() {
   }, []);
 
   const startFeedTransition = useCallback(() => {
-    pauseAllVideos();
     setIsFeedTransitioning(true);
     if (feedTransitionTimeoutRef.current) {
       clearTimeout(feedTransitionTimeoutRef.current);
@@ -192,7 +191,7 @@ export default function FeedScreen() {
     feedTransitionTimeoutRef.current = setTimeout(() => {
       feedTransitionTimeoutRef.current = null;
       setIsFeedTransitioning(false);
-    }, 700);
+    }, 120);
   }, []);
 
   React.useEffect(() => () => {
@@ -476,17 +475,16 @@ export default function FeedScreen() {
     screenName: `feed:${activeTab}`,
     onIndexChanged: (index) => {
       if (index !== currentIndexRef.current) {
-        pauseAllVideos();
         currentIndexRef.current = index;
+        setCurrentIndex(index);
+        lastActiveIndexRef.current = index;
       }
     },
     onIndexSettled: (nextIndex) => {
       setCurrentIndex(nextIndex);
       lastActiveIndexRef.current = nextIndex;
     },
-    onTransitionEnd: () => {
-      finishFeedTransition();
-    },
+    onTransitionEnd: () => {},
   });
 
   useResumeRefresh({
@@ -1005,7 +1003,7 @@ export default function FeedScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && currentIndex === index;
-    const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused || isActive });
+    const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused });
 
     const isLiked = likedPosts.includes(item.id) || item.is_liked === true;
     const targetUserId = item.user?.id || (item as any).user_id || (item as any).userId || '';
@@ -1033,12 +1031,12 @@ export default function FeedScreen() {
         isFollowing={isFollowing}
         isFollowStateReady={!user || followedUsersReady || item.is_following_author === true}
         isActive={isActive}
-        suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
+        suspendPlayback={commentsModalVisible || reportModalVisible}
         shouldPreload={shouldPreload}
         availableHeight={verticalPageHeight}
       />
     );
-  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, isFeedTransitioning, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
+  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
 
   const renderListFooter = useCallback(() => {
     if (isFetchingNextPage) {
@@ -1202,8 +1200,6 @@ export default function FeedScreen() {
                   tintColor="#60a5fa"
                 />
               }
-              onScrollBeginDrag={startFeedTransition}
-              onMomentumScrollBegin={startFeedTransition}
               onScroll={handlePagerScroll}
               onMomentumScrollEnd={handlePagerMomentumScrollEnd}
               onEndReached={onEndReached}

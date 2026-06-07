@@ -43,12 +43,13 @@ import { feedTelemetry } from '@/lib/feed-telemetry';
 import {
   acquireFeedVideoPlayer,
   createFeedVideoPlayerKey,
-  prewarmFeedVideoPlayer,
+  resetFeedVideoPlayer,
 } from '@/lib/feed-video-player-pool';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
 const FEED_ANIMATION_USES_NATIVE_DRIVER = false;
 const VIDEO_VISUAL_READY_SECONDS = 0.08;
+const VIDEO_FIRST_FRAME_WATCHDOG_DELAYS_MS = [1800, 3500, 5500];
 
 const formatNumber = (num: number): string => {
   if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -421,9 +422,8 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         style={styles.media}
         contentFit={contentFit}
         nativeControls={false}
-        useExoShutter={false}
+        useExoShutter={Platform.OS === 'android'}
         onFirstFrameRender={onFirstFrameRender}
-        {...(Platform.OS === 'android' ? { surfaceType: 'textureView' as any } : {})}
       />
     );
   }
@@ -563,10 +563,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     initialIsLiked: isPostLiked,
   });
 
-  const wasActiveRef = useRef(isActive);
+  const wasActiveRef = useRef(false);
+  const wasAppActiveRef = useRef(isAppActive);
+  const hasActivatedOnceRef = useRef(false);
   const playerValidRef = useRef(false);
   const isMountedRef = useRef(true);
   const videoControllerRef = useRef<NativeFeedVideoHandle | null>(null);
+  const shouldRestartOnActiveRef = useRef(false);
+  const prewarmBufferedRef = useRef(false);
   const videoMountRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoplayRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const videoMountRetryCountRef = useRef(0);
@@ -574,6 +578,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [isPlayerValid, setIsPlayerValid] = useState(false);
   const [canMountVideoPlayer, setCanMountVideoPlayer] = useState(false);
   const [videoMountBoundaryKey, setVideoMountBoundaryKey] = useState(0);
+  const [activePlaybackGeneration, setActivePlaybackGeneration] = useState(0);
   const [isLiking, setIsLiking] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [usingImageFallback, setUsingImageFallback] = useState(false);
@@ -603,7 +608,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const thumbnailOpacity = useRef(new Animated.Value(1)).current;
   const playbackStatusRef = useRef<'idle' | 'loading' | 'readyToPlay' | 'error'>('idle');
   const lastPlaybackTimeRef = useRef(0);
+  const lastDurationRef = useRef(0);
   const firstPlaybackRequestedAtRef = useRef<number | null>(null);
+  const firstPlaybackMotionRequestedAtRef = useRef<number | null>(null);
+  const firstPlaybackMotionReportedRef = useRef(false);
   const stallCountRef = useRef(0);
   const playbackStallCountRef = useRef(0);
   const playbackStallProbeRef = useRef({ time: 0, checkedAt: 0 });
@@ -614,13 +622,29 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   // When not dragging it mirrors the videoProgress state.
   const scrubProgress = useRef(new Animated.Value(0)).current;
   const isDraggingRef = useRef(false);
-  const dragSeekPageXRef = useRef(0);
+  const dragSeekRatioRef = useRef(0);
+  const progressBarWidthRef = useRef(screenWidth);
+  const managedPlayerRef = useRef<VideoPlayer | null>(null);
   const screenWidthRef = useRef(screenWidth);
   screenWidthRef.current = screenWidth;
+  managedPlayerRef.current = managedPlayer;
 
   const clearAutoplayRetryTimeouts = useCallback(() => {
     autoplayRetryTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     autoplayRetryTimeoutsRef.current = [];
+  }, []);
+
+  const refreshAndroidPlaybackSurface = useCallback((controller: NativeFeedVideoHandle, unmuted: boolean) => {
+    try {
+      const currentTime = controller.getCurrentTime?.() ?? 0;
+      controller.setMuted(true);
+      controller.pause();
+      controller.seekTo(Math.max(0, currentTime > 0.08 ? currentTime - 0.033 : 0));
+      controller.setMuted(unmuted);
+      controller.play();
+    } catch {
+      playerValidRef.current = false;
+    }
   }, []);
 
   // Resume playback after any modal/popup dismisses.
@@ -640,7 +664,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         ctrl.play();
       } catch (_) {}
     }, 150);
-  }, [isActive, suspendPlayback, isAppActive, decoderErrorDetected, pausedByUser, isMuted]);
+  }, [decoderErrorDetected, isActive, isAppActive, isMuted, pausedByUser, suspendPlayback]);
 
   // Watch all internal modal states — resume playback when they ALL close.
   const anyInternalModalOpen =
@@ -658,6 +682,60 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const mediaUrl = getPostMediaUrl(item);
   const isVideo = item.type === 'video';
+  const metadataDuration = Number(
+    (item as any).video_duration ??
+    (item as any).videoDuration ??
+    (item as any).duration ??
+    (item as any).metadata?.duration ??
+    0
+  );
+  const fallbackVideoDuration = Number.isFinite(metadataDuration) && metadataDuration > 0
+    ? metadataDuration
+    : 0;
+
+  const resolvePlaybackTimes = useCallback(() => {
+    const controller = videoControllerRef.current;
+    const player = managedPlayerRef.current;
+    let currentTime = controller?.getCurrentTime?.() ?? 0;
+    let duration = controller?.getDuration?.() ?? 0;
+
+    if (player) {
+      if (currentTime <= 0 && Number.isFinite(player.currentTime) && player.currentTime > 0) {
+        currentTime = player.currentTime;
+      }
+      if (duration <= 0 && Number.isFinite(player.duration) && player.duration > 0) {
+        duration = player.duration;
+      }
+    }
+
+    if (duration <= 0 && lastDurationRef.current > 0) {
+      duration = lastDurationRef.current;
+    }
+    if (duration <= 0 && fallbackVideoDuration > 0) {
+      duration = fallbackVideoDuration;
+    }
+
+    return { currentTime, duration };
+  }, [fallbackVideoDuration]);
+
+  const syncProgressFromPlayer = useCallback((currentTime?: number, duration?: number) => {
+    if (isDraggingRef.current || !isMountedRef.current) {
+      return;
+    }
+
+    const resolved = resolvePlaybackTimes();
+    const time = currentTime ?? resolved.currentTime;
+    const dur = duration ?? resolved.duration;
+    if (dur <= 0) {
+      return;
+    }
+
+    lastDurationRef.current = dur;
+    const ratio = Math.max(0, Math.min(1, time / dur));
+    scrubProgress.setValue(ratio);
+    setVideoProgress((prev) => (Math.abs(prev - ratio) < 0.001 ? prev : ratio));
+  }, [resolvePlaybackTimes, scrubProgress]);
+
   const challengeMeta = getChallengePostMeta(item);
   const activeChallengeName = challengeName || challengeMeta.challengeName;
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
@@ -670,9 +748,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isActive &&
     !videoError;
   const shouldPrewarmVideo = isVideo && hlsReady && isAppActive && shouldPreload && !isActive && !videoError;
-  const shouldMountVideoPlayer = Platform.OS === 'ios'
-    ? shouldLoadVideo || shouldPrewarmVideo
-    : shouldLoadVideo;
+  const shouldMountVideoPlayer = shouldLoadVideo || shouldPrewarmVideo;
+  const shouldKeepPooledPlayer = shouldLoadVideo || shouldPrewarmVideo;
+  const shouldPlayVideo =
+    isAppActive &&
+    !videoError &&
+    !decoderErrorDetected &&
+    !suspendPlayback &&
+    ((isActive && !pausedByUser) || shouldPrewarmVideo);
+  const shouldMuteVideo = shouldPrewarmVideo && !isActive ? true : isMuted;
   const directVideoPlayerSource = React.useMemo(
     () => playbackUrl
       ? {
@@ -685,16 +769,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   );
   const resolvedVideoSource = React.useMemo(
     () => playbackUrl
-      ? (Platform.OS === 'ios' && preferDirectVideoSource ? directVideoPlayerSource : getVideoSource(playbackUrl))
+      ? (Platform.OS === 'ios' && directVideoPlayerSource
+          ? directVideoPlayerSource
+          : getVideoSource(playbackUrl))
       : null,
-    [directVideoPlayerSource, playbackUrl, preferDirectVideoSource],
+    [directVideoPlayerSource, playbackUrl],
   );
-  const videoSourceMode = Platform.OS === 'android'
-    ? 'android_cache'
-    : 'direct';
+  const videoSourceMode = Platform.OS === 'android' ? 'android_cache' : 'direct';
   const videoPoolKey = resolvedVideoSource ? createFeedVideoPlayerKey(item.id, resolvedVideoSource) : null;
   const screenName = 'fullscreen-feed-post';
-
   const requestAutoplayPlayback = useCallback((reason: string) => {
     clearAutoplayRetryTimeouts();
 
@@ -807,28 +890,54 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     };
   }, [clearAutoplayRetryTimeouts, likeOpacity, likeScale, muteOpacity, pauseIndicatorOpacity, scrubProgress, thumbnailOpacity]);
 
-  // CRITICAL: Immediately mute and pause audio when scrolling away, minimizing
-  // the app, or suspending playback. Checks ALL conditions that should stop audio.
+  // Mute/pause when leaving foreground, suspending, or when off-screen and not prewarming.
   useEffect(() => {
-    const shouldBeSilent = !isActive || suspendPlayback || !isAppActive;
-    if (shouldBeSilent) {
-      clearAutoplayRetryTimeouts();
-      const controller = videoControllerRef.current;
-      if (controller) {
-        try {
-          controller.setMuted(true);
-          controller.pause();
-        } catch (_) {}
-      }
+    const controller = videoControllerRef.current;
+    if (!controller) {
+      return;
     }
-  }, [clearAutoplayRetryTimeouts, isActive, suspendPlayback, isAppActive]);
 
-  // SAFETY NET: Poll every 500ms to catch any player that escaped the effects
-  // (e.g., native auto-play, race conditions during rapid scrolling).
-  // If this post should NOT be playing, forcefully kill its audio.
+    if (!isAppActive || suspendPlayback) {
+      clearAutoplayRetryTimeouts();
+      try {
+        controller.setMuted(true);
+        controller.pause();
+      } catch (_) {}
+      return;
+    }
+
+    if (isActive) {
+      return;
+    }
+
+    if (shouldPrewarmVideo) {
+      try {
+        controller.setMuted(true);
+        if (!controller.isPlaying()) {
+          controller.play();
+        }
+      } catch (_) {}
+      return;
+    }
+
+    clearAutoplayRetryTimeouts();
+    try {
+      controller.setMuted(true);
+      controller.pause();
+    } catch (_) {}
+  }, [clearAutoplayRetryTimeouts, isActive, isAppActive, shouldPrewarmVideo, suspendPlayback]);
+
+  // SAFETY NET: Poll every 500ms to catch players that escaped cleanup.
+  // Allow muted prewarm buffering; silence everything else that should be idle.
   useEffect(() => {
-    const shouldBePlaying = isActive && !suspendPlayback && isAppActive && !pausedByUser && !decoderErrorDetected;
-    if (shouldBePlaying) return; // Active post — no need to police
+    const shouldAllowPlayback =
+      isAppActive &&
+      !suspendPlayback &&
+      !decoderErrorDetected &&
+      ((isActive && !pausedByUser) || shouldPrewarmVideo);
+    if (shouldAllowPlayback) {
+      return;
+    }
 
     const interval = setInterval(() => {
       const controller = videoControllerRef.current;
@@ -842,7 +951,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isActive, suspendPlayback, isAppActive, pausedByUser, decoderErrorDetected]);
+  }, [decoderErrorDetected, isActive, isAppActive, pausedByUser, shouldPrewarmVideo, suspendPlayback]);
 
   useEffect(() => {
     if (Platform.OS === 'ios') {
@@ -874,18 +983,133 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     setPausedByUser(false);
     playbackStatusRef.current = 'idle';
     lastPlaybackTimeRef.current = 0;
+    lastDurationRef.current = 0;
     videoMountRetryCountRef.current = 0;
     setCanMountVideoPlayer(false);
     setVideoMountBoundaryKey(0);
+    setActivePlaybackGeneration(0);
     setIosVisualRecoveryKey(0);
     clearAutoplayRetryTimeouts();
     firstPlaybackRequestedAtRef.current = null;
+    firstPlaybackMotionRequestedAtRef.current = null;
+    firstPlaybackMotionReportedRef.current = false;
     stallCountRef.current = 0;
     playbackStallCountRef.current = 0;
     playbackStallProbeRef.current = { time: 0, checkedAt: 0 };
     iosPrewarmKickedRef.current = false;
     visualRecoveryAttemptedRef.current = false;
-  }, [clearAutoplayRetryTimeouts, item.id]);
+    wasActiveRef.current = false;
+    wasAppActiveRef.current = isAppActive;
+    hasActivatedOnceRef.current = false;
+    shouldRestartOnActiveRef.current = false;
+    prewarmBufferedRef.current = false;
+  }, [clearAutoplayRetryTimeouts, isAppActive, item.id]);
+
+  // Treat every activation as a fresh playback session. This prevents native
+  // player/surface reuse from resuming audio while the old thumbnail remains
+  // visible, especially when the user scrolls away before the first frame.
+  useEffect(() => {
+    if (!isVideo) {
+      wasActiveRef.current = isActive;
+      return;
+    }
+
+    const becameActive = isActive && !wasActiveRef.current;
+    const becameInactive = !isActive && wasActiveRef.current;
+    const resumedWhileActive = isActive && isAppActive && !wasAppActiveRef.current;
+
+    if (becameActive || resumedWhileActive) {
+      const hadPrewarmBuffer = prewarmBufferedRef.current && (firstFrameRendered || videoVisualReady);
+      const isAndroidReactivation = Platform.OS === 'android' && becameActive && hasActivatedOnceRef.current;
+      shouldRestartOnActiveRef.current = isAndroidReactivation
+        ? true
+        : hadPrewarmBuffer
+          ? false
+          : (becameActive || Platform.OS !== 'android');
+      visualRecoveryAttemptedRef.current = false;
+      stallCountRef.current = 0;
+      playbackStallCountRef.current = 0;
+      playbackStallProbeRef.current = { time: 0, checkedAt: Date.now() };
+      if (!hadPrewarmBuffer) {
+        firstPlaybackRequestedAtRef.current = null;
+      }
+      lastPlaybackTimeRef.current = 0;
+      clearAutoplayRetryTimeouts();
+      thumbnailOpacity.stopAnimation();
+      if (hadPrewarmBuffer) {
+        thumbnailOpacity.setValue(0);
+      } else if (isAndroidReactivation) {
+        // Keep thumbnail until the remounted surface renders; audio-only resume is confusing.
+      } else {
+        thumbnailOpacity.setValue(1);
+        scrubProgress.setValue(0);
+        setVideoReady(false);
+        setFirstFrameRendered(false);
+        setVideoVisualReady(false);
+        setIsPlaying(false);
+        setVideoProgress(0);
+      }
+      if (isAndroidReactivation) {
+        setActivePlaybackGeneration((prev) => prev + 1);
+        setVideoMountBoundaryKey((prev) => prev + 1);
+      }
+      prewarmBufferedRef.current = false;
+
+      if (Platform.OS !== 'android' && (hasActivatedOnceRef.current || resumedWhileActive) && videoPoolKey) {
+        resetFeedVideoPlayer(videoPoolKey);
+        setManagedPlayer(null);
+        playerValidRef.current = false;
+        videoControllerRef.current = null;
+        setIsPlayerValid(false);
+        setActivePlaybackGeneration((prev) => prev + 1);
+        setVideoMountBoundaryKey((prev) => prev + 1);
+      }
+
+      const controller = videoControllerRef.current;
+      if (Platform.OS !== 'android' && controller && playerValidRef.current) {
+        try {
+          controller.setMuted(true);
+          controller.pause();
+          controller.seekTo(0);
+          shouldRestartOnActiveRef.current = false;
+        } catch (_) {
+          playerValidRef.current = false;
+        }
+      }
+
+    } else if (becameInactive) {
+      shouldRestartOnActiveRef.current = false;
+      clearAutoplayRetryTimeouts();
+      thumbnailOpacity.stopAnimation();
+      thumbnailOpacity.setValue(1);
+      setVideoReady(false);
+      setFirstFrameRendered(false);
+      setVideoVisualReady(false);
+      setIsPlaying(false);
+
+      const controller = videoControllerRef.current;
+      if (controller) {
+        try {
+          controller.setMuted(true);
+          controller.pause();
+        } catch (_) {}
+      }
+    }
+
+    wasActiveRef.current = isActive;
+    wasAppActiveRef.current = isAppActive;
+    if (becameActive) {
+      hasActivatedOnceRef.current = true;
+    }
+  }, [
+    clearAutoplayRetryTimeouts,
+    isActive,
+    isAppActive,
+    isVideo,
+    scrubProgress,
+    thumbnailOpacity,
+    videoPoolKey,
+  ]);
 
   useEffect(() => {
     if (!isVideo || !isActive || !isAppActive || suspendPlayback) {
@@ -1055,14 +1279,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         }
 
         if (count <= 4) {
+          if (Platform.OS === 'android') {
+            controller.seekTo(Math.max(0, currentTime + 0.05));
+            controller.play();
+            return;
+          }
+
           setVideoReady(false);
           setFirstFrameRendered(false);
           setVideoVisualReady(false);
-          if (Platform.OS === 'ios') {
-            setIosVisualRecoveryKey((prev) => prev + 1);
-          } else if (!preferDirectVideoSource) {
-            setPreferDirectVideoSource(true);
-          }
+          setIosVisualRecoveryKey((prev) => prev + 1);
           setVideoMountBoundaryKey((prev) => prev + 1);
           requestAutoplayPlayback('post_frame_stall_retry');
         }
@@ -1124,22 +1350,20 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return;
     }
 
-    if (shouldLoadVideo) {
-      const lease = acquireFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
-      setManagedPlayer(lease.player);
-      setCanMountVideoPlayer(true);
-
-      return () => {
-        lease.release();
-      };
+    if (!shouldKeepPooledPlayer) {
+      setManagedPlayer(null);
+      setCanMountVideoPlayer(false);
+      return;
     }
 
-    if (shouldPrewarmVideo) {
-      return prewarmFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
-    }
+    const lease = acquireFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
+    setManagedPlayer(lease.player);
+    setCanMountVideoPlayer(true);
 
-    return;
-  }, [resolvedVideoSource, shouldLoadVideo, shouldMountVideoPlayer, shouldPrewarmVideo, videoPoolKey]);
+    return () => {
+      lease.release();
+    };
+  }, [resolvedVideoSource, shouldKeepPooledPlayer, shouldMountVideoPlayer, videoPoolKey]);
 
   const handleNativePlayerReady = useCallback(() => {
     playerValidRef.current = true;
@@ -1272,17 +1496,26 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     const currentTime = payload.currentTime || 0;
-    const duration = payload.duration || 0;
+    const duration = payload.duration || lastDurationRef.current || 0;
     lastPlaybackTimeRef.current = currentTime;
-    if (firstFrameRendered && isPlaying && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+    if (duration > 0) {
+      lastDurationRef.current = duration;
+    }
+    if (isPlaying && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+      if (!firstFrameRendered) {
+        setFirstFrameRendered(true);
+      }
       setVideoVisualReady(true);
+      if (shouldPrewarmVideo) {
+        prewarmBufferedRef.current = true;
+      }
     }
 
     // Don't update progress while user is dragging the progress bar
-    if (duration > 0 && !isDraggingRef.current) {
-      setVideoProgress(currentTime / duration);
+    if (!isDraggingRef.current) {
+      syncProgressFromPlayer(currentTime, duration > 0 ? duration : undefined);
     }
-  }, [firstFrameRendered, isPlaying]);
+  }, [firstFrameRendered, isPlaying, syncProgressFromPlayer]);
 
   const handleNativePlayToEnd = useCallback(() => {
     if (!isMountedRef.current) {
@@ -1296,7 +1529,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   useEffect(() => {
     if (shouldLoadVideo && firstPlaybackRequestedAtRef.current === null) {
-      firstPlaybackRequestedAtRef.current = Date.now();
+      const requestedAt = Date.now();
+      firstPlaybackRequestedAtRef.current = requestedAt;
+      firstPlaybackMotionRequestedAtRef.current = requestedAt;
+      firstPlaybackMotionReportedRef.current = false;
       feedTelemetry.trackVideoSourceMode({
         mode: videoSourceMode,
         postId: item.id,
@@ -1304,6 +1540,30 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       });
     }
   }, [item.id, screenName, shouldLoadVideo, videoSourceMode]);
+
+  useEffect(() => {
+    if (!shouldPrewarmVideo || !isAppActive || suspendPlayback) {
+      return;
+    }
+
+    const kickPrewarm = () => {
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current || !isMountedRef.current) {
+        return;
+      }
+
+      try {
+        controller.setMuted(true);
+        if (!controller.isPlaying()) {
+          controller.play();
+        }
+      } catch (_) {}
+    };
+
+    kickPrewarm();
+    const retryId = setTimeout(kickPrewarm, 120);
+    return () => clearTimeout(retryId);
+  }, [canMountVideoPlayer, isAppActive, isPlayerValid, shouldPrewarmVideo, suspendPlayback]);
 
   useEffect(() => {
     const controller = videoControllerRef.current;
@@ -1315,8 +1575,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return;
     }
     try {
-      if (isActive && !wasActiveRef.current) {
-        controller.seekTo(0);
+      if (isActive && shouldRestartOnActiveRef.current) {
+        if (Platform.OS === 'android') {
+          refreshAndroidPlaybackSurface(controller, isMuted);
+        } else {
+          controller.setMuted(true);
+          controller.pause();
+          controller.seekTo(0);
+        }
+        shouldRestartOnActiveRef.current = false;
       }
       if (shouldAutoplay) {
         requestAutoplayPlayback('active_item');
@@ -1325,7 +1592,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         controller.setMuted(true);
         controller.pause();
       }
-      wasActiveRef.current = isActive;
     } catch (e) {
       playerValidRef.current = false;
     }
@@ -1338,39 +1604,82 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isMuted,
     isPlayerValid,
     pausedByUser,
+    refreshAndroidPlaybackSurface,
     requestAutoplayPlayback,
     suspendPlayback,
   ]);
 
-  // Poll video progress every 250ms for smooth progress bar animation.
-  // Expo Video's native timeUpdate event is unreliable on many devices.
+  // Poll video progress for smooth progress bar animation.
+  // Expo Video's native timeUpdate event is unreliable on many Android/HLS devices.
   useEffect(() => {
-    if (!isActive || !isPlayerValid || pausedByUser || suspendPlayback) return;
+    if (!isActive || pausedByUser || suspendPlayback || !isAppActive) return;
 
     const interval = setInterval(() => {
-      // Don't update progress while user is dragging the progress bar
       if (isDraggingRef.current) return;
       const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current) return;
+      if (!controller) return;
       try {
-        const currentTime = controller.getCurrentTime?.() ?? 0;
-        const duration = controller.getDuration?.() ?? 0;
+        const { currentTime, duration } = resolvePlaybackTimes();
         if (duration > 0 && isMountedRef.current) {
-          if (firstFrameRendered && controller.isPlaying() && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+          const controllerPlaying = controller.isPlaying();
+          if (controllerPlaying && currentTime > VIDEO_VISUAL_READY_SECONDS) {
+            lastPlaybackTimeRef.current = currentTime;
+            if (!firstFrameRendered) {
+              setFirstFrameRendered(true);
+            }
             setVideoVisualReady(true);
+            const firstMotionRequestedAt = firstPlaybackMotionRequestedAtRef.current;
+            if (!firstPlaybackMotionReportedRef.current && firstMotionRequestedAt) {
+              firstPlaybackMotionReportedRef.current = true;
+              feedTelemetry.trackVideoTimeToFirstMotion({
+                postId: item.id,
+                screenName,
+                sourceMode: videoSourceMode,
+                durationMs: Math.max(0, Date.now() - firstMotionRequestedAt),
+              });
+            }
           }
-          setVideoProgress(currentTime / duration);
+          syncProgressFromPlayer(currentTime, duration);
+
+          if (
+            !controllerPlaying &&
+            isActive &&
+            !pausedByUser &&
+            !suspendPlayback &&
+            isAppActive &&
+            !decoderErrorDetected
+          ) {
+            controller.setMuted(isMuted);
+            controller.play();
+          }
         }
       } catch (_) {}
-    }, 250);
+    }, 100);
 
     return () => clearInterval(interval);
-  }, [firstFrameRendered, isActive, isPlayerValid, pausedByUser, suspendPlayback]);
+  }, [
+    decoderErrorDetected,
+    firstFrameRendered,
+    isActive,
+    isAppActive,
+    isMuted,
+    item.id,
+    pausedByUser,
+    resolvePlaybackTimes,
+    screenName,
+    suspendPlayback,
+    syncProgressFromPlayer,
+    videoSourceMode,
+  ]);
 
-  // Fade out the thumbnail only after playback has advanced past the native
-  // startup frame. onFirstFrameRender can still correspond to a grey native
-  // surface on some devices, so it is not enough by itself.
+  // Fade out the thumbnail once playback is visually ready.
   useEffect(() => {
+    if (isActive && videoVisualReady && (isPlaying || prewarmBufferedRef.current)) {
+      thumbnailOpacity.stopAnimation();
+      thumbnailOpacity.setValue(0);
+      return;
+    }
+
     if (isActive && isPlaying && videoVisualReady) {
       const timerId = setTimeout(() => {
         if (!isMountedRef.current) return;
@@ -1381,18 +1690,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         }).start();
       }, 0);
       return () => clearTimeout(timerId);
-    } else {
+    }
+
+    if (!isActive && !shouldPrewarmVideo) {
       thumbnailOpacity.setValue(1);
     }
-  }, [isActive, isPlaying, thumbnailOpacity, videoVisualReady]);
-
-  // Mirror videoProgress → scrubProgress Animated.Value while not dragging.
-  // During a drag we write scrubProgress directly so this is suppressed.
-  useEffect(() => {
-    if (!isDraggingRef.current) {
-      scrubProgress.setValue(videoProgress);
-    }
-  }, [videoProgress, scrubProgress]);
+  }, [isActive, isPlaying, shouldPrewarmVideo, thumbnailOpacity, videoVisualReady]);
 
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {
@@ -1418,8 +1721,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return;
     }
 
-    const delays = [2000, 3000, 5000];
-    const delay = delays[retryCount] ?? 2000;
+    const delay = VIDEO_FIRST_FRAME_WATCHDOG_DELAYS_MS[retryCount] ?? VIDEO_FIRST_FRAME_WATCHDOG_DELAYS_MS[0];
 
     const timeoutId = setTimeout(() => {
       if (!isMountedRef.current || firstFrameRendered || videoError) {
@@ -1447,7 +1749,23 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         status: playbackStatusRef.current,
         currentTime: lastPlaybackTimeRef.current,
       });
+      if (!audioOrProgressWithoutFrame && playbackStatusRef.current !== 'readyToPlay') {
+        return;
+      }
       setRetryCount((prev) => prev + 1);
+      const controller = videoControllerRef.current;
+      if (controller) {
+        try {
+          controller.setMuted(true);
+          controller.pause();
+          controller.seekTo(0);
+          shouldRestartOnActiveRef.current = true;
+        } catch (_) {}
+      }
+      setIsPlaying(false);
+      setVideoReady(false);
+      setFirstFrameRendered(false);
+      setVideoVisualReady(false);
       if (Platform.OS === 'ios') {
         if (audioOrProgressWithoutFrame && !visualRecoveryAttemptedRef.current) {
           visualRecoveryAttemptedRef.current = true;
@@ -1457,11 +1775,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             status: playbackStatusRef.current,
             currentTime: lastPlaybackTimeRef.current,
           });
-          setVideoReady(false);
-          setFirstFrameRendered(false);
           setIosVisualRecoveryKey((prev) => prev + 1);
         }
-        requestAutoplayPlayback('stall_retry');
+        setVideoMountBoundaryKey((prev) => prev + 1);
+        setTimeout(() => requestAutoplayPlayback('stall_retry'), 90);
         return;
       }
       if (!preferDirectVideoSource && retryCount >= 1) {
@@ -1473,6 +1790,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       // DO NOT toggle canMountVideoPlayer — doing so races against expo-video's
       // SharedObject release and causes "Cannot use shared object that was already released".
       setVideoMountBoundaryKey((prev) => prev + 1);
+      setTimeout(() => requestAutoplayPlayback('stall_retry'), 90);
     }, delay);
 
     return () => clearTimeout(timeoutId);
@@ -1582,54 +1900,51 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     if (onComment && item.id) onComment(item.id);
   }, [onComment, item.id]);
 
-  const handleProgressBarSeek = useCallback((locationX: number) => {
+  const seekToProgressRatio = useCallback((ratio: number) => {
     const controller = videoControllerRef.current;
     if (!controller || !playerValidRef.current) return;
-    const ratio = Math.max(0, Math.min(1, locationX / screenWidth));
+    const { duration } = resolvePlaybackTimes();
+    if (duration <= 0) return;
+    const clamped = Math.max(0, Math.min(1, ratio));
     try {
-      const dur = controller.getDuration() || 0;
-      if (dur > 0) {
-        controller.seekTo(ratio * dur);
-        setVideoProgress(ratio);
-      }
+      controller.seekTo(clamped * duration);
+      lastPlaybackTimeRef.current = clamped * duration;
+      scrubProgress.setValue(clamped);
+      setVideoProgress(clamped);
     } catch (_) {}
-  }, [screenWidth]);
+  }, [resolvePlaybackTimes, scrubProgress]);
 
-  const seekRef = useRef((_x: number) => {});
-  seekRef.current = handleProgressBarSeek;
+  const seekToProgressRatioRef = useRef((_ratio: number) => {});
+  seekToProgressRatioRef.current = seekToProgressRatio;
 
   // PanResponder for smooth scrubbing.
-  // IMPORTANT: during onPanResponderMove we ONLY update the Animated.Value
-  // (native driver, zero JS re-render). seekTo() is called only on release so
-  // the video jumps to the correct position without causing per-frame lag.
+  // During drag we update scrubProgress directly; seek on release.
   const progressBarPanResponder = useRef(
     PanResponder.create({
-      // Capture phase — intercept touches BEFORE the parent Pressable
       onStartShouldSetPanResponderCapture: () => true,
       onMoveShouldSetPanResponderCapture: () => true,
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onShouldBlockNativeResponder: () => true,
-      onPanResponderTerminationRequest: () => false, // Don't let parent steal the touch
+      onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (e) => {
         isDraggingRef.current = true;
-        const ratio = Math.max(0, Math.min(1, e.nativeEvent.pageX / screenWidthRef.current));
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / Math.max(1, progressBarWidthRef.current || screenWidthRef.current)));
+        dragSeekRatioRef.current = ratio;
         scrubProgress.setValue(ratio);
-        dragSeekPageXRef.current = e.nativeEvent.pageX;
       },
       onPanResponderMove: (e) => {
-        // Visual-only update — avoids setState + seekTo on every pixel moved.
-        const ratio = Math.max(0, Math.min(1, e.nativeEvent.pageX / screenWidthRef.current));
+        const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / Math.max(1, progressBarWidthRef.current || screenWidthRef.current)));
+        dragSeekRatioRef.current = ratio;
         scrubProgress.setValue(ratio);
-        dragSeekPageXRef.current = e.nativeEvent.pageX;
       },
       onPanResponderRelease: () => {
         isDraggingRef.current = false;
-        seekRef.current(dragSeekPageXRef.current);
+        seekToProgressRatioRef.current(dragSeekRatioRef.current);
       },
       onPanResponderTerminate: () => {
         isDraggingRef.current = false;
-        seekRef.current(dragSeekPageXRef.current);
+        seekToProgressRatioRef.current(dragSeekRatioRef.current);
       },
     }),
   ).current;
@@ -1676,15 +1991,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 />
               ) : null}
 
-              {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || managedPlayer) && (
+              {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || Platform.OS === 'android' || managedPlayer) && (
                 <View
                   pointerEvents="none"
-                  style={[
-                    styles.videoLayer,
-                    { opacity: videoVisualReady ? 1 : 0.001 },
-                  ]}
+                  style={styles.videoLayer}
                 >
                   <VideoMountBoundary
+                    key={`${item.id}:${videoMountBoundaryKey}:${iosVisualRecoveryKey}`}
                     boundaryKey={`${item.id}:${videoMountBoundaryKey}:${iosVisualRecoveryKey}`}
                     onError={handleNativePlayerMountError}
                   >
@@ -1692,16 +2005,23 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       ref={videoControllerRef}
                       player={managedPlayer}
                       source={resolvedVideoSource}
-                      playerInstanceKey={`${item.id}:${iosVisualRecoveryKey}`}
+                      playerInstanceKey={`${item.id}:${activePlaybackGeneration}:${iosVisualRecoveryKey}`}
                       contentFit={mediaContentFit}
-                      isMuted={isMuted}
-                      shouldPlay={isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser}
+                      isMuted={shouldMuteVideo}
+                      shouldPlay={shouldPlayVideo}
                       postId={item.id}
                       screenName={screenName}
                       sourceMode={videoSourceMode}
                       onFirstFrameRender={() => {
                         setVideoReady(true);
                         setFirstFrameRendered(true);
+                        if (shouldPrewarmVideo && !isActive) {
+                          prewarmBufferedRef.current = true;
+                        }
+                        if (isActive) {
+                          thumbnailOpacity.stopAnimation();
+                          thumbnailOpacity.setValue(0);
+                        }
                         if (isPlaying && lastPlaybackTimeRef.current > VIDEO_VISUAL_READY_SECONDS) {
                           setVideoVisualReady(true);
                         }
@@ -1939,10 +2259,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         {isVideo && isActive && (
           <View
             style={[styles.videoProgressBarContainer, { bottom: feedProgressBottomInset }]}
+            onLayout={(event) => {
+              const width = event.nativeEvent.layout.width;
+              if (width > 0) {
+                progressBarWidthRef.current = width;
+              }
+            }}
             {...progressBarPanResponder.panHandlers}
           >
-            {/* Inner row: track (4px) + thumb (14px) share the same 14px height
-                so the thumb is perfectly centered on the track. */}
+            {/* Inner row: track (3px) + thumb (10px) share the same height. */}
             <View style={styles.progressBarInner}>
               <View style={styles.videoProgressBarTrack}>
                 <Animated.View
@@ -1951,14 +2276,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                     {
                       width: scrubProgress.interpolate({
                         inputRange: [0, 1],
-                        outputRange: ['0%', '100%'],
+                        outputRange: [0, screenWidth],
                         extrapolate: 'clamp',
                       }),
                     },
                   ]}
                 />
               </View>
-              {/* Thumb: translateX driven by Animated.Value for zero-lag drag */}
               <Animated.View
                 style={[
                   styles.videoProgressBarThumb,
@@ -1967,7 +2291,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       {
                         translateX: scrubProgress.interpolate({
                           inputRange: [0, 1],
-                          outputRange: [0, screenWidth - 10],
+                          outputRange: [0, Math.max(0, screenWidth - 10)],
                           extrapolate: 'clamp',
                         }),
                       },
@@ -2200,13 +2524,15 @@ const styles = StyleSheet.create({
   },
   mediaThumbnailLayer: {
     position: 'absolute',
-    zIndex: 1,
+    zIndex: 2,
+    elevation: 2,
     width: '100%',
     height: '100%',
   },
   videoLayer: {
     position: 'absolute',
-    zIndex: 2,
+    zIndex: 1,
+    elevation: 1,
     width: '100%',
     height: '100%',
     backgroundColor: 'transparent',
@@ -2270,6 +2596,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 15,
+    elevation: 15,
     pointerEvents: 'none',
   },
   muteIndicatorBadge: {
@@ -2283,6 +2610,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 16,
     zIndex: 20,
+    elevation: 20,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -2687,6 +3015,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingBottom: 0,
     zIndex: 30,
+    elevation: 30,
   },
   fixedBottomFooter: {
     position: 'absolute',

@@ -174,9 +174,7 @@ export default function ChallengePostsScreen() {
     onIndexSettled: (index) => {
       setFullscreenIndex(index);
     },
-    onTransitionEnd: () => {
-      setIsFullscreenTransitioning(false);
-    },
+    onTransitionEnd: () => {},
   });
 
   useRefetchOnReconnect(() => loadPosts(1, true));
@@ -709,7 +707,7 @@ export default function ChallengePostsScreen() {
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
               const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, {
-                disabled: isCreateFocused || isActive,
+                disabled: isCreateFocused,
               });
               return (
                 <FullscreenFeedPostItem
@@ -724,7 +722,7 @@ export default function ChallengePostsScreen() {
                   isLiked={item.is_liked ?? likedPosts.includes(item.id)}
                   isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
-                  suspendPlayback={isFullscreenTransitioning || commentsModalVisible || reportModalVisible}
+                  suspendPlayback={commentsModalVisible || reportModalVisible}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenPageHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
@@ -746,8 +744,6 @@ export default function ChallengePostsScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
-            onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
-            onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onScroll={handleFullscreenPagerScroll}
             onMomentumScrollEnd={handleFullscreenPagerMomentumEnd}
             getItemLayout={getFullscreenItemLayout}

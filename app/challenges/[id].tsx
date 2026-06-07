@@ -215,9 +215,7 @@ export default function ChallengeDetailScreen() {
     onIndexSettled: (index) => {
       setFullscreenIndex(index);
     },
-    onTransitionEnd: () => {
-      setIsFullscreenTransitioning(false);
-    },
+    onTransitionEnd: () => {},
   });
 
   useRefetchOnReconnect(() => {
@@ -1923,7 +1921,7 @@ export default function ChallengeDetailScreen() {
             data={sortedPosts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenIndex === index;
-              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, { disabled: isActive });
+              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex);
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -1937,7 +1935,7 @@ export default function ChallengeDetailScreen() {
                   isLiked={likedPosts.includes(item.id)}
                   isFollowing={userFollowStatus[item.user?.id || ''] ?? (followedUsers.has(item.user?.id || '') ? true : item.is_following_author === true)}
                   isActive={isActive}
-                  suspendPlayback={isFullscreenTransitioning || commentsModalVisible || reportModalVisible}
+                  suspendPlayback={commentsModalVisible || reportModalVisible}
                   shouldPreload={shouldPreload}
                   availableHeight={fullscreenPageHeight}
                   likesDuringChallenge={likesDuringChallengeMap[item.id]}
@@ -1960,8 +1958,6 @@ export default function ChallengeDetailScreen() {
             removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
             onViewableItemsChanged={fullscreenViewableHandler}
             viewabilityConfig={fullscreenViewabilityConfig}
-            onScrollBeginDrag={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
-            onMomentumScrollBegin={() => { pauseAllVideos(); setIsFullscreenTransitioning(true); }}
             onScroll={handleFullscreenPagerScroll}
             onMomentumScrollEnd={handleFullscreenPagerMomentumEnd}
             initialScrollIndex={fullscreenIndex}

@@ -1,13 +1,12 @@
 import { Image as ExpoImage } from 'expo-image';
-import { Platform } from 'react-native';
 import { Post } from '@/types';
 import { getPlaybackUrl, getPostMediaUrl, getThumbnailUrl } from '@/lib/utils/file-url';
 import { primePostDetailsCache, getPostDetailsCached } from '@/lib/post-details-cache';
 import { getPostVideoAssetsBatchCached } from '@/lib/post-video-assets-cache';
 import { getVideoSource } from '@/lib/utils/video-source';
 import { createFeedVideoPlayerKey, prewarmFeedVideoPlayer } from '@/lib/feed-video-player-pool';
+import { getFeedWarmRadius } from '@/lib/utils/video-feed';
 
-const FEED_WARM_RADIUS = 3;
 const FEED_WARM_TTL_MS = 2 * 60 * 1000;
 
 const warmedPostIds = new Map<string, number>();
@@ -22,19 +21,20 @@ function pickThumbnailUrl(post: Post) {
   return getThumbnailUrl(post) || (!isVideoPost(post) ? getPostMediaUrl(post) : null);
 }
 
-function getWarmTargets(posts: Post[], centerIndex: number, radius = FEED_WARM_RADIUS) {
+function getWarmTargets(posts: Post[], centerIndex: number, radius?: { forward: number; backward: number }) {
   if (!Array.isArray(posts) || posts.length === 0) {
     return [];
   }
 
   const safeCenter = Math.max(0, Math.min(centerIndex, posts.length - 1));
-  const start = Math.max(0, safeCenter - radius);
-  const end = Math.min(posts.length, safeCenter + radius + 1);
+  const warmRadius = radius ?? getFeedWarmRadius(safeCenter, posts.length);
+  const start = Math.max(0, safeCenter - warmRadius.backward);
+  const end = Math.min(posts.length, safeCenter + warmRadius.forward + 1);
   return posts.slice(start, end).filter((post): post is Post => !!post?.id);
 }
 
-export function warmFeedWindow(posts: Post[], centerIndex: number, options?: { radius?: number }) {
-  const targets = getWarmTargets(posts, centerIndex, options?.radius ?? FEED_WARM_RADIUS);
+export function warmFeedWindow(posts: Post[], centerIndex: number, options?: { radius?: { forward: number; backward: number } }) {
+  const targets = getWarmTargets(posts, centerIndex, options?.radius);
   if (targets.length === 0) {
     return;
   }
@@ -53,24 +53,22 @@ export function warmFeedWindow(posts: Post[], centerIndex: number, options?: { r
     releasePrewarmedPlayers.delete(key);
   }
 
-  if (Platform.OS !== 'ios') {
-    targets.forEach((post) => {
-      const playbackUrl = getPlaybackUrl(post);
-      if (!playbackUrl) {
-        return;
-      }
+  targets.forEach((post) => {
+    const playbackUrl = getPlaybackUrl(post);
+    if (!playbackUrl) {
+      return;
+    }
 
-      const source = getVideoSource(playbackUrl);
-      const sourceKey = createFeedVideoPlayerKey(post.id, source);
+    const source = getVideoSource(playbackUrl);
+    const sourceKey = createFeedVideoPlayerKey(post.id, source);
 
-      if (releasePrewarmedPlayers.has(sourceKey)) {
-        return;
-      }
+    if (releasePrewarmedPlayers.has(sourceKey)) {
+      return;
+    }
 
-      const release = prewarmFeedVideoPlayer(sourceKey, source);
-      releasePrewarmedPlayers.set(sourceKey, release);
-    });
-  }
+    const release = prewarmFeedVideoPlayer(sourceKey, source);
+    releasePrewarmedPlayers.set(sourceKey, release);
+  });
 
   const freshTargets = targets.filter((post) => {
     const warmedAt = warmedPostIds.get(post.id) || 0;

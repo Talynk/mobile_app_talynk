@@ -668,17 +668,16 @@ function ProfileFeedContent({
     screenName: 'profile-feed',
     onIndexChanged: (index) => {
       if (index !== currentIndexRef.current) {
-        pauseAllVideos();
         currentIndexRef.current = index;
+        setCurrentIndex(index);
+        lastActiveIndexRef.current = index;
       }
     },
     onIndexSettled: (nextIndex) => {
       setCurrentIndex(nextIndex);
       lastActiveIndexRef.current = nextIndex;
     },
-    onTransitionEnd: () => {
-      setIsFeedTransitioning(false);
-    },
+    onTransitionEnd: () => {},
   });
 
   useResumeRefresh({
@@ -905,7 +904,7 @@ function ProfileFeedContent({
           renderItem={({ item, index }) => {
             const isActive = isScreenFocused && currentIndex === index;
             const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, {
-              disabled: isCreateFocused || isActive,
+              disabled: isCreateFocused,
             });
             return (
               <FullscreenFeedPostItem
@@ -920,7 +919,7 @@ function ProfileFeedContent({
                 isLiked={likedPosts.includes(item.id)}
                 isFollowing={userFollowStatus[item.user?.id || ''] ?? followedUsers.has(item.user?.id || '')}
                 isActive={isActive}
-                suspendPlayback={isFeedTransitioning || commentsModalVisible || reportModalVisible}
+                suspendPlayback={commentsModalVisible || reportModalVisible}
                 shouldPreload={shouldPreload}
                 availableHeight={verticalPageHeight}
                 showReportButton={!isOwnProfile}
@@ -953,8 +952,6 @@ function ProfileFeedContent({
               progressViewOffset={20}
             />
           }
-          onScrollBeginDrag={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
-          onMomentumScrollBegin={() => { pauseAllVideos(); setIsFeedTransitioning(true); }}
           onScroll={handlePagerScroll}
           onMomentumScrollEnd={handlePagerMomentumScrollEnd}
           onViewableItemsChanged={onViewableItemsChanged}

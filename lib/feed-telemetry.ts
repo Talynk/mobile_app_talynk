@@ -183,6 +183,14 @@ export const feedTelemetry = {
   }) {
     logTelemetry('video_time_to_first_frame_ms', payload);
   },
+  trackVideoTimeToFirstMotion(payload: {
+    postId: string;
+    screenName: string;
+    sourceMode: 'direct' | 'android_cache';
+    durationMs: number;
+  }) {
+    logTelemetry('video_time_to_first_motion_ms', payload);
+  },
   trackVideoStall(payload: {
     postId: string;
     screenName: string;
