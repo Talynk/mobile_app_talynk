@@ -7,11 +7,15 @@ const IS_OLDER_ANDROID = Platform.OS === 'android' &&
   Number.isFinite(ANDROID_API_LEVEL) &&
   ANDROID_API_LEVEL <= 28;
 
-export const VIDEO_FEED_WINDOW_SIZE = 11;
-export const VIDEO_FEED_INITIAL_NUM_TO_RENDER = 7;
-export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = 8;
+export const VIDEO_FEED_WINDOW_SIZE = IS_OLDER_ANDROID ? 7 : 9;
+export const VIDEO_FEED_INITIAL_NUM_TO_RENDER = IS_OLDER_ANDROID ? 3 : 5;
+export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = IS_OLDER_ANDROID ? 4 : 6;
 export const VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS = false;
 
+/**
+ * TikTok-style: only the immediate NEXT post may prepare (paused buffer).
+ * Never preload backward — avoids multiple decoders on low-end Android.
+ */
 export function shouldPreloadFeedVideo(
   index: number,
   activeIndex: number,
@@ -25,23 +29,20 @@ export function shouldPreloadFeedVideo(
     return false;
   }
 
-  const distance = Math.abs(index - activeIndex);
-  if (distance === 0) {
-    return false;
-  }
-
-  // Immediate neighbors must always buffer first — this is what makes scroll feel instant.
-  if (distance === 1) {
+  if (index === activeIndex + 1) {
     return true;
   }
 
-  const preloadDistance = IS_OLDER_ANDROID ? 2 : 3;
-  return distance <= preloadDistance;
+  // iOS can afford one previous neighbor for scroll-back.
+  if (Platform.OS === 'ios' && index === activeIndex - 1) {
+    return true;
+  }
+
+  return false;
 }
 
-/** Prefer warming the next item in scroll direction. */
 export function getFeedWarmRadius(activeIndex: number, itemCount: number) {
-  const forward = Math.min(2, Math.max(0, itemCount - activeIndex - 1));
-  const backward = Math.min(1, activeIndex);
+  const forward = Math.min(1, Math.max(0, itemCount - activeIndex - 1));
+  const backward = Platform.OS === 'ios' ? Math.min(1, activeIndex) : 0;
   return { forward, backward };
 }

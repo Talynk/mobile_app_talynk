@@ -97,6 +97,7 @@ function reorderFollowingPosts(posts: Post[], seed: number) {
 export default function FeedScreen() {
   const [activeTab, setActiveTab] = useState<FeedTab>('foryou');
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [activePlayIndex, setActivePlayIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
@@ -215,6 +216,7 @@ export default function FeedScreen() {
     currentIndexRef.current = 0;
     lastActiveIndexRef.current = 0;
     setCurrentIndex(0);
+    setActivePlayIndex(0);
   }, []);
 
   const hardRefreshForYou = useCallback((reason: 'resume' | 'manual' | 'recovery', backgroundDurationMs = 0) => {
@@ -477,11 +479,13 @@ export default function FeedScreen() {
       if (index !== currentIndexRef.current) {
         currentIndexRef.current = index;
         setCurrentIndex(index);
-        lastActiveIndexRef.current = index;
       }
     },
     onIndexSettled: (nextIndex) => {
+      pauseAllVideos();
+      currentIndexRef.current = nextIndex;
       setCurrentIndex(nextIndex);
+      setActivePlayIndex(nextIndex);
       lastActiveIndexRef.current = nextIndex;
     },
     onTransitionEnd: () => {},
@@ -515,6 +519,7 @@ export default function FeedScreen() {
       refreshForYouFromHomeTab(getHomeFeedRefreshRequestId());
       if (lastActiveIndexRef.current >= 0) {
         setCurrentIndex(lastActiveIndexRef.current);
+        setActivePlayIndex(lastActiveIndexRef.current);
       }
       return () => {
         const savedIndex = currentIndexRef.current;
@@ -897,20 +902,8 @@ export default function FeedScreen() {
     setReportModalVisible(true);
   }, [user, visiblePosts]);
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems.length > 0) {
-      const mostVisible = viewableItems.reduce((best: any, item: any) =>
-        item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
-      , null as any);
-
-      const idx = mostVisible?.index ?? viewableItems[0]?.index ?? 0;
-      finishFeedTransition();
-      setCurrentIndex(idx);
-      lastActiveIndexRef.current = idx;
-    } else {
-      finishFeedTransition();
-      setCurrentIndex(-1);
-    }
+  const onViewableItemsChanged = useRef(() => {
+    finishFeedTransition();
   }).current;
 
   const viewabilityConfig = useRef({
@@ -930,19 +923,19 @@ export default function FeedScreen() {
       return;
     }
 
-    const remainingItems = visiblePosts.length - Math.max(0, currentIndex) - 1;
+    const remainingItems = visiblePosts.length - Math.max(0, activePlayIndex) - 1;
     if (remainingItems > 4) {
       return;
     }
 
-    const paginationKey = `${activeTab}:${visiblePosts.length}:${currentIndex}`;
+    const paginationKey = `${activeTab}:${visiblePosts.length}:${activePlayIndex}`;
     if (lastAutoPaginationKeyRef.current === paginationKey) {
       return;
     }
 
     lastAutoPaginationKeyRef.current = paginationKey;
     void runQuerySafely(() => fetchNextPage(), 'feed pagination prefetch');
-  }, [activeTab, currentIndex, fetchNextPage, hasNextPage, isFetchingNextPage, visiblePosts.length]);
+  }, [activePlayIndex, activeTab, fetchNextPage, hasNextPage, isFetchingNextPage, visiblePosts.length]);
 
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
@@ -1002,7 +995,7 @@ export default function FeedScreen() {
   ), [handleRefresh, isRefetching, pullRefreshing, renderSkeletonItem, verticalPageHeight]);
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
-    const isActive = isScreenFocused && currentIndex === index;
+    const isActive = isScreenFocused && activePlayIndex === index;
     const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused });
 
     const isLiked = likedPosts.includes(item.id) || item.is_liked === true;
@@ -1036,7 +1029,7 @@ export default function FeedScreen() {
         availableHeight={verticalPageHeight}
       />
     );
-  }, [activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
+  }, [activePlayIndex, activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
 
   const renderListFooter = useCallback(() => {
     if (isFetchingNextPage) {

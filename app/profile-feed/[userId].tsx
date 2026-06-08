@@ -173,6 +173,7 @@ function ProfileFeedContent({
   const [hasMore, setHasMore] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [activePlayIndex, setActivePlayIndex] = useState(0);
   const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
   const [initialScrollDone, setInitialScrollDone] = useState(false);
@@ -632,6 +633,7 @@ function ProfileFeedContent({
       setIsScreenFocused(true);
       if (lastActiveIndexRef.current >= 0) {
         setCurrentIndex(lastActiveIndexRef.current);
+        setActivePlayIndex(lastActiveIndexRef.current);
       }
       return () => {
         setIsScreenFocused(false);
@@ -670,11 +672,13 @@ function ProfileFeedContent({
       if (index !== currentIndexRef.current) {
         currentIndexRef.current = index;
         setCurrentIndex(index);
-        lastActiveIndexRef.current = index;
       }
     },
     onIndexSettled: (nextIndex) => {
+      pauseAllVideos();
+      currentIndexRef.current = nextIndex;
       setCurrentIndex(nextIndex);
+      setActivePlayIndex(nextIndex);
       lastActiveIndexRef.current = nextIndex;
     },
     onTransitionEnd: () => {},
@@ -703,6 +707,7 @@ function ProfileFeedContent({
       currentIndexRef.current = 0;
       lastActiveIndexRef.current = 0;
       setCurrentIndex(0);
+      setActivePlayIndex(0);
       setCurrentPage(1);
       setHasMore(true);
       setInitialScrollDone(false);
@@ -846,20 +851,12 @@ function ProfileFeedContent({
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
       const visibleItem = viewableItems[0];
-      const newIndex = visibleItem.index || 0;
       const postId = visibleItem.item?.id;
-
       if (postId) {
         likesManager.onPostVisible(postId);
       }
-
-      setIsFeedTransitioning(false);
-      setCurrentIndex(newIndex);
-      lastActiveIndexRef.current = newIndex;
-    } else {
-      setIsFeedTransitioning(false);
-      setCurrentIndex(-1);
     }
+    setIsFeedTransitioning(false);
   }).current;
 
   const viewabilityConfig = useRef({
@@ -902,7 +899,7 @@ function ProfileFeedContent({
           ref={flatListRef}
           data={posts}
           renderItem={({ item, index }) => {
-            const isActive = isScreenFocused && currentIndex === index;
+            const isActive = isScreenFocused && activePlayIndex === index;
             const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, {
               disabled: isCreateFocused,
             });

@@ -40,11 +40,6 @@ import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
 import { enterPlaybackMode } from '@/lib/media/audio-session';
 import { feedTelemetry } from '@/lib/feed-telemetry';
-import {
-  acquireFeedVideoPlayer,
-  createFeedVideoPlayerKey,
-  resetFeedVideoPlayer,
-} from '@/lib/feed-video-player-pool';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
 const FEED_ANIMATION_USES_NATIVE_DRIVER = false;
@@ -212,7 +207,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       player,
       contentFit,
       isMuted,
-      shouldPlay,
+      shouldPlay: _shouldPlay,
       postId,
       screenName,
       sourceMode,
@@ -251,6 +246,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         try {
           player.muted = true;
           player.pause();
+          player.currentTime = 0;
           if ((player as any).volume !== undefined) {
             (player as any).volume = 0;
           }
@@ -289,34 +285,21 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
         try {
           (player as any).audioMixingMode = 'doNotMix';
         } catch (_) {}
-        if (!shouldPlay) {
-          player.pause();
-        }
       } catch (_) {}
-    }, [player, shouldPlay]);
+    }, [player]);
 
     React.useEffect(() => {
-      if (!player) return;
+      if (!player) {
+        return;
+      }
 
       try {
-        if (shouldPlay) {
-          // Unmute then play (order matters for smooth transition)
-          player.muted = isMuted;
-          if ((player as any).volume !== undefined) {
-            (player as any).volume = isMuted ? 0 : 1;
-          }
-          player.play();
-        } else {
-          // MUTE FIRST, then pause. This ordering prevents any brief
-          // audio blip during the transition.
-          player.muted = true;
-          if ((player as any).volume !== undefined) {
-            (player as any).volume = 0;
-          }
-          player.pause();
+        player.muted = isMuted;
+        if ((player as any).volume !== undefined) {
+          (player as any).volume = isMuted ? 0 : 1;
         }
       } catch (_) {}
-    }, [isMuted, player, shouldPlay]);
+    }, [isMuted, player]);
 
     React.useEffect(() => {
       if (!player) return;
@@ -442,16 +425,26 @@ const HookFeedVideo = React.forwardRef<NativeFeedVideoHandle, HookFeedVideoProps
         try {
           (createdPlayer as any).audioMixingMode = 'doNotMix';
         } catch (_) {}
-        if (Platform.OS === 'ios') {
-          try {
+        try {
+          if (Platform.OS === 'ios') {
             createdPlayer.bufferOptions = {
-              preferredForwardBufferDuration: 6,
-              waitsToMinimizeStalling: false,
+              preferredForwardBufferDuration: 10,
+              waitsToMinimizeStalling: true,
             } as any;
-          } catch {
-            (createdPlayer as any).preferredForwardBufferDuration = 6;
+          } else {
+            // Android ExoPlayer DefaultLoadControl settings.
+            // bufferForPlaybackMs — how much data must be buffered before readyToPlay fires
+            // and before we call play(). High value = smoother first-play.
+            // bufferForPlaybackAfterRebufferMs — same threshold after a mid-play stall.
+            // maxBufferMs — how far ahead ExoPlayer pre-downloads (keeps buffer full).
+            createdPlayer.bufferOptions = {
+              minBufferMs: 5000,
+              maxBufferMs: 15000,
+              bufferForPlaybackMs: 2500,
+              bufferForPlaybackAfterRebufferMs: 3000,
+            } as any;
           }
-        }
+        } catch (_) {}
         createdPlayer.pause();
       } catch (_) {}
     });
@@ -470,20 +463,20 @@ type FeedVideoProps = NativeFeedVideoProps & {
 };
 
 const FeedVideo = React.forwardRef<NativeFeedVideoHandle, FeedVideoProps>(
-  ({ source, playerInstanceKey, player, ...props }, ref) => {
-    if (Platform.OS === 'ios') {
-      return (
-        <HookFeedVideo
-          key={playerInstanceKey}
-          ref={ref}
-          source={source}
-          playerInstanceKey={playerInstanceKey}
-          {...props}
-        />
-      );
-    }
-
-    return <NativeFeedVideo ref={ref} player={player} {...props} />;
+  ({ source, playerInstanceKey, player: _unusedPoolPlayer, ...props }, ref) => {
+    // Always use hook-based player on both iOS and Android.
+    // key={playerInstanceKey} causes React to unmount+remount HookFeedVideo
+    // on every new activation, giving us a guaranteed fresh player at position 0.
+    // This is the only reliable way to ensure every video starts from 0:00.
+    return (
+      <HookFeedVideo
+        key={playerInstanceKey}
+        ref={ref}
+        source={source}
+        playerInstanceKey={playerInstanceKey}
+        {...props}
+      />
+    );
   },
 );
 
@@ -569,12 +562,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const playerValidRef = useRef(false);
   const isMountedRef = useRef(true);
   const videoControllerRef = useRef<NativeFeedVideoHandle | null>(null);
-  const shouldRestartOnActiveRef = useRef(false);
-  const prewarmBufferedRef = useRef(false);
+  const [playbackGeneration, setPlaybackGeneration] = useState(0);
+  const lastStartedPlaybackGenerationRef = useRef(-1);
+  const pendingPlayRef = useRef(false);
   const videoMountRetryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoplayRetryTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const videoMountRetryCountRef = useRef(0);
-  const [managedPlayer, setManagedPlayer] = useState<VideoPlayer | null>(null);
   const [isPlayerValid, setIsPlayerValid] = useState(false);
   const [canMountVideoPlayer, setCanMountVideoPlayer] = useState(false);
   const [videoMountBoundaryKey, setVideoMountBoundaryKey] = useState(0);
@@ -615,7 +608,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const stallCountRef = useRef(0);
   const playbackStallCountRef = useRef(0);
   const playbackStallProbeRef = useRef({ time: 0, checkedAt: 0 });
-  const iosPrewarmKickedRef = useRef(false);
   const visualRecoveryAttemptedRef = useRef(false);
   // Animated value that drives the progress bar fill + thumb visually.
   // During drag we update this directly (no setState → no re-render lag).
@@ -624,27 +616,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isDraggingRef = useRef(false);
   const dragSeekRatioRef = useRef(0);
   const progressBarWidthRef = useRef(screenWidth);
-  const managedPlayerRef = useRef<VideoPlayer | null>(null);
   const screenWidthRef = useRef(screenWidth);
   screenWidthRef.current = screenWidth;
-  managedPlayerRef.current = managedPlayer;
 
   const clearAutoplayRetryTimeouts = useCallback(() => {
     autoplayRetryTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     autoplayRetryTimeoutsRef.current = [];
-  }, []);
-
-  const refreshAndroidPlaybackSurface = useCallback((controller: NativeFeedVideoHandle, unmuted: boolean) => {
-    try {
-      const currentTime = controller.getCurrentTime?.() ?? 0;
-      controller.setMuted(true);
-      controller.pause();
-      controller.seekTo(Math.max(0, currentTime > 0.08 ? currentTime - 0.033 : 0));
-      controller.setMuted(unmuted);
-      controller.play();
-    } catch {
-      playerValidRef.current = false;
-    }
   }, []);
 
   // Resume playback after any modal/popup dismisses.
@@ -695,18 +672,8 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   const resolvePlaybackTimes = useCallback(() => {
     const controller = videoControllerRef.current;
-    const player = managedPlayerRef.current;
     let currentTime = controller?.getCurrentTime?.() ?? 0;
     let duration = controller?.getDuration?.() ?? 0;
-
-    if (player) {
-      if (currentTime <= 0 && Number.isFinite(player.currentTime) && player.currentTime > 0) {
-        currentTime = player.currentTime;
-      }
-      if (duration <= 0 && Number.isFinite(player.duration) && player.duration > 0) {
-        duration = player.duration;
-      }
-    }
 
     if (duration <= 0 && lastDurationRef.current > 0) {
       duration = lastDurationRef.current;
@@ -741,22 +708,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
+  // Load (and preload) when active OR when the neighboring post should be preloaded.
+  // The preloaded player sits in readyToPlay state so activation is instant.
   const shouldLoadVideo =
     isVideo &&
     hlsReady &&
     isAppActive &&
-    isActive &&
+    (isActive || shouldPreload) &&
     !videoError;
-  const shouldPrewarmVideo = isVideo && hlsReady && isAppActive && shouldPreload && !isActive && !videoError;
-  const shouldMountVideoPlayer = shouldLoadVideo || shouldPrewarmVideo;
-  const shouldKeepPooledPlayer = shouldLoadVideo || shouldPrewarmVideo;
-  const shouldPlayVideo =
-    isAppActive &&
-    !videoError &&
-    !decoderErrorDetected &&
-    !suspendPlayback &&
-    ((isActive && !pausedByUser) || shouldPrewarmVideo);
-  const shouldMuteVideo = shouldPrewarmVideo && !isActive ? true : isMuted;
+  const shouldMountVideoPlayer = shouldLoadVideo;
+  const shouldMuteVideo = isMuted;
   const directVideoPlayerSource = React.useMemo(
     () => playbackUrl
       ? {
@@ -776,80 +737,59 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     [directVideoPlayerSource, playbackUrl],
   );
   const videoSourceMode = Platform.OS === 'android' ? 'android_cache' : 'direct';
-  const videoPoolKey = resolvedVideoSource ? createFeedVideoPlayerKey(item.id, resolvedVideoSource) : null;
   const screenName = 'fullscreen-feed-post';
-  const requestAutoplayPlayback = useCallback((reason: string) => {
-    clearAutoplayRetryTimeouts();
-
-    const shouldAttemptPlayback =
-      isVideo &&
-      isActive &&
-      !suspendPlayback &&
-      isAppActive &&
-      !decoderErrorDetected &&
-      !pausedByUser;
-
-    if (!shouldAttemptPlayback) {
-      return;
+  const startActivePlayback = useCallback(() => {
+    if (
+      !isVideo ||
+      !isActive ||
+      !isMountedRef.current ||
+      suspendPlayback ||
+      !isAppActive ||
+      decoderErrorDetected ||
+      pausedByUser
+    ) {
+      return false;
     }
 
-    const attemptPlay = () => {
-      if (
-        !isMountedRef.current ||
-        !isActive ||
-        suspendPlayback ||
-        !isAppActive ||
-        decoderErrorDetected ||
-        pausedByUser
-      ) {
-        return;
-      }
-
-      const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current) {
-        return;
-      }
-
-      try {
-        if (controller.isPlaying()) {
-          clearAutoplayRetryTimeouts();
-          return;
-        }
-
-        controller.setMuted(isMuted);
-        controller.play();
-      } catch (error) {
-        playerValidRef.current = false;
-        addFabricBreadcrumb('feed_video_autoplay_retry_failed', {
-          postId: item.id,
-          index,
-          reason,
-          message: error instanceof Error ? error.message : 'unknown',
-        });
-      }
-    };
+    // Reset visual state — thumbnail stays visible until playback actually starts.
+    scrubProgress.setValue(0);
+    setVideoProgress(0);
+    lastPlaybackTimeRef.current = 0;
 
     void enterPlaybackMode();
-    attemptPlay();
 
-    if (Platform.OS !== 'ios') {
-      return;
+    const controller = videoControllerRef.current;
+
+    // FAST PATH: player already preloaded and buffered — play from 0 immediately.
+    // This fires when the neighbor video had time to buffer while previous video played.
+    // seekTo(0) is safe here: the preloaded player is always at position 0 (we reset it
+    // on deactivation so it stays ready for the next activation).
+    if (
+      controller &&
+      playerValidRef.current &&
+      playbackStatusRef.current === 'readyToPlay'
+    ) {
+      pendingPlayRef.current = false;
+      try {
+        controller.seekTo(0);
+        controller.setMuted(isMuted);
+        controller.play();
+      } catch (_) {}
+      return true;
     }
 
-    [120, 350, 800, 1500].forEach((delay) => {
-      const timeoutId = setTimeout(attemptPlay, delay);
-      autoplayRetryTimeoutsRef.current.push(timeoutId);
-    });
+    // SLOW PATH: player still loading (cold start or not yet preloaded).
+    // Flag to play the moment readyToPlay fires in handleNativeStatusChange.
+    pendingPlayRef.current = true;
+    return true;
   }, [
-    clearAutoplayRetryTimeouts,
     decoderErrorDetected,
-    index,
     isActive,
     isAppActive,
     isMuted,
     isVideo,
-    item.id,
     pausedByUser,
+    scrubProgress,
     suspendPlayback,
   ]);
 
@@ -886,6 +826,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       likeOpacity.stopAnimation();
       thumbnailOpacity.stopAnimation();
       scrubProgress.stopAnimation();
+      pendingPlayRef.current = false;
       clearAutoplayRetryTimeouts();
     };
   }, [clearAutoplayRetryTimeouts, likeOpacity, likeScale, muteOpacity, pauseIndicatorOpacity, scrubProgress, thumbnailOpacity]);
@@ -910,31 +851,22 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return;
     }
 
-    if (shouldPrewarmVideo) {
-      try {
-        controller.setMuted(true);
-        if (!controller.isPlaying()) {
-          controller.play();
-        }
-      } catch (_) {}
-      return;
-    }
-
     clearAutoplayRetryTimeouts();
     try {
       controller.setMuted(true);
       controller.pause();
+      controller.seekTo(0);
     } catch (_) {}
-  }, [clearAutoplayRetryTimeouts, isActive, isAppActive, shouldPrewarmVideo, suspendPlayback]);
+  }, [clearAutoplayRetryTimeouts, isActive, isAppActive, suspendPlayback]);
 
   // SAFETY NET: Poll every 500ms to catch players that escaped cleanup.
-  // Allow muted prewarm buffering; silence everything else that should be idle.
   useEffect(() => {
     const shouldAllowPlayback =
       isAppActive &&
       !suspendPlayback &&
       !decoderErrorDetected &&
-      ((isActive && !pausedByUser) || shouldPrewarmVideo);
+      isActive &&
+      !pausedByUser;
     if (shouldAllowPlayback) {
       return;
     }
@@ -946,24 +878,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         if (controller.isPlaying()) {
           controller.setMuted(true);
           controller.pause();
+          controller.seekTo(0);
         }
       } catch (_) {}
     }, 500);
 
     return () => clearInterval(interval);
-  }, [decoderErrorDetected, isActive, isAppActive, pausedByUser, shouldPrewarmVideo, suspendPlayback]);
-
-  useEffect(() => {
-    if (Platform.OS === 'ios') {
-      return;
-    }
-
-    if (!managedPlayer) {
-      playerValidRef.current = false;
-      videoControllerRef.current = null;
-      if (isMountedRef.current) setIsPlayerValid(false);
-    }
-  }, [managedPlayer]);
+  }, [decoderErrorDetected, isActive, isAppActive, pausedByUser, suspendPlayback]);
 
   useEffect(() => {
     setImageError(false);
@@ -996,13 +917,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     stallCountRef.current = 0;
     playbackStallCountRef.current = 0;
     playbackStallProbeRef.current = { time: 0, checkedAt: 0 };
-    iosPrewarmKickedRef.current = false;
     visualRecoveryAttemptedRef.current = false;
     wasActiveRef.current = false;
     wasAppActiveRef.current = isAppActive;
     hasActivatedOnceRef.current = false;
-    shouldRestartOnActiveRef.current = false;
-    prewarmBufferedRef.current = false;
+    lastStartedPlaybackGenerationRef.current = -1;
+    pendingPlayRef.current = false;
+    setPlaybackGeneration(0);
   }, [clearAutoplayRetryTimeouts, isAppActive, item.id]);
 
   // Treat every activation as a fresh playback session. This prevents native
@@ -1019,66 +940,37 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const resumedWhileActive = isActive && isAppActive && !wasAppActiveRef.current;
 
     if (becameActive || resumedWhileActive) {
-      const hadPrewarmBuffer = prewarmBufferedRef.current && (firstFrameRendered || videoVisualReady);
-      const isAndroidReactivation = Platform.OS === 'android' && becameActive && hasActivatedOnceRef.current;
-      shouldRestartOnActiveRef.current = isAndroidReactivation
-        ? true
-        : hadPrewarmBuffer
-          ? false
-          : (becameActive || Platform.OS !== 'android');
       visualRecoveryAttemptedRef.current = false;
       stallCountRef.current = 0;
       playbackStallCountRef.current = 0;
       playbackStallProbeRef.current = { time: 0, checkedAt: Date.now() };
-      if (!hadPrewarmBuffer) {
-        firstPlaybackRequestedAtRef.current = null;
-      }
+      firstPlaybackRequestedAtRef.current = null;
       lastPlaybackTimeRef.current = 0;
+      lastStartedPlaybackGenerationRef.current = -1;
+      pendingPlayRef.current = false;
       clearAutoplayRetryTimeouts();
       thumbnailOpacity.stopAnimation();
-      if (hadPrewarmBuffer) {
-        thumbnailOpacity.setValue(0);
-      } else if (isAndroidReactivation) {
-        // Keep thumbnail until the remounted surface renders; audio-only resume is confusing.
-      } else {
-        thumbnailOpacity.setValue(1);
-        scrubProgress.setValue(0);
-        setVideoReady(false);
-        setFirstFrameRendered(false);
-        setVideoVisualReady(false);
-        setIsPlaying(false);
-        setVideoProgress(0);
-      }
-      if (isAndroidReactivation) {
-        setActivePlaybackGeneration((prev) => prev + 1);
-        setVideoMountBoundaryKey((prev) => prev + 1);
-      }
-      prewarmBufferedRef.current = false;
-
-      if (Platform.OS !== 'android' && (hasActivatedOnceRef.current || resumedWhileActive) && videoPoolKey) {
-        resetFeedVideoPlayer(videoPoolKey);
-        setManagedPlayer(null);
-        playerValidRef.current = false;
-        videoControllerRef.current = null;
-        setIsPlayerValid(false);
-        setActivePlaybackGeneration((prev) => prev + 1);
-        setVideoMountBoundaryKey((prev) => prev + 1);
-      }
+      thumbnailOpacity.setValue(1);
+      scrubProgress.setValue(0);
+      setVideoReady(false);
+      setFirstFrameRendered(false);
+      setVideoVisualReady(false);
+      setIsPlaying(false);
+      setVideoProgress(0);
+      setPlaybackGeneration((prev) => prev + 1);
 
       const controller = videoControllerRef.current;
-      if (Platform.OS !== 'android' && controller && playerValidRef.current) {
+      if (controller && playerValidRef.current) {
         try {
           controller.setMuted(true);
           controller.pause();
-          controller.seekTo(0);
-          shouldRestartOnActiveRef.current = false;
         } catch (_) {
           playerValidRef.current = false;
         }
       }
 
     } else if (becameInactive) {
-      shouldRestartOnActiveRef.current = false;
+      pendingPlayRef.current = false;
       clearAutoplayRetryTimeouts();
       thumbnailOpacity.stopAnimation();
       thumbnailOpacity.setValue(1);
@@ -1086,12 +978,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setFirstFrameRendered(false);
       setVideoVisualReady(false);
       setIsPlaying(false);
+      scrubProgress.setValue(0);
+      setVideoProgress(0);
 
       const controller = videoControllerRef.current;
       if (controller) {
         try {
           controller.setMuted(true);
           controller.pause();
+          // Reset to position 0 immediately on deactivation.
+          // This guarantees the player is at 0 when reactivated, so the
+          // fast-path in startActivePlayback (already readyToPlay) works correctly.
+          controller.seekTo(0);
         } catch (_) {}
       }
     }
@@ -1108,223 +1006,50 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isVideo,
     scrubProgress,
     thumbnailOpacity,
-    videoPoolKey,
   ]);
 
+  // ONE playback start per scroll-to-post: seek(0) then play. No declarative shouldPlay.
   useEffect(() => {
-    if (!isVideo || !isActive || !isAppActive || suspendPlayback) {
+    if (!isVideo || !isActive) {
       return;
     }
 
+    if (
+      pausedByUser ||
+      suspendPlayback ||
+      !isAppActive ||
+      decoderErrorDetected ||
+      !canMountVideoPlayer ||
+      !isPlayerValid
+    ) {
+      return;
+    }
+
+    if (lastStartedPlaybackGenerationRef.current === playbackGeneration) {
+      return;
+    }
+
+    lastStartedPlaybackGenerationRef.current = playbackGeneration;
     void enterPlaybackMode();
-  }, [isActive, isAppActive, isVideo, suspendPlayback]);
-
-  useEffect(() => {
-    const shouldKeepPlaying =
-      isVideo &&
-      isActive &&
-      !suspendPlayback &&
-      isAppActive &&
-      !decoderErrorDetected &&
-      !pausedByUser;
-
-    if (!shouldKeepPlaying) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current || !isMountedRef.current) {
-        return;
-      }
-
-      try {
-        if (!controller.isPlaying()) {
-          controller.setMuted(isMuted);
-          controller.play();
-        }
-      } catch (error) {
-        addFabricBreadcrumb('feed_video_keepalive_play_failed', {
-          postId: item.id,
-          index,
-          message: error instanceof Error ? error.message : 'unknown',
-        });
-      }
-    }, 650);
-
-    return () => clearInterval(interval);
+    startActivePlayback();
   }, [
+    canMountVideoPlayer,
     decoderErrorDetected,
-    index,
     isActive,
     isAppActive,
-    isMuted,
-    isVideo,
-    item.id,
-    pausedByUser,
-    suspendPlayback,
-  ]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios' || !shouldPrewarmVideo || isActive || iosPrewarmKickedRef.current) {
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current || !isMountedRef.current || isActive || !shouldPrewarmVideo) {
-        return;
-      }
-
-      iosPrewarmKickedRef.current = true;
-      try {
-        controller.setMuted(true);
-        controller.play();
-      } catch {
-        return;
-      }
-
-      setTimeout(() => {
-        const latest = videoControllerRef.current;
-        if (!latest || !playerValidRef.current || !isMountedRef.current || isActive) {
-          return;
-        }
-        try {
-          latest.setMuted(true);
-          latest.pause();
-          latest.seekTo(0);
-        } catch (_) {}
-      }, 320);
-    }, 80);
-
-    return () => clearTimeout(timeoutId);
-  }, [isActive, isPlayerValid, shouldPrewarmVideo]);
-
-  useEffect(() => {
-    const canRecoverActivePlayback =
-      isVideo &&
-      isActive &&
-      shouldLoadVideo &&
-      firstFrameRendered &&
-      isPlayerValid &&
-      !suspendPlayback &&
-      isAppActive &&
-      !decoderErrorDetected &&
-      !pausedByUser &&
-      !anyInternalModalOpen &&
-      !videoError;
-
-    if (!canRecoverActivePlayback) {
-      playbackStallCountRef.current = 0;
-      playbackStallProbeRef.current = {
-        time: lastPlaybackTimeRef.current,
-        checkedAt: Date.now(),
-      };
-      return;
-    }
-
-    const interval = setInterval(() => {
-      const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current || !isMountedRef.current || isDraggingRef.current) {
-        return;
-      }
-
-      try {
-        const currentTime = controller.getCurrentTime?.() ?? lastPlaybackTimeRef.current;
-        const duration = controller.getDuration?.() ?? 0;
-        const now = Date.now();
-        const previous = playbackStallProbeRef.current;
-        const advanced = currentTime > previous.time + 0.04 || currentTime < previous.time - 0.5;
-        const nearEnd = duration > 0 && currentTime >= duration - 0.45;
-        const oldEnough = now - previous.checkedAt >= 850;
-
-        if (!oldEnough) {
-          return;
-        }
-
-        playbackStallProbeRef.current = { time: currentTime, checkedAt: now };
-
-        if (advanced || nearEnd) {
-          playbackStallCountRef.current = 0;
-          return;
-        }
-
-        playbackStallCountRef.current += 1;
-        const count = playbackStallCountRef.current;
-        feedTelemetry.trackVideoStall({
-          postId: item.id,
-          screenName,
-          count,
-        });
-        addFabricBreadcrumb('feed_video_post_frame_stall_retry', {
-          postId: item.id,
-          count,
-          currentTime,
-          duration,
-          status: playbackStatusRef.current,
-          sourceMode: videoSourceMode,
-        });
-
-        controller.setMuted(isMuted);
-
-        if (count === 1) {
-          controller.play();
-          return;
-        }
-
-        if (count === 2) {
-          controller.seekTo(Math.max(0, currentTime + 0.01));
-          controller.play();
-          return;
-        }
-
-        if (count <= 4) {
-          if (Platform.OS === 'android') {
-            controller.seekTo(Math.max(0, currentTime + 0.05));
-            controller.play();
-            return;
-          }
-
-          setVideoReady(false);
-          setFirstFrameRendered(false);
-          setVideoVisualReady(false);
-          setIosVisualRecoveryKey((prev) => prev + 1);
-          setVideoMountBoundaryKey((prev) => prev + 1);
-          requestAutoplayPlayback('post_frame_stall_retry');
-        }
-      } catch (error) {
-        addFabricBreadcrumb('feed_video_post_frame_stall_recovery_failed', {
-          postId: item.id,
-          message: error instanceof Error ? error.message : 'unknown',
-        });
-      }
-    }, 900);
-
-    return () => clearInterval(interval);
-  }, [
-    anyInternalModalOpen,
-    decoderErrorDetected,
-    firstFrameRendered,
-    isActive,
-    isAppActive,
-    isMuted,
     isPlayerValid,
     isVideo,
-    item.id,
     pausedByUser,
-    preferDirectVideoSource,
-    requestAutoplayPlayback,
-    screenName,
-    shouldLoadVideo,
+    playbackGeneration,
+    startActivePlayback,
     suspendPlayback,
-    videoError,
-    videoSourceMode,
   ]);
 
   useEffect(() => {
-    if (!shouldMountVideoPlayer) {
+    if (shouldMountVideoPlayer && resolvedVideoSource) {
+      setCanMountVideoPlayer(true);
+    } else {
       setCanMountVideoPlayer(false);
-      setManagedPlayer(null);
       setVideoReady(false);
       setFirstFrameRendered(false);
       setVideoVisualReady(false);
@@ -1335,35 +1060,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         setIsPlayerValid(false);
       }
     }
-  }, [shouldMountVideoPlayer]);
-
-  useEffect(() => {
-    if (!videoPoolKey || !resolvedVideoSource) {
-      return;
-    }
-
-    if (Platform.OS === 'ios') {
-      if (shouldMountVideoPlayer) {
-        setManagedPlayer(null);
-        setCanMountVideoPlayer(true);
-      }
-      return;
-    }
-
-    if (!shouldKeepPooledPlayer) {
-      setManagedPlayer(null);
-      setCanMountVideoPlayer(false);
-      return;
-    }
-
-    const lease = acquireFeedVideoPlayer(videoPoolKey, resolvedVideoSource);
-    setManagedPlayer(lease.player);
-    setCanMountVideoPlayer(true);
-
-    return () => {
-      lease.release();
-    };
-  }, [resolvedVideoSource, shouldKeepPooledPlayer, shouldMountVideoPlayer, videoPoolKey]);
+  }, [shouldMountVideoPlayer, resolvedVideoSource]);
 
   const handleNativePlayerReady = useCallback(() => {
     playerValidRef.current = true;
@@ -1487,8 +1184,30 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       setVideoError(false);
       setDecoderErrorDetected(false);
       setVideoReady(true);
+
+      // Android: this is the ONLY reliable moment to start playback from position 0.
+      // The source is loaded and buffered — seekTo(0) + play() here is guaranteed correct.
+      if (
+        pendingPlayRef.current &&
+        isActive &&
+        !pausedByUser &&
+        !suspendPlayback &&
+        isAppActive &&
+        !decoderErrorDetected &&
+        isMountedRef.current
+      ) {
+        pendingPlayRef.current = false;
+        const controller = videoControllerRef.current;
+        if (controller && playerValidRef.current) {
+          try {
+            controller.seekTo(0);
+            controller.setMuted(isMuted);
+            controller.play();
+          } catch (_) {}
+        }
+      }
     }
-  }, [item.id, index, shouldLoadVideo, isActive, isAppActive, preferDirectVideoSource, videoSourceMode]);
+  }, [decoderErrorDetected, index, isActive, isAppActive, isMuted, isVideo, item.id, pausedByUser, preferDirectVideoSource, shouldLoadVideo, suspendPlayback, videoSourceMode]);
 
   const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
     if (!isMountedRef.current) {
@@ -1506,9 +1225,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         setFirstFrameRendered(true);
       }
       setVideoVisualReady(true);
-      if (shouldPrewarmVideo) {
-        prewarmBufferedRef.current = true;
-      }
     }
 
     // Don't update progress while user is dragging the progress bar
@@ -1541,74 +1257,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [item.id, screenName, shouldLoadVideo, videoSourceMode]);
 
-  useEffect(() => {
-    if (!shouldPrewarmVideo || !isAppActive || suspendPlayback) {
-      return;
-    }
-
-    const kickPrewarm = () => {
-      const controller = videoControllerRef.current;
-      if (!controller || !playerValidRef.current || !isMountedRef.current) {
-        return;
-      }
-
-      try {
-        controller.setMuted(true);
-        if (!controller.isPlaying()) {
-          controller.play();
-        }
-      } catch (_) {}
-    };
-
-    kickPrewarm();
-    const retryId = setTimeout(kickPrewarm, 120);
-    return () => clearTimeout(retryId);
-  }, [canMountVideoPlayer, isAppActive, isPlayerValid, shouldPrewarmVideo, suspendPlayback]);
-
-  useEffect(() => {
-    const controller = videoControllerRef.current;
-    const shouldAutoplay = isActive && !suspendPlayback && isAppActive && !decoderErrorDetected && !pausedByUser;
-    if (!controller || !playerValidRef.current) {
-      if (shouldAutoplay) {
-        requestAutoplayPlayback('waiting_for_player');
-      }
-      return;
-    }
-    try {
-      if (isActive && shouldRestartOnActiveRef.current) {
-        if (Platform.OS === 'android') {
-          refreshAndroidPlaybackSurface(controller, isMuted);
-        } else {
-          controller.setMuted(true);
-          controller.pause();
-          controller.seekTo(0);
-        }
-        shouldRestartOnActiveRef.current = false;
-      }
-      if (shouldAutoplay) {
-        requestAutoplayPlayback('active_item');
-      } else {
-        clearAutoplayRetryTimeouts();
-        controller.setMuted(true);
-        controller.pause();
-      }
-    } catch (e) {
-      playerValidRef.current = false;
-    }
-  }, [
-    canMountVideoPlayer,
-    clearAutoplayRetryTimeouts,
-    decoderErrorDetected,
-    isActive,
-    isAppActive,
-    isMuted,
-    isPlayerValid,
-    pausedByUser,
-    refreshAndroidPlaybackSurface,
-    requestAutoplayPlayback,
-    suspendPlayback,
-  ]);
-
   // Poll video progress for smooth progress bar animation.
   // Expo Video's native timeUpdate event is unreliable on many Android/HLS devices.
   useEffect(() => {
@@ -1640,18 +1288,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             }
           }
           syncProgressFromPlayer(currentTime, duration);
-
-          if (
-            !controllerPlaying &&
-            isActive &&
-            !pausedByUser &&
-            !suspendPlayback &&
-            isAppActive &&
-            !decoderErrorDetected
-          ) {
-            controller.setMuted(isMuted);
-            controller.play();
-          }
         }
       } catch (_) {}
     }, 100);
@@ -1674,12 +1310,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   // Fade out the thumbnail once playback is visually ready.
   useEffect(() => {
-    if (isActive && videoVisualReady && (isPlaying || prewarmBufferedRef.current)) {
-      thumbnailOpacity.stopAnimation();
-      thumbnailOpacity.setValue(0);
-      return;
-    }
-
     if (isActive && isPlaying && videoVisualReady) {
       const timerId = setTimeout(() => {
         if (!isMountedRef.current) return;
@@ -1692,10 +1322,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       return () => clearTimeout(timerId);
     }
 
-    if (!isActive && !shouldPrewarmVideo) {
+    if (!isActive) {
       thumbnailOpacity.setValue(1);
     }
-  }, [isActive, isPlaying, shouldPrewarmVideo, thumbnailOpacity, videoVisualReady]);
+  }, [isActive, isPlaying, thumbnailOpacity, videoVisualReady]);
 
   // Retry on video error with exponential backoff
   const handleRetry = useCallback(() => {
@@ -1713,11 +1343,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [retryCount]);
 
-  // If an active video plays audio/progress but never renders a frame, keep the
-  // thumbnail visible and recover the player. iOS uses hook-owned remounts only;
-  // Android keeps the existing pooled-player remount recovery path.
+  // iOS-only: recover when audio advances but no frame renders. Android skips this
+  // because remount/seek retries were causing stop/play loops on low-end devices.
   useEffect(() => {
-    if (!isVideo || !isActive || !shouldLoadVideo || firstFrameRendered || videoError || retryCount >= 3) {
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+
+    if (!isVideo || !isActive || !shouldLoadVideo || firstFrameRendered || videoError || retryCount >= 2) {
       return;
     }
 
@@ -1727,70 +1360,16 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       if (!isMountedRef.current || firstFrameRendered || videoError) {
         return;
       }
-      stallCountRef.current += 1;
+
       const audioOrProgressWithoutFrame = isPlaying || lastPlaybackTimeRef.current > 0.2;
-      feedTelemetry.trackVideoStall({
-        postId: item.id,
-        screenName,
-        count: stallCountRef.current,
-      });
-      addFabricBreadcrumb('feed_video_first_frame_timeout', {
-        postId: item.id,
-        retryCount,
-        sourceMode: videoSourceMode,
-        status: playbackStatusRef.current,
-        currentTime: lastPlaybackTimeRef.current,
-        isPlaying,
-      });
-      addFabricBreadcrumb('feed_video_stall_retry', {
-        postId: item.id,
-        retryCount,
-        sourceMode: videoSourceMode,
-        status: playbackStatusRef.current,
-        currentTime: lastPlaybackTimeRef.current,
-      });
       if (!audioOrProgressWithoutFrame && playbackStatusRef.current !== 'readyToPlay') {
         return;
       }
+
       setRetryCount((prev) => prev + 1);
-      const controller = videoControllerRef.current;
-      if (controller) {
-        try {
-          controller.setMuted(true);
-          controller.pause();
-          controller.seekTo(0);
-          shouldRestartOnActiveRef.current = true;
-        } catch (_) {}
-      }
-      setIsPlaying(false);
-      setVideoReady(false);
-      setFirstFrameRendered(false);
-      setVideoVisualReady(false);
-      if (Platform.OS === 'ios') {
-        if (audioOrProgressWithoutFrame && !visualRecoveryAttemptedRef.current) {
-          visualRecoveryAttemptedRef.current = true;
-          addFabricBreadcrumb('feed_video_audio_without_frame', {
-            postId: item.id,
-            retryCount,
-            status: playbackStatusRef.current,
-            currentTime: lastPlaybackTimeRef.current,
-          });
-          setIosVisualRecoveryKey((prev) => prev + 1);
-        }
-        setVideoMountBoundaryKey((prev) => prev + 1);
-        setTimeout(() => requestAutoplayPlayback('stall_retry'), 90);
-        return;
-      }
-      if (!preferDirectVideoSource && retryCount >= 1) {
-        setPreferDirectVideoSource(true);
-      }
-      // Only bump the boundary key. React's key reconciliation unmounts the
-      // entire VideoMountBoundary + NativeFeedVideo tree atomically so the
-      // native player is fully released before the new one is created.
-      // DO NOT toggle canMountVideoPlayer — doing so races against expo-video's
-      // SharedObject release and causes "Cannot use shared object that was already released".
       setVideoMountBoundaryKey((prev) => prev + 1);
-      setTimeout(() => requestAutoplayPlayback('stall_retry'), 90);
+      lastStartedPlaybackGenerationRef.current = -1;
+      setPlaybackGeneration((prev) => prev + 1);
     }, delay);
 
     return () => clearTimeout(timeoutId);
@@ -1802,9 +1381,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     retryCount,
     shouldLoadVideo,
     videoError,
-    preferDirectVideoSource,
     item.id,
-    requestAutoplayPlayback,
     screenName,
     videoSourceMode,
   ]);
@@ -1991,7 +1568,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 />
               ) : null}
 
-              {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (Platform.OS === 'ios' || Platform.OS === 'android' || managedPlayer) && (
+              {canMountVideoPlayer && shouldMountVideoPlayer && !videoError && resolvedVideoSource && (
                 <View
                   pointerEvents="none"
                   style={styles.videoLayer}
@@ -2003,21 +1580,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                   >
                     <FeedVideo
                       ref={videoControllerRef}
-                      player={managedPlayer}
+                      player={null}
                       source={resolvedVideoSource}
                       playerInstanceKey={`${item.id}:${activePlaybackGeneration}:${iosVisualRecoveryKey}`}
                       contentFit={mediaContentFit}
                       isMuted={shouldMuteVideo}
-                      shouldPlay={shouldPlayVideo}
+                      shouldPlay={false}
                       postId={item.id}
                       screenName={screenName}
                       sourceMode={videoSourceMode}
                       onFirstFrameRender={() => {
                         setVideoReady(true);
                         setFirstFrameRendered(true);
-                        if (shouldPrewarmVideo && !isActive) {
-                          prewarmBufferedRef.current = true;
-                        }
                         if (isActive) {
                           thumbnailOpacity.stopAnimation();
                           thumbnailOpacity.setValue(0);
@@ -2035,23 +1609,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                           });
                           firstPlaybackRequestedAtRef.current = null;
                         }
-                        // Kick-start playback asynchronously — calling play() synchronously
-                        // inside the native callback can race with player teardown on iOS.
-                        setTimeout(() => {
-                          const controller = videoControllerRef.current;
-                          if (
-                            controller &&
-                            playerValidRef.current &&
-                            isMountedRef.current &&
-                            isActive &&
-                            !suspendPlayback &&
-                            isAppActive &&
-                            !decoderErrorDetected &&
-                            !pausedByUser
-                          ) {
-                            try { controller.setMuted(isMuted); controller.play(); } catch (_) {}
-                          }
-                        }, 0);
                       }}
                       onStatusChange={handleNativeStatusChange}
                       onPlayingChange={handleNativePlayingChange}

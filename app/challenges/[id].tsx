@@ -136,6 +136,7 @@ export default function ChallengeDetailScreen() {
   const fullscreenAvailableHeight = Math.max(0, Math.round((safeAreaFrame.height || 0) - FULLSCREEN_HEADER_PX));
   const fullscreenFooterHeight = Math.max(insets.bottom + 44, 56);
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
+  const [fullscreenPlayIndex, setFullscreenPlayIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
   const challengeDetailListRef = useRef<FlatList>(null);
@@ -188,11 +189,7 @@ export default function ChallengeDetailScreen() {
     const mostVisible = viewableItems.reduce((best: any, item: any) =>
       item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best,
     null as any);
-    const idx = mostVisible?.index ?? viewableItems[0]?.index;
-    if (idx !== undefined && idx !== null) {
-      setIsFullscreenTransitioning(false);
-      setFullscreenIndex(idx);
-    }
+    setIsFullscreenTransitioning(false);
   }).current;
   const fullscreenViewabilityConfig = useRef({
     itemVisiblePercentThreshold: 60,
@@ -213,7 +210,9 @@ export default function ChallengeDetailScreen() {
       setFullscreenIndex(index);
     },
     onIndexSettled: (index) => {
+      pauseAllVideos();
       setFullscreenIndex(index);
+      setFullscreenPlayIndex(index);
     },
     onTransitionEnd: () => {},
   });
@@ -350,6 +349,7 @@ export default function ChallengeDetailScreen() {
     setActiveTab('posts');
     setShowFullscreen(false);
     setFullscreenIndex(0);
+    setFullscreenPlayIndex(0);
     setIsFullscreenTransitioning(false);
   }, [id]);
 
@@ -580,6 +580,7 @@ export default function ChallengeDetailScreen() {
       if (showFullscreen) {
         fullscreenListRef.current?.scrollToOffset({ offset: 0, animated: false });
         setFullscreenIndex(0);
+        setFullscreenPlayIndex(0);
       }
       fetchChallenge({ showLoader: false });
       handleTabChange(activeTab, { forceRefresh: true });
@@ -1920,7 +1921,7 @@ export default function ChallengeDetailScreen() {
             ref={fullscreenListRef}
             data={sortedPosts}
             renderItem={({ item, index }) => {
-              const isActive = fullscreenIndex === index;
+              const isActive = fullscreenPlayIndex === index;
               const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex);
               return (
                 <FullscreenFeedPostItem

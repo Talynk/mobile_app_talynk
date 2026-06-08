@@ -116,6 +116,7 @@ export default function ChallengePostsScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const [fullscreenIndex, setFullscreenIndex] = useState(0);
+  const [fullscreenPlayIndex, setFullscreenPlayIndex] = useState(0);
   const [showFullscreen, setShowFullscreen] = useState(false);
   const [isFullscreenTransitioning, setIsFullscreenTransitioning] = useState(false);
   const fullscreenListRef = useRef<FlatList>(null);
@@ -137,11 +138,7 @@ export default function ChallengePostsScreen() {
     const mostVisible = viewableItems.reduce((best: any, item: any) =>
       item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best
     , null as any);
-    const idx = mostVisible?.index ?? viewableItems[0]?.index;
-    if (idx !== undefined && idx !== null) {
-      setIsFullscreenTransitioning(false);
-      setFullscreenIndex(idx);
-    }
+    setIsFullscreenTransitioning(false);
   }).current;
 
   // CRITICAL: Pause all videos when navigating away from this screen
@@ -172,7 +169,9 @@ export default function ChallengePostsScreen() {
       setFullscreenIndex(index);
     },
     onIndexSettled: (index) => {
+      pauseAllVideos();
       setFullscreenIndex(index);
+      setFullscreenPlayIndex(index);
     },
     onTransitionEnd: () => {},
   });
@@ -705,7 +704,7 @@ export default function ChallengePostsScreen() {
             ref={fullscreenListRef}
             data={posts}
             renderItem={({ item, index }) => {
-              const isActive = fullscreenIndex === index;
+              const isActive = fullscreenPlayIndex === index;
               const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex, {
                 disabled: isCreateFocused,
               });

@@ -9,8 +9,6 @@ type PoolEntry = {
   detachedAt: number | null;
   activeRefs: number;
   warmRefs: number;
-  warmupTimer: ReturnType<typeof setTimeout> | null;
-  primedAt: number;
 };
 
 type PlayerLease = {
@@ -22,12 +20,12 @@ const ANDROID_API_LEVEL = typeof Platform.Version === 'number'
   ? Platform.Version
   : Number.parseInt(String(Platform.Version), 10);
 const MAX_POOL_SIZE = Platform.OS === 'ios'
-  ? 8
+  ? 3
   : Number.isFinite(ANDROID_API_LEVEL) && ANDROID_API_LEVEL <= 28
-    ? 5
-    : 7;
-const IDLE_EVICT_AFTER_MS = 60_000;
-const RELEASE_GRACE_MS = Platform.OS === 'ios' ? 8_000 : 4_000;
+    ? 1
+    : 2;
+const IDLE_EVICT_AFTER_MS = 30_000;
+const RELEASE_GRACE_MS = Platform.OS === 'ios' ? 4_000 : 2_000;
 const playerPool = new Map<string, PoolEntry>();
 
 function getSourceSignature(source: VideoSource) {
@@ -65,12 +63,12 @@ export function resetFeedVideoPlayer(key: string): boolean {
   return true;
 }
 
-function configureFeedPlayer(player: VideoPlayer, options?: { prime?: boolean }) {
+function pausePlayerAtStart(player: VideoPlayer) {
   try {
     player.loop = true;
     player.muted = true;
     player.staysActiveInBackground = false;
-    player.timeUpdateEventInterval = 0.25;
+    player.timeUpdateEventInterval = 0.5;
 
     try {
       (player as any).audioMixingMode = 'doNotMix';
@@ -80,50 +78,42 @@ function configureFeedPlayer(player: VideoPlayer, options?: { prime?: boolean })
 
     if (Platform.OS === 'android') {
       try {
+        // ExoPlayer DefaultLoadControl keys (ms units).
+        // bufferForPlaybackMs: minimum buffer before starting/resuming play.
+        // Raising this from ExoPlayer's default (2500ms) prevents stutter on
+        // first-play of a cold-cached video segment.
         player.bufferOptions = {
-          preferredForwardBufferDuration: 8,
-          minBufferForPlayback: 0.1,
-          maxBufferBytes: 0,
-          prioritizeTimeOverSizeThreshold: true,
+          minBufferMs: 3000,
+          maxBufferMs: 12000,
+          bufferForPlaybackMs: 1500,
+          bufferForPlaybackAfterRebufferMs: 2500,
         } as any;
       } catch {
-        (player as any).preferredForwardBufferDuration = 8;
+        // Not all expo-video versions expose these keys; safe to ignore.
       }
     } else {
       try {
         player.bufferOptions = {
-          preferredForwardBufferDuration: 0,
+          preferredForwardBufferDuration: 8,
           waitsToMinimizeStalling: true,
         } as any;
       } catch {
-        (player as any).preferredForwardBufferDuration = 0;
+        // Best-effort only.
       }
-    }
-
-    if (options?.prime) {
-      try {
-        player.play();
-      } catch {
-        player.pause();
-      }
-      return;
     }
 
     player.pause();
+    player.currentTime = 0;
   } catch {
     // Best-effort only.
   }
 }
 
 function releaseEntry(entry: PoolEntry) {
-  if (entry.warmupTimer) {
-    clearTimeout(entry.warmupTimer);
-    entry.warmupTimer = null;
-  }
-
   try {
     entry.player.muted = true;
     entry.player.pause();
+    entry.player.currentTime = 0;
   } catch {
     // Best-effort only.
   }
@@ -202,9 +192,8 @@ function getOrCreateEntry(key: string, source: VideoSource) {
     if (existing.sourceSignature !== sourceSignature) {
       try {
         existing.player.replace(source, true);
-        configureFeedPlayer(existing.player, { prime: Platform.OS === 'android' });
+        pausePlayerAtStart(existing.player);
         existing.sourceSignature = sourceSignature;
-        existing.primedAt = Platform.OS === 'android' ? Date.now() : 0;
       } catch {
         releaseEntry(existing);
         return getOrCreateEntry(key, source);
@@ -219,7 +208,7 @@ function getOrCreateEntry(key: string, source: VideoSource) {
   }
 
   const player = createVideoPlayer(source);
-  configureFeedPlayer(player, { prime: Platform.OS === 'android' });
+  pausePlayerAtStart(player);
 
   const entry: PoolEntry = {
     key,
@@ -229,8 +218,6 @@ function getOrCreateEntry(key: string, source: VideoSource) {
     detachedAt: null,
     activeRefs: 0,
     warmRefs: 0,
-    warmupTimer: null,
-    primedAt: Platform.OS === 'android' ? Date.now() : 0,
   };
 
   playerPool.set(key, entry);
@@ -238,22 +225,27 @@ function getOrCreateEntry(key: string, source: VideoSource) {
   return entry;
 }
 
+export function resetFeedPlayerToStart(player: VideoPlayer, source?: VideoSource) {
+  try {
+    player.muted = true;
+    player.pause();
+    if (source) {
+      // replace() always loads from the beginning. No second arg needed.
+      player.replace(source);
+    } else {
+      player.currentTime = 0;
+    }
+  } catch {
+    // Best-effort only.
+  }
+}
+
 export function acquireFeedVideoPlayer(key: string, source: VideoSource): PlayerLease {
   const entry = getOrCreateEntry(key, source);
   entry.activeRefs += 1;
   entry.lastUsedAt = Date.now();
   entry.detachedAt = null;
-
-  if (Platform.OS === 'android' && entry.primedAt > 0) {
-    try {
-      entry.player.muted = true;
-      if (!entry.player.playing) {
-        entry.player.play();
-      }
-    } catch {
-      // Best-effort only.
-    }
-  }
+  pausePlayerAtStart(entry.player);
 
   return {
     player: entry.player,
@@ -270,6 +262,7 @@ export function acquireFeedVideoPlayer(key: string, source: VideoSource): Player
         try {
           current.player.muted = true;
           current.player.pause();
+          current.player.currentTime = 0;
         } catch {
           // Best-effort only.
         }
@@ -279,6 +272,7 @@ export function acquireFeedVideoPlayer(key: string, source: VideoSource): Player
   };
 }
 
+/** Load source into pool paused at 0 — never plays; used only for metadata/cache hints. */
 export function prewarmFeedVideoPlayer(key: string, source: VideoSource): () => void {
   evictIdleEntries();
 
@@ -296,18 +290,8 @@ export function prewarmFeedVideoPlayer(key: string, source: VideoSource): () => 
 
   try {
     entry.player.muted = true;
-    if ((entry.player as any).volume !== undefined) {
-      (entry.player as any).volume = 0;
-    }
-
-    if (Platform.OS === 'android') {
-      if (!entry.warmupTimer) {
-        entry.player.play();
-        entry.primedAt = Date.now();
-      }
-    } else {
-      entry.player.pause();
-    }
+    entry.player.pause();
+    entry.player.currentTime = 0;
   } catch {
     // Best-effort only.
   }
@@ -323,15 +307,8 @@ export function prewarmFeedVideoPlayer(key: string, source: VideoSource): () => 
     if (current.activeRefs === 0 && current.warmRefs === 0) {
       try {
         current.player.muted = true;
-        if ((current.player as any).volume !== undefined) {
-          (current.player as any).volume = 0;
-        }
-        if (Platform.OS !== 'android' || current.primedAt === 0) {
-          current.player.pause();
-          current.player.currentTime = 0;
-        } else {
-          current.player.pause();
-        }
+        current.player.pause();
+        current.player.currentTime = 0;
       } catch {
         // Best-effort only.
       }
