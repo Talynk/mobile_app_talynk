@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 const ANDROID_API_LEVEL = typeof Platform.Version === 'number'
   ? Platform.Version
   : Number.parseInt(String(Platform.Version), 10);
-const IS_OLDER_ANDROID = Platform.OS === 'android' &&
+export const IS_OLDER_ANDROID = Platform.OS === 'android' &&
   Number.isFinite(ANDROID_API_LEVEL) &&
   ANDROID_API_LEVEL <= 28;
 
@@ -13,10 +13,8 @@ export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = IS_OLDER_ANDROID ? 4 : 6;
 export const VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS = false;
 
 /**
- * TikTok-style preload window:
- * - Current post: mount player immediately so first video and resume are instant.
- * - Next post: buffer while user watches current one.
- * - Previous (iOS only): smooth scroll-back.
+ * Modern devices preload one immediate neighbor in each direction.
+ * API <= 28 mounts only the active video player; HTTP warmup handles neighbors.
  */
 export function shouldPreloadFeedVideo(
   index: number,
@@ -31,16 +29,12 @@ export function shouldPreloadFeedVideo(
     return false;
   }
 
-  if (index === activeIndex) {
-    return true;
+  // Mara Z / API <= 28: NEVER mount a second decoder.
+  if (IS_OLDER_ANDROID) {
+    return false;
   }
 
-  if (index === activeIndex + 1) {
-    return true;
-  }
-
-  // iOS can afford one previous neighbor for scroll-back.
-  if (Platform.OS === 'ios' && index === activeIndex - 1) {
+  if (index === activeIndex + 1 || index === activeIndex - 1) {
     return true;
   }
 
@@ -48,7 +42,8 @@ export function shouldPreloadFeedVideo(
 }
 
 export function getFeedWarmRadius(activeIndex: number, itemCount: number) {
-  const forward = Math.min(1, Math.max(0, itemCount - activeIndex - 1));
-  const backward = Platform.OS === 'ios' ? Math.min(1, activeIndex) : 0;
+  const forwardSlots = IS_OLDER_ANDROID ? 3 : 2;
+  const forward = Math.min(forwardSlots, Math.max(0, itemCount - activeIndex - 1));
+  const backward = Math.min(IS_OLDER_ANDROID ? 1 : 1, activeIndex);
   return { forward, backward };
 }

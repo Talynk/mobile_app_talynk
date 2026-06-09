@@ -4,13 +4,12 @@ function isHlsUrl(url: string): boolean {
   return url.toLowerCase().includes('.m3u8');
 }
 
-/**
- * Android: ExoPlayer native LRU disk cache.
- */
 export function getVideoSource(url: string): VideoSource {
+  const isHls = isHlsUrl(url);
+
   return {
     uri: url,
     useCaching: true,
-    ...(isHlsUrl(url) ? { contentType: 'hls' as const } : {}),
+    ...(isHls ? { contentType: 'hls' as const } : {}),
   };
 }

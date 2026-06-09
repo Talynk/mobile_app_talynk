@@ -6,6 +6,7 @@ import { authApi, feedApi, followsApi, postsApi, userApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { FEED_DEFAULT_PAGE_SIZE, FEED_INTEGRATION_CONFIG } from '@/lib/feed-config';
 import { feedTelemetry } from '@/lib/feed-telemetry';
+import { warmFeedWindow } from '@/lib/feed-window-warmup';
 import { primePostDetailsCache } from '@/lib/post-details-cache';
 import { FeedApiResponse, FeedPagination, Post, UserPreferenceHint } from '@/types';
 import { normalizePost } from '@/lib/utils/normalize-post';
@@ -291,6 +292,9 @@ function buildCatalogFallbackPage(args: {
   const hasNext = extractHasNextFromPagination(pagination, requestIndex, rawPosts.length, limit);
 
   primePostDetailsCache(posts);
+  if (requestIndex === 1 && posts.length > 0) {
+    warmFeedWindow(posts, 0, { radius: { forward: 2, backward: 0 } });
+  }
 
   feedTelemetry.trackFeedRequest({
     endpoint: 'catalog',
@@ -845,6 +849,9 @@ export function useFeedQuery(tab: FeedTab, options: UseFeedQueryOptions = {}) {
         if (cachedPage) {
           return cachedPage;
         }
+      }
+      if (requestIndex === 1 && page.posts.length > 0) {
+        warmFeedWindow(page.posts, 0, { radius: { forward: 2, backward: 0 } });
       }
       return page;
     },

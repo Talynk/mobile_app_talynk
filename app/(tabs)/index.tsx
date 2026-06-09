@@ -11,6 +11,8 @@ import {
   Animated,
   Alert,
   FlatList,
+  Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
@@ -47,7 +49,6 @@ import {
 } from '@/lib/utils/video-feed';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import {
-  getHomeFeedRefreshRequestId,
   subscribeHomeFeedRefresh,
 } from '@/lib/home-feed-events';
 import {
@@ -102,7 +103,11 @@ export default function FeedScreen() {
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const [isFeedTransitioning, setIsFeedTransitioning] = useState(false);
   const lastActiveIndexRef = useRef(0);
+  const lastSettledIndexRef = useRef(0);
   const currentIndexRef = useRef(0);
+  const visiblePostCountRef = useRef(0);
+  const verticalPageHeightRef = useRef(1);
+  const feedViewportReadyRef = useRef(false);
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportPostId, setReportPostId] = useState<string | null>(null);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -130,6 +135,8 @@ export default function FeedScreen() {
   const didAdvanceForYouSessionRef = useRef(false);
   const seenResetRecoveryAttemptedRef = useRef(false);
   const feedTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastHandledDevLinkRef = useRef<string | null>(null);
   const lastHandledHomeRefreshRequestRef = useRef(0);
   const { user } = useAuth();
   const { isCreateFocused } = useCreateFocus();
@@ -196,16 +203,22 @@ export default function FeedScreen() {
     }, 120);
   }, []);
 
+  const clearAutoScrollTimers = useCallback(() => {
+    autoScrollTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    autoScrollTimeoutsRef.current = [];
+  }, []);
+
   React.useEffect(() => () => {
     if (feedTransitionTimeoutRef.current) {
       clearTimeout(feedTransitionTimeoutRef.current);
       feedTransitionTimeoutRef.current = null;
     }
+    clearAutoScrollTimers();
     pendingLikeSyncTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     pendingLikeSyncTimeoutsRef.current.clear();
     pendingFollowSyncTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
     pendingFollowSyncTimeoutsRef.current.clear();
-  }, []);
+  }, [clearAutoScrollTimers]);
   const currentFeedSessionId = React.useMemo(
     () => `foryou:${user?.id ?? 'guest'}:${effectiveRefresh ?? forYouRefreshSeed}`,
     [effectiveRefresh, forYouRefreshSeed, user?.id],
@@ -216,6 +229,7 @@ export default function FeedScreen() {
     flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
     currentIndexRef.current = 0;
     lastActiveIndexRef.current = 0;
+    lastSettledIndexRef.current = 0;
     setCurrentIndex(0);
     setActivePlayIndex(0);
   }, []);
@@ -465,9 +479,37 @@ export default function FeedScreen() {
   const fallbackAvailableHeight = Math.max(0, (safeAreaFrame.height || screenHeight) - headerHeight);
   const availableHeight = feedViewportHeight > 0 ? feedViewportHeight : fallbackAvailableHeight;
   const isFeedViewportReady = activeTab === 'challenges' || availableHeight > 0;
+  visiblePostCountRef.current = visiblePosts.length;
+  feedViewportReadyRef.current = isFeedViewportReady;
+  const commitSettledFeedIndex = useCallback((index: number) => {
+    const itemCount = visiblePostCountRef.current;
+    if (itemCount <= 0) {
+      return 0;
+    }
+
+    const nextIndex = Math.max(0, Math.min(index, itemCount - 1));
+    const prevIndex = lastSettledIndexRef.current;
+    if (nextIndex !== lastActiveIndexRef.current) {
+      pauseAllVideos();
+    }
+
+    currentIndexRef.current = nextIndex;
+    setCurrentIndex(nextIndex);
+    setActivePlayIndex(nextIndex);
+    lastActiveIndexRef.current = nextIndex;
+    lastSettledIndexRef.current = nextIndex;
+    feedTelemetry.trackFeedScrollSettled({
+      screenName: `feed:${activeTab}`,
+      index: nextIndex,
+      direction: nextIndex > prevIndex ? 'forward' : nextIndex < prevIndex ? 'backward' : 'unknown',
+    });
+
+    return nextIndex;
+  }, [activeTab]);
+
   const {
     pageHeight: verticalPageHeight,
-    snapToOffsets,
+    snapToInterval,
     getItemLayout,
     handleScroll: handlePagerScroll,
     handleMomentumScrollEnd: handlePagerMomentumScrollEnd,
@@ -479,18 +521,12 @@ export default function FeedScreen() {
     onIndexChanged: (index) => {
       if (index !== currentIndexRef.current) {
         currentIndexRef.current = index;
-        setCurrentIndex(index);
       }
     },
-    onIndexSettled: (nextIndex) => {
-      pauseAllVideos();
-      currentIndexRef.current = nextIndex;
-      setCurrentIndex(nextIndex);
-      setActivePlayIndex(nextIndex);
-      lastActiveIndexRef.current = nextIndex;
-    },
+    onIndexSettled: commitSettledFeedIndex,
     onTransitionEnd: () => {},
   });
+  verticalPageHeightRef.current = verticalPageHeight;
 
   useResumeRefresh({
     enabled: isScreenFocused && activeTab !== 'challenges',
@@ -517,7 +553,6 @@ export default function FeedScreen() {
   useFocusEffect(
     useCallback(() => {
       setIsScreenFocused(true);
-      refreshForYouFromHomeTab(getHomeFeedRefreshRequestId());
       if (lastActiveIndexRef.current >= 0) {
         setCurrentIndex(lastActiveIndexRef.current);
         setActivePlayIndex(lastActiveIndexRef.current);
@@ -528,8 +563,118 @@ export default function FeedScreen() {
         lastActiveIndexRef.current = savedIndex;
         pauseAllVideos();
       };
-    }, [refreshForYouFromHomeTab])
+    }, [])
   );
+
+  const scrollToFeedIndexForTest = useCallback((targetIndex: number, animated = true) => {
+    const itemCount = visiblePostCountRef.current;
+    if (!feedViewportReadyRef.current || itemCount === 0) {
+      return 0;
+    }
+
+    const pageHeight = verticalPageHeightRef.current;
+    const nextIndex = Math.max(0, Math.min(targetIndex, itemCount - 1));
+    flatListRef.current?.scrollToOffset({
+      offset: nextIndex * pageHeight,
+      animated,
+    });
+
+    const settleDelay = animated ? 850 : 50;
+    const timeoutId = setTimeout(() => {
+      if (lastSettledIndexRef.current !== nextIndex) {
+        commitSettledFeedIndex(nextIndex);
+      }
+    }, settleDelay);
+    autoScrollTimeoutsRef.current.push(timeoutId);
+    return nextIndex;
+  }, [commitSettledFeedIndex]);
+
+  const runDevAutoScrollTest = useCallback((forward: number, backward: number, intervalMs: number) => {
+    clearAutoScrollTimers();
+    if (activeTab !== 'foryou') {
+      setActiveTab('foryou');
+    }
+
+    const safeForward = Math.max(0, Math.min(forward, 80));
+    const safeBackward = Math.max(0, Math.min(backward, 80));
+    const safeInterval = Math.max(700, Math.min(intervalMs, 10_000));
+    const steps: Array<'next' | 'prev'> = [
+      ...Array.from({ length: safeForward }, () => 'next' as const),
+      ...Array.from({ length: safeBackward }, () => 'prev' as const),
+    ];
+
+    let targetIndex = 0;
+    const initialDelay = activeTab === 'foryou' ? 600 : 1600;
+    const resetTimeoutId = setTimeout(() => {
+      targetIndex = 0;
+      scrollToFeedIndexForTest(0, false);
+    }, Math.max(0, initialDelay - 500));
+    autoScrollTimeoutsRef.current.push(resetTimeoutId);
+
+    steps.forEach((direction, stepIndex) => {
+      const timeoutId = setTimeout(() => {
+        const itemCount = visiblePostCountRef.current;
+        if (itemCount <= 0) {
+          return;
+        }
+        targetIndex = direction === 'next'
+          ? Math.min(targetIndex + 1, Math.max(0, itemCount - 1))
+          : Math.max(targetIndex - 1, 0);
+        scrollToFeedIndexForTest(targetIndex, true);
+      }, initialDelay + stepIndex * safeInterval);
+      autoScrollTimeoutsRef.current.push(timeoutId);
+    });
+  }, [activeTab, clearAutoScrollTimers, scrollToFeedIndexForTest]);
+
+  React.useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+
+    const getNumericParam = (url: string, name: string, fallback: number) => {
+      const match = url.match(new RegExp(`[?&]${name}=([^&]+)`));
+      const value = match ? Number(decodeURIComponent(match[1])) : fallback;
+      return Number.isFinite(value) ? value : fallback;
+    };
+
+    const getStringParam = (url: string, name: string) => {
+      const match = url.match(new RegExp(`[?&]${name}=([^&]+)`));
+      return match ? decodeURIComponent(match[1]) : '';
+    };
+
+    const handleUrl = (url: string | null) => {
+      if (!url || lastHandledDevLinkRef.current === url) {
+        return;
+      }
+
+      if (url.includes('dev/auto-scroll-test') || url.includes('devAutoScroll=1')) {
+        lastHandledDevLinkRef.current = url;
+        const forward = getNumericParam(url, 'forward', 35);
+        const backward = getNumericParam(url, 'backward', 35);
+        const intervalMs = getNumericParam(url, 'interval', 4000);
+        runDevAutoScrollTest(forward, backward, intervalMs);
+        return;
+      }
+
+      if (url.includes('dev/scroll-step') || url.includes('devScrollStep=1')) {
+        lastHandledDevLinkRef.current = url;
+        const direction = getStringParam(url, 'direction') === 'prev' ? 'prev' : 'next';
+        const baseIndex = lastSettledIndexRef.current;
+        scrollToFeedIndexForTest(direction === 'next' ? baseIndex + 1 : baseIndex - 1, true);
+      }
+    };
+
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleUrl(event.url);
+    });
+
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+
+    return () => {
+      subscription.remove();
+      clearAutoScrollTimers();
+    };
+  }, [clearAutoScrollTimers, runDevAutoScrollTest, scrollToFeedIndexForTest]);
 
   // Keep currentIndexRef in sync
   currentIndexRef.current = currentIndex;
@@ -991,7 +1136,8 @@ export default function FeedScreen() {
       data={Array.from({ length: count }, (_, index) => index)}
       keyExtractor={(item) => `skeleton-${item}`}
       renderItem={({ item }) => renderSkeletonItem(item)}
-      snapToOffsets={Array.from({ length: count }, (_, index) => index * verticalPageHeight)}
+      pagingEnabled
+      snapToInterval={verticalPageHeight}
       snapToAlignment="start"
       disableIntervalMomentum
       decelerationRate="fast"
@@ -1013,7 +1159,8 @@ export default function FeedScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
     const isActive = isScreenFocused && activePlayIndex === index;
-    const shouldPreload = shouldPreloadFeedVideo(index, currentIndex, { disabled: isCreateFocused });
+    const preloadAnchor = Platform.OS === 'android' ? activePlayIndex : currentIndex;
+    const shouldPreload = shouldPreloadFeedVideo(index, preloadAnchor, { disabled: isCreateFocused });
 
     const isLiked = likedPosts.includes(item.id) || item.is_liked === true;
     const targetUserId = item.user?.id || (item as any).user_id || (item as any).userId || '';
@@ -1128,8 +1275,18 @@ export default function FeedScreen() {
       return;
     }
 
-    warmFeedWindow(visiblePosts, Math.max(0, currentIndex));
-  }, [activeTab, currentIndex, visiblePosts]);
+    const warmCenter = Platform.OS === 'android' ? activePlayIndex : currentIndex;
+    warmFeedWindow(visiblePosts, Math.max(0, warmCenter));
+  }, [activeTab, activePlayIndex, currentIndex, visiblePosts]);
+
+  // Eager-warm the first videos the moment feed data arrives (before scroll / skeleton dismiss).
+  React.useEffect(() => {
+    if (activeTab === 'challenges' || posts.length === 0) {
+      return;
+    }
+
+    warmFeedWindow(posts, 0, { radius: { forward: 2, backward: 0 } });
+  }, [activeTab, posts[0]?.id, posts[1]?.id, posts[2]?.id]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -1172,9 +1329,10 @@ export default function FeedScreen() {
           style={styles.feedViewport}
           onLayout={(event) => {
             const nextHeight = Math.round(event.nativeEvent.layout.height);
-            if (nextHeight > 0 && nextHeight !== feedViewportHeight) {
-              setFeedViewportHeight(nextHeight);
+            if (nextHeight <= 0) {
+              return;
             }
+            setFeedViewportHeight((prev) => (prev === nextHeight ? prev : nextHeight));
           }}
         >
           {!isFeedViewportReady || (isLoading && visiblePosts.length === 0) ? (
@@ -1182,42 +1340,50 @@ export default function FeedScreen() {
               {[1, 2, 3].map((i) => renderSkeletonItem(i))}
             </View>
           ) : (
-            <FlatList
-              ref={flatListRef}
-              data={visiblePosts}
-              renderItem={renderItem}
-              keyExtractor={(item) => item.id}
-              getItemLayout={getItemLayout}
-              snapToOffsets={snapToOffsets}
-              snapToAlignment="start"
-              disableIntervalMomentum
-              decelerationRate="fast"
-              showsVerticalScrollIndicator={false}
-              windowSize={VIDEO_FEED_WINDOW_SIZE}
-              maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
-              initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
-              removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
-              scrollEventThrottle={16}
-              scrollEnabled={true}
-              bounces
-              alwaysBounceVertical
-              refreshControl={
-                <RefreshControl
-                  refreshing={pullRefreshing || isRefetching}
-                  onRefresh={() => {
-                    void handleRefresh();
-                  }}
-                  tintColor="#60a5fa"
-                />
-              }
-              onScroll={handlePagerScroll}
-              onMomentumScrollEnd={handlePagerMomentumScrollEnd}
-              onEndReached={onEndReached}
-              onEndReachedThreshold={0.5}
-              ListFooterComponent={renderListFooter}
-              onViewableItemsChanged={onViewableItemsChanged}
-              viewabilityConfig={viewabilityConfig}
-              ListEmptyComponent={
+              <FlatList
+                style={styles.feedList}
+                ref={flatListRef}
+                data={visiblePosts}
+                renderItem={renderItem}
+                keyExtractor={(item) => item.id}
+                getItemLayout={getItemLayout}
+                pagingEnabled
+                snapToInterval={snapToInterval}
+                snapToAlignment="start"
+                disableIntervalMomentum
+                decelerationRate="fast"
+                showsVerticalScrollIndicator={false}
+                windowSize={VIDEO_FEED_WINDOW_SIZE}
+                maxToRenderPerBatch={VIDEO_FEED_MAX_TO_RENDER_PER_BATCH}
+                initialNumToRender={VIDEO_FEED_INITIAL_NUM_TO_RENDER}
+                removeClippedSubviews={VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS}
+                scrollEventThrottle={16}
+                scrollEnabled
+                bounces={false}
+                alwaysBounceVertical={false}
+                overScrollMode="never"
+                extraData={activePlayIndex}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={pullRefreshing || isRefetching}
+                    enabled={currentIndex === 0}
+                    onRefresh={() => {
+                      if (currentIndex !== 0) {
+                        return;
+                      }
+                        void handleRefresh();
+                    }}
+                    tintColor="#60a5fa"
+                  />
+                }
+                onScroll={handlePagerScroll}
+                onMomentumScrollEnd={handlePagerMomentumScrollEnd}
+                onEndReached={onEndReached}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={renderListFooter}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={viewabilityConfig}
+                ListEmptyComponent={
                 isOffline ? (
                   renderScrollableSkeletonFeed()
                 ) : isRefetching || isLoading || (activeTab === 'foryou' && forYouRecoveryAttempts > 0 && forYouRecoveryAttempts < 2) ? (
@@ -1274,7 +1440,7 @@ export default function FeedScreen() {
                   renderScrollableSkeletonFeed(8)
                 )
               }
-            />
+              />
           )}
         </View>
       )}
@@ -1321,6 +1487,10 @@ const styles = StyleSheet.create({
   },
   feedViewport: {
     flex: 1,
+  },
+  feedList: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   header: {
     justifyContent: 'center',

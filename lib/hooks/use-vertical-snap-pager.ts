@@ -31,7 +31,17 @@ export function useVerticalSnapPager<ItemT>({
 
   useEffect(() => {
     const next = normalizeHeight(pageHeight);
-    setStablePageHeight((current) => (current === next ? current : next));
+    setStablePageHeight((current) => {
+      if (current === next) {
+        return current;
+      }
+      // After the first real measurement, ignore tiny layout jitter so snap offsets
+      // do not oscillate and throw the feed back to index 0.
+      if (current > 1 && Math.abs(current - next) <= 4) {
+        return current;
+      }
+      return next;
+    });
   }, [pageHeight]);
 
   const snapToOffsets = useMemo(
@@ -63,15 +73,9 @@ export function useVerticalSnapPager<ItemT>({
   const handleMomentumScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const offsetY = event.nativeEvent.contentOffset.y;
     const nextIndex = resolveIndexFromOffset(offsetY);
+
     const expectedOffset = nextIndex * stablePageHeight;
     const alignmentErrorPx = Math.abs(offsetY - expectedOffset);
-
-    if (alignmentErrorPx > 1) {
-      listRef.current?.scrollToOffset({
-        offset: expectedOffset,
-        animated: false,
-      });
-    }
 
     feedTelemetry.trackPageAlignmentError({
       screenName,
@@ -83,10 +87,11 @@ export function useVerticalSnapPager<ItemT>({
     onIndexSettled?.(nextIndex);
     onTransitionEnd?.();
     return nextIndex;
-  }, [listRef, onIndexSettled, onTransitionEnd, resolveIndexFromOffset, screenName, stablePageHeight]);
+  }, [onIndexSettled, onTransitionEnd, resolveIndexFromOffset, screenName, stablePageHeight]);
 
   return {
     pageHeight: stablePageHeight,
+    snapToInterval: stablePageHeight,
     snapToOffsets,
     getItemLayout,
     handleScroll,

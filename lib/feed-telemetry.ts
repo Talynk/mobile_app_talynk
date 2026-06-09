@@ -80,6 +80,14 @@ function captureFeedMessage(
 function logTelemetry(event: string, payload: Record<string, unknown>) {
   if (__DEV__) {
     console.log(`[FeedTelemetry] ${event}`, payload);
+    try {
+      (globalThis as any).nativeLoggingHook?.(
+        `[FeedTelemetry] ${event} ${JSON.stringify(payload)}`,
+        1,
+      );
+    } catch {
+      // Best-effort device-test logging only.
+    }
   }
 
   addFeedBreadcrumb(event, payload);
@@ -215,6 +223,13 @@ export const feedTelemetry = {
       return;
     }
     logTelemetry('page_alignment_error_px', payload);
+  },
+  trackFeedScrollSettled(payload: {
+    screenName: string;
+    index: number;
+    direction?: 'forward' | 'backward' | 'unknown';
+  }) {
+    logTelemetry('feed_scroll_settled', payload);
   },
   trackShareSuccess(payload: { postId: string }) {
     logTelemetry('feed_share_post_success', payload);
