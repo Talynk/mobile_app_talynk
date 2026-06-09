@@ -13,8 +13,10 @@ export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = IS_OLDER_ANDROID ? 4 : 6;
 export const VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS = false;
 
 /**
- * TikTok-style: only the immediate NEXT post may prepare (paused buffer).
- * Never preload backward — avoids multiple decoders on low-end Android.
+ * TikTok-style preload window:
+ * - Current post: mount player immediately so first video and resume are instant.
+ * - Next post: buffer while user watches current one.
+ * - Previous (iOS only): smooth scroll-back.
  */
 export function shouldPreloadFeedVideo(
   index: number,
@@ -27,6 +29,10 @@ export function shouldPreloadFeedVideo(
 
   if (activeIndex < 0) {
     return false;
+  }
+
+  if (index === activeIndex) {
+    return true;
   }
 
   if (index === activeIndex + 1) {

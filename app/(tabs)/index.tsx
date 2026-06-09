@@ -125,6 +125,7 @@ export default function FeedScreen() {
   const pendingLikeSyncTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingFollowSyncTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastAutoPaginationKeyRef = useRef<string | null>(null);
+  const feedBootstrapPrefetchDoneRef = useRef(false);
   const lastTabRef = useRef<FeedTab>('foryou');
   const didAdvanceForYouSessionRef = useRef(false);
   const seenResetRecoveryAttemptedRef = useRef(false);
@@ -885,6 +886,8 @@ export default function FeedScreen() {
     }
 
     resetFeedViewportToTop();
+    feedBootstrapPrefetchDoneRef.current = false;
+    lastAutoPaginationKeyRef.current = null;
     setForYouRefreshSeed(nextRefreshSeed);
   }, [activeTab, feedEndpoint, followingOrderSeed, forYouRefreshSeed, refetch, resetFeedViewportToTop, user]);
 
@@ -924,7 +927,7 @@ export default function FeedScreen() {
     }
 
     const remainingItems = visiblePosts.length - Math.max(0, activePlayIndex) - 1;
-    if (remainingItems > 4) {
+    if (remainingItems > 8) {
       return;
     }
 
@@ -936,6 +939,20 @@ export default function FeedScreen() {
     lastAutoPaginationKeyRef.current = paginationKey;
     void runQuerySafely(() => fetchNextPage(), 'feed pagination prefetch');
   }, [activePlayIndex, activeTab, fetchNextPage, hasNextPage, isFetchingNextPage, visiblePosts.length]);
+
+  // Prefetch page 2 as soon as page 1 arrives so the feed never feels finite.
+  React.useEffect(() => {
+    if (activeTab !== 'foryou' || visiblePosts.length === 0 || !hasNextPage || isFetchingNextPage) {
+      return;
+    }
+
+    if (feedBootstrapPrefetchDoneRef.current) {
+      return;
+    }
+
+    feedBootstrapPrefetchDoneRef.current = true;
+    void runQuerySafely(() => fetchNextPage(), 'feed bootstrap prefetch');
+  }, [activeTab, fetchNextPage, hasNextPage, isFetchingNextPage, visiblePosts.length]);
 
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   React.useEffect(() => {

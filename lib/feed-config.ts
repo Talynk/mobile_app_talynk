@@ -1,6 +1,6 @@
 export const FEED_REFRESH_BUCKET_MS = 60_000;
-export const FEED_DEFAULT_PAGE_SIZE = 10;
-export const FEED_LOAD_MORE_PAGE_SIZE = 10;
+export const FEED_DEFAULT_PAGE_SIZE = 20;
+export const FEED_LOAD_MORE_PAGE_SIZE = 20;
 
 export const FEED_INTEGRATION_CONFIG = {
   enableSeenResetOnPullToRefresh: true,

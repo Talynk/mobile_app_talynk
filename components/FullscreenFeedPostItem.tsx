@@ -428,20 +428,36 @@ const HookFeedVideo = React.forwardRef<NativeFeedVideoHandle, HookFeedVideoProps
         try {
           if (Platform.OS === 'ios') {
             createdPlayer.bufferOptions = {
-              preferredForwardBufferDuration: 10,
+              // Buffer 60 seconds ahead — covers the full duration of most short clips.
+              preferredForwardBufferDuration: 60,
+              // Let AVPlayer choose the right moment to start/resume; prevents micro-stalls.
               waitsToMinimizeStalling: true,
             } as any;
           } else {
-            // Android ExoPlayer DefaultLoadControl settings.
-            // bufferForPlaybackMs — how much data must be buffered before readyToPlay fires
-            // and before we call play(). High value = smoother first-play.
-            // bufferForPlaybackAfterRebufferMs — same threshold after a mid-play stall.
-            // maxBufferMs — how far ahead ExoPlayer pre-downloads (keeps buffer full).
+            // Android ExoPlayer DefaultLoadControl parameters (all in milliseconds).
+            //
+            // bufferForPlaybackMs:
+            //   Minimum buffer required before readyToPlay fires on a cold start.
+            //   Keep LOW (500 ms) so the first video and any cold-start video begins
+            //   almost immediately on fast WiFi. ExoPlayer keeps filling the buffer
+            //   in the background up to maxBufferMs while the video plays.
+            //
+            // bufferForPlaybackAfterRebufferMs:
+            //   Same threshold but applied after a mid-play stall. Low value = resumes
+            //   as soon as the pipe clears; avoids the stop-continue loop.
+            //
+            // minBufferMs:
+            //   If the forward buffer falls below this, ExoPlayer starts a refill.
+            //   10 s gives plenty of headroom without pinning too much memory.
+            //
+            // maxBufferMs:
+            //   How far ahead ExoPlayer pre-downloads. 60 s covers the full duration
+            //   of most clips (1–2 min) so the decoder never runs dry on fast WiFi.
             createdPlayer.bufferOptions = {
-              minBufferMs: 5000,
-              maxBufferMs: 15000,
-              bufferForPlaybackMs: 2500,
-              bufferForPlaybackAfterRebufferMs: 3000,
+              minBufferMs: 15_000,
+              maxBufferMs: 120_000,
+              bufferForPlaybackMs: 500,
+              bufferForPlaybackAfterRebufferMs: 500,
             } as any;
           }
         } catch (_) {}
@@ -939,7 +955,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     const becameInactive = !isActive && wasActiveRef.current;
     const resumedWhileActive = isActive && isAppActive && !wasAppActiveRef.current;
 
-    if (becameActive || resumedWhileActive) {
+    if (becameActive) {
       visualRecoveryAttemptedRef.current = false;
       stallCountRef.current = 0;
       playbackStallCountRef.current = 0;
@@ -968,7 +984,28 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
           playerValidRef.current = false;
         }
       }
-
+    } else if (resumedWhileActive) {
+      // App returned to foreground (e.g. control center dismissed) — resume in place.
+      // Do NOT reset position or remount; that causes a multi-second cold restart.
+      const controller = videoControllerRef.current;
+      if (
+        controller &&
+        playerValidRef.current &&
+        !pausedByUser &&
+        !suspendPlayback &&
+        !decoderErrorDetected
+      ) {
+        try {
+          controller.setMuted(isMuted);
+          controller.play();
+        } catch (_) {
+          lastStartedPlaybackGenerationRef.current = -1;
+          setPlaybackGeneration((prev) => prev + 1);
+        }
+      } else {
+        lastStartedPlaybackGenerationRef.current = -1;
+        setPlaybackGeneration((prev) => prev + 1);
+      }
     } else if (becameInactive) {
       pendingPlayRef.current = false;
       clearAutoplayRetryTimeouts();
@@ -1001,10 +1038,14 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
   }, [
     clearAutoplayRetryTimeouts,
+    decoderErrorDetected,
     isActive,
     isAppActive,
+    isMuted,
     isVideo,
+    pausedByUser,
     scrubProgress,
+    suspendPlayback,
     thumbnailOpacity,
   ]);
 
@@ -1906,7 +1947,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       <Modal
         visible={showShareComingSoonModal}
         transparent
-        animationType="fade"
         onRequestClose={() => setShowShareComingSoonModal(false)}
       >
         <Pressable style={styles.bestModalOverlay} onPress={() => setShowShareComingSoonModal(false)}>

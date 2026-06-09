@@ -359,10 +359,31 @@ function keepForYouPageContinuable(page: FeedPage): FeedPage {
     return page;
   }
 
+  // Catalog responses carry accurate pagination — never override hasNext there.
+  if (page.endpoint === 'catalog' || page.pipeline === 'catalog-fallback') {
+    return page;
+  }
+
+  // Primary tiktok-lite feed often returns hasNext:false while more posts exist.
   return {
     ...page,
     hasNext: true,
   };
+}
+
+async function supplementForYouWithCatalog(
+  primaryPage: FeedPage,
+  requestIndex: number,
+  limit: number,
+  refreshSeed?: number,
+): Promise<FeedPage> {
+  const catalogPage = await loadCatalogFeedPage(requestIndex, limit, refreshSeed);
+
+  if (requestIndex === 1 && primaryPage.posts.length > 0) {
+    return keepForYouPageContinuable(mergePrimaryWithCatalog(primaryPage, catalogPage));
+  }
+
+  return keepForYouPageContinuable(catalogPage);
 }
 
 function normalizeFeedPage(args: {
@@ -565,23 +586,22 @@ async function loadForYouFeedPage(args: {
       refreshSeed,
     });
 
-    if (
-      FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback &&
-      primaryPage.legacyPipeline &&
-      (primaryPage.posts.length < limit || !primaryPage.hasNext)
-    ) {
+    const primaryExhausted =
+      !primaryPage.hasNext ||
+      primaryPage.posts.length < limit ||
+      primaryPage.posts.length === 0;
+
+    if (FEED_INTEGRATION_CONFIG.enableCatalogFeedFallback && primaryExhausted) {
       try {
-        return keepForYouPageContinuable(
-          mergePrimaryWithCatalog(
-            primaryPage,
-            await loadCatalogFeedPage(requestIndex, limit, refreshSeed),
-          ),
-        );
+        return await supplementForYouWithCatalog(primaryPage, requestIndex, limit, refreshSeed);
       } catch (catalogError: any) {
         feedTelemetry.trackFeedNetworkError({
           endpoint: 'catalog',
           message: catalogError?.message || 'Failed to supplement For You feed',
         });
+        if (primaryPage.posts.length > 0) {
+          return keepForYouPageContinuable(primaryPage);
+        }
       }
     }
 
