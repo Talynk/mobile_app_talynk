@@ -1,17 +1,6 @@
 import Expo
 import React
 import ReactAppDependencyProvider
-#if canImport(Sentry)
-import Sentry
-
-private func addBootBreadcrumb(_ message: String) {
-  let breadcrumb = Breadcrumb()
-  breadcrumb.level = .info
-  breadcrumb.category = "boot"
-  breadcrumb.message = message
-  SentrySDK.addBreadcrumb(breadcrumb)
-}
-#endif
 
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
@@ -24,19 +13,6 @@ public class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-#if canImport(Sentry)
-    // Native-first Sentry boot capture so launch-time crashes are visible even
-    // when JS has not started yet.
-    SentrySDK.start { options in
-      options.dsn = "https://826972301f2cf9d457818170954c4b49@o4510978923692032.ingest.de.sentry.io/4510985398452304"
-      options.debug = false
-      options.enableAppHangTracking = true
-      options.attachStacktrace = true
-      options.maxBreadcrumbs = 200
-    }
-    addBootBreadcrumb("native didFinishLaunching start")
-#endif
-
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -47,18 +23,12 @@ public class AppDelegate: ExpoAppDelegate {
 
 #if os(iOS) || os(tvOS)
     window = UIWindow(frame: UIScreen.main.bounds)
-#if canImport(Sentry)
-    addBootBreadcrumb("native starting React Native factory")
-#endif
     factory.startReactNative(
       withModuleName: "main",
       in: window,
       launchOptions: launchOptions)
 #endif
 
-#if canImport(Sentry)
-    addBootBreadcrumb("native didFinishLaunching complete")
-#endif
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
