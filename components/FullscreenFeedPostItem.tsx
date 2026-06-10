@@ -157,6 +157,13 @@ type NativeFeedVideoProps = {
   contentFit: 'contain' | 'cover' | 'fill';
   isMuted: boolean;
   shouldPlay: boolean;
+  /**
+   * When false on Android, the player stays alive and keeps filling its buffer
+   * but is NOT attached to a VideoView (no surface). Per expo-video docs a player
+   * buffers without a view, and with no surface ExoPlayer does not hold a video
+   * decoder — so preloading the next clip never steals the active clip's decoder.
+   */
+  attachVideoView: boolean;
   postId: string;
   screenName: string;
   sourceMode: 'direct' | 'android_cache';
@@ -209,6 +216,7 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       contentFit,
       isMuted,
       shouldPlay: _shouldPlay,
+      attachVideoView,
       postId,
       screenName,
       sourceMode,
@@ -399,6 +407,14 @@ const NativeFeedVideo = React.forwardRef<NativeFeedVideoHandle, NativeFeedVideoP
       return null;
     }
 
+    // Android: only the active clip attaches a surface (one hardware decoder).
+    // Preloading neighbours keep the player alive and buffering with no view, so
+    // they never contend for the decoder/CPU. iOS handles multiple players fine.
+    const shouldAttachView = Platform.OS === 'ios' ? true : attachVideoView;
+    if (!shouldAttachView) {
+      return null;
+    }
+
     return (
       <VideoView
         player={player}
@@ -434,37 +450,50 @@ const HookFeedVideo = React.forwardRef<NativeFeedVideoHandle, HookFeedVideoProps
               waitsToMinimizeStalling: true,
             } as any;
           } else {
-            // Android ExoPlayer DefaultLoadControl parameters (all in milliseconds).
+            // Android expo-video BufferOptions. IMPORTANT: only these keys are
+            // honored — raw ExoPlayer DefaultLoadControl names like minBufferMs /
+            // maxBufferMs / bufferForPlaybackMs are silently IGNORED by expo-video.
             //
-            // bufferForPlaybackMs:
-            //   Minimum buffer required before readyToPlay fires on a cold start.
-            //   Keep LOW (500 ms) so the first video and any cold-start video begins
-            //   almost immediately on fast WiFi. ExoPlayer keeps filling the buffer
-            //   in the background up to maxBufferMs while the video plays.
+            // preferredForwardBufferDuration (seconds):
+            //   How far ahead the player buffers. Because the NEXT post is
+            //   preloaded (buffered while paused), a generous value fills the
+            //   buffer BEFORE the video becomes active — so playback starts
+            //   instantly and never runs dry mid-clip. 30 s covers most short
+            //   clips end-to-end on a low-end device.
             //
-            // bufferForPlaybackAfterRebufferMs:
-            //   Same threshold but applied after a mid-play stall. Low value = resumes
-            //   as soon as the pipe clears; avoids the stop-continue loop.
+            // minBufferForPlayback (seconds):
+            //   Buffer required before (re)starting playback. Keeps the first
+            //   decoded frames keyframe-aligned so there is no frame breaking at
+            //   the start. It does NOT delay preloaded videos because their
+            //   buffer is already well past this threshold by activation time.
             //
-            // minBufferMs:
-            //   If the forward buffer falls below this, ExoPlayer starts a refill.
-            //   10 s gives plenty of headroom without pinning too much memory.
+            // prioritizeTimeOverSizeThreshold:
+            //   Prioritize buffering watchable duration over byte size so the
+            //   player reaches a playable state as fast as possible.
+            // Mara Z has ~23 MB free RAM. Two players each buffering 60 s with no
+            // byte cap blew the native heap to 275 MB → GC thrash → decoder
+            // starvation → the worsening stalls and 20-55 s stuck videos.
             //
-            // maxBufferMs:
-            //   How far ahead ExoPlayer pre-downloads. 60 s covers the full duration
-            //   of most clips (1–2 min) so the decoder never runs dry on fast WiFi.
+            // So we cap buffer MEMORY hard instead of time:
+            //  - prioritizeTimeOverSizeThreshold:false → ExoPlayer respects the
+            //    byte cap (otherwise it ignores it and grows unbounded).
+            //  - maxBufferBytes → the real ceiling. ~8 MB ≈ 30-60 s of a 360p clip,
+            //    plenty of look-ahead so good wifi never drains it mid-play, while
+            //    active + preload players together stay well within device memory.
+            //  - preferredForwardBufferDuration is the time ceiling; whichever
+            //    (time or bytes) is hit first stops loading until playback drains it.
             createdPlayer.bufferOptions = (IS_OLDER_ANDROID
               ? {
-                  minBufferMs: 4_000,
-                  maxBufferMs: 15_000,
-                  bufferForPlaybackMs: 500,
-                  bufferForPlaybackAfterRebufferMs: 1_500,
+                  preferredForwardBufferDuration: 25,
+                  minBufferForPlayback: 1.5,
+                  prioritizeTimeOverSizeThreshold: false,
+                  maxBufferBytes: 8 * 1024 * 1024,
                 }
               : {
-                  minBufferMs: 1_000,
-                  maxBufferMs: 20_000,
-                  bufferForPlaybackMs: 100,
-                  bufferForPlaybackAfterRebufferMs: 250,
+                  preferredForwardBufferDuration: 40,
+                  minBufferForPlayback: 1.5,
+                  prioritizeTimeOverSizeThreshold: false,
+                  maxBufferBytes: 24 * 1024 * 1024,
                 }) as any;
           }
         } catch (_) {}
@@ -750,13 +779,15 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const isCompetitionPost = Boolean(activeChallengeName || challengeMeta.isChallengePost);
   const playbackUrl = getPlaybackUrl(item);
   const hlsReady = !!playbackUrl;
-  // Low-end Android: ONE decoder only (active post). Retaining visited players caused
-  // 2+ simultaneous ExoPlayer instances and 9s+ first-frame delays on Mara Z.
+  // Mount the player when this post is active OR scheduled for preload. On API <= 28
+  // shouldPreloadFeedVideo limits preload to the single next post, so at most two
+  // decoders (active + next) stay alive. The preloaded player buffers while paused,
+  // giving an instant, stall-free start when the user scrolls onto it.
   const shouldLoadVideo =
     isVideo &&
     hlsReady &&
     isAppActive &&
-    (isActive || (!IS_OLDER_ANDROID && shouldPreload)) &&
+    (isActive || shouldPreload) &&
     !videoError;
   const shouldMountVideoPlayer = shouldLoadVideo;
   const shouldMuteVideo = isMuted;
@@ -1015,11 +1046,13 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
       thumbnailOpacity.stopAnimation();
       if (isWarmPlayer) {
-        // Preloaded player: skip thumbnail flash and play immediately.
-        thumbnailOpacity.setValue(0);
+        // Preloaded player already buffered while it had no surface. The VideoView
+        // attaches now (attachVideoView flips true), so play immediately from the
+        // buffered data but KEEP the thumbnail (same clip's poster) visible until
+        // onFirstFrameRender confirms the first real frame is drawn — this avoids a
+        // black flash during the surface attach.
+        thumbnailOpacity.setValue(1);
         setVideoReady(true);
-        setFirstFrameRendered(true);
-        setVideoVisualReady(true);
         try {
           const position = controller.getCurrentTime();
           if (position > 0.15) {
@@ -1692,6 +1725,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                       contentFit={mediaContentFit}
                       isMuted={shouldMuteVideo}
                       shouldPlay={false}
+                      attachVideoView={isActive}
                       postId={item.id}
                       screenName={screenName}
                       sourceMode={videoSourceMode}

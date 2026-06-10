@@ -13,8 +13,17 @@ export const VIDEO_FEED_MAX_TO_RENDER_PER_BATCH = IS_OLDER_ANDROID ? 4 : 6;
 export const VIDEO_FEED_REMOVE_CLIPPED_SUBVIEWS = false;
 
 /**
- * Modern devices preload one immediate neighbor in each direction.
- * API <= 28 mounts only the active video player; HTTP warmup handles neighbors.
+ * Preloading creates the neighbour's VideoPlayer (with its source) BEFORE it
+ * becomes active. Per expo-video docs, a player fills its buffers even while it
+ * is not attached to a visible VideoView, so when the user scrolls onto it the
+ * video starts instantly with no cold-start buffering.
+ *
+ * Modern devices preload one neighbour in each direction (active +/- 1).
+ *
+ * Low-end Android (API <= 28) preloads ONLY the next video (forward +1). This
+ * keeps at most two decoders alive in steady state (active + next) — enough for
+ * instant forward scrolling without overloading the device with extra ExoPlayer
+ * instances.
  */
 export function shouldPreloadFeedVideo(
   index: number,
@@ -29,9 +38,8 @@ export function shouldPreloadFeedVideo(
     return false;
   }
 
-  // Mara Z / API <= 28: NEVER mount a second decoder.
   if (IS_OLDER_ANDROID) {
-    return false;
+    return index === activeIndex + 1;
   }
 
   if (index === activeIndex + 1 || index === activeIndex - 1) {
