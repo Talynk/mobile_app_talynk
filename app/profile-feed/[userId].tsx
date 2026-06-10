@@ -234,6 +234,9 @@ function ProfileFeedContent({
         context: 'profile_feed:initial_scroll',
       });
       setCurrentIndex(initialIndex);
+      // Activate the opened post so it plays immediately (not just its thumbnail).
+      setActivePlayIndex(initialIndex);
+      lastActiveIndexRef.current = initialIndex;
       setInitialScrollDone(true);
     }, 0);
 
@@ -527,6 +530,9 @@ function ProfileFeedContent({
                     context: 'profile_feed:load_posts_initial_scroll',
                   });
                   setCurrentIndex(initialIndex);
+                  // Activate the opened post so it plays immediately.
+                  setActivePlayIndex(initialIndex);
+                  lastActiveIndexRef.current = initialIndex;
                   setInitialScrollDone(true);
                 }, 0);
               } else {

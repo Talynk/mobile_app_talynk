@@ -1184,6 +1184,7 @@ export default function ChallengeDetailScreen() {
           openFullscreenWithSafeScroll({
             setVisible: setShowFullscreen,
             setIndex: setFullscreenIndex,
+            setPlayIndex: setFullscreenPlayIndex,
             ref: fullscreenListRef,
             index,
             itemCount: sortedPosts.length,

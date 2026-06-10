@@ -421,6 +421,7 @@ export default function ChallengePostsScreen() {
     openFullscreenWithSafeScroll({
       setVisible: setShowFullscreen,
       setIndex: setFullscreenIndex,
+      setPlayIndex: setFullscreenPlayIndex,
       ref: fullscreenListRef,
       index: safeIdx,
       itemCount: posts.length,
@@ -445,6 +446,7 @@ export default function ChallengePostsScreen() {
     openFullscreenWithSafeScroll({
       setVisible: setShowFullscreen,
       setIndex: setFullscreenIndex,
+      setPlayIndex: setFullscreenPlayIndex,
       ref: fullscreenListRef,
       index,
       itemCount: posts.length,

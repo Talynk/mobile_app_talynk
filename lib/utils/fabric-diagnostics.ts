@@ -13,6 +13,12 @@ type SafeScrollParams = {
 type OpenFullscreenParams = {
   setVisible: (visible: boolean) => void;
   setIndex: (index: number) => void;
+  /**
+   * Sets the ACTIVE/playing index. Must be provided for feeds that gate playback
+   * on `playIndex === index` (challenge/profile fullscreen), otherwise opening at
+   * any index other than 0 leaves no item active and only the thumbnail shows.
+   */
+  setPlayIndex?: (index: number) => void;
   ref: { current: { scrollToIndex?: (params: { index: number; animated?: boolean }) => void } | null };
   index: number;
   itemCount: number;
@@ -125,6 +131,7 @@ export function safeScrollToIndex({
 export function openFullscreenWithSafeScroll({
   setVisible,
   setIndex,
+  setPlayIndex,
   ref,
   index,
   itemCount,
@@ -134,6 +141,10 @@ export function openFullscreenWithSafeScroll({
   const safeIndex = itemCount > 0 ? Math.max(0, Math.min(index, itemCount - 1)) : 0;
   prewarm?.();
   setIndex(safeIndex);
+  // Activate the opened post immediately so it plays (not just the thumbnail).
+  // Programmatic scroll does not fire the snap pager's momentum-end handler, so
+  // the play index would otherwise stay at its initial 0.
+  setPlayIndex?.(safeIndex);
   setVisible(true);
 
   addFabricBreadcrumb('openFullscreenWithSafeScroll:start', {

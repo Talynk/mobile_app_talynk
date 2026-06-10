@@ -107,7 +107,8 @@
         }
       ],
       "react-native-compressor",
-      "react-native-vision-camera"
+      "react-native-vision-camera",
+      "./plugins/withUserLeaveHintGuard"
     ],
     "experiments": {
       "typedRoutes": true
