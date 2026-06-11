@@ -418,6 +418,10 @@ function ProfileFeedContent({
           (p: any) => {
             const processingStatus = p.processing_status ?? p.processingStatus ?? '';
             const needsPlaybackData = p.hlsReady && !p.hls_url && !p.fullUrl?.includes('.m3u8');
+            // A video that has no resolvable HLS playback URL yet must be
+            // enriched EVEN IF it already has a thumbnail — otherwise the feed
+            // shows a frozen thumbnail and the video never mounts/plays.
+            const needsPlayableUrl = p.type === 'video' && !getPlaybackUrl(p);
             const staleProcessingState =
               p.type === 'video' &&
               !!processingStatus &&
@@ -425,6 +429,7 @@ function ProfileFeedContent({
               processingStatus !== 'failed';
             return (
               needsPlaybackData ||
+              needsPlayableUrl ||
               staleProcessingState ||
               needsRenderableMediaEnrichment(p) ||
               needsChallengeMetaEnrichment(p)

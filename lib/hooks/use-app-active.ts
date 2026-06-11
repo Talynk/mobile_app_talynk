@@ -15,7 +15,15 @@ export function useAppActive() {
 
     try {
       blurSubscription = AppState.addEventListener('blur' as any, () => {
-        setIsAppActive(false);
+        // On Android, 'blur' fires for ANY window-focus loss — including opening
+        // our own <Modal> (the fullscreen competition/profile feed viewers). That
+        // false "inactive" signal tore down the active video player mid-load, so
+        // the first posts showed only a frozen frame. Only treat blur as inactive
+        // when the app is genuinely no longer active; real backgrounding is
+        // already reported by the 'change' event below.
+        if (AppState.currentState !== 'active') {
+          setIsAppActive(false);
+        }
       });
       focusSubscription = AppState.addEventListener('focus' as any, () => {
         setIsAppActive(AppState.currentState === 'active');

@@ -185,10 +185,10 @@ export default function ChallengeDetailScreen() {
     if (!viewableItems || viewableItems.length === 0) {
       return;
     }
-
-    const mostVisible = viewableItems.reduce((best: any, item: any) =>
-      item.isViewable && (!best || (item.percentVisible ?? 0) > (best.percentVisible ?? 0)) ? item : best,
-    null as any);
+    // Do NOT set the active index here. Viewability fires for every post that
+    // crosses the visibility threshold mid-scroll, which would thrash the player
+    // (mount/destroy before a frame renders). The active index is committed once
+    // per settled page in onIndexSettled (momentum end), exactly like For You.
     setIsFullscreenTransitioning(false);
   }).current;
   const fullscreenViewabilityConfig = useRef({
@@ -197,7 +197,7 @@ export default function ChallengeDetailScreen() {
   }).current;
   const {
     pageHeight: fullscreenPageHeight,
-    snapToOffsets: fullscreenSnapToOffsets,
+    snapToInterval: fullscreenSnapToInterval,
     getItemLayout: getFullscreenItemLayout,
     handleScroll: handleFullscreenPagerScroll,
     handleMomentumScrollEnd: handleFullscreenPagerMomentumEnd,
@@ -1923,7 +1923,11 @@ export default function ChallengeDetailScreen() {
             data={sortedPosts}
             renderItem={({ item, index }) => {
               const isActive = fullscreenPlayIndex === index;
-              const shouldPreload = shouldPreloadFeedVideo(index, fullscreenIndex);
+              // Anchor preload on the PLAY index (same var as isActive) on Android
+              // so a single `extraData={fullscreenPlayIndex}` re-renders cells with
+              // the correct active/preload state. Mirrors the working For You feed.
+              const preloadAnchor = Platform.OS === 'android' ? fullscreenPlayIndex : fullscreenIndex;
+              const shouldPreload = shouldPreloadFeedVideo(index, preloadAnchor);
               return (
                 <FullscreenFeedPostItem
                   item={item}
@@ -1949,8 +1953,11 @@ export default function ChallengeDetailScreen() {
               );
             }}
             keyExtractor={(item) => item.id}
-            snapToOffsets={fullscreenSnapToOffsets}
+            extraData={fullscreenPlayIndex}
+            pagingEnabled
+            snapToInterval={fullscreenSnapToInterval}
             snapToAlignment="start"
+            disableIntervalMomentum
             decelerationRate="fast"
             scrollEventThrottle={16}
             showsVerticalScrollIndicator={false}

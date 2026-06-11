@@ -29,6 +29,28 @@ type PrepareChallengePostsOptions = {
   preserveUnavailableVideos?: boolean;
 };
 
+/**
+ * A video post whose playback URL cannot be resolved yet (no HLS/processing
+ * fields) still needs detail enrichment EVEN IF it already has a thumbnail.
+ * Without this, challenge posts that arrive with only a poster image are never
+ * enriched, so `getPlaybackUrl` stays null and the feed shows a frozen
+ * thumbnail with no video. The For You feed never hits this because its posts
+ * already include the HLS fields.
+ */
+export function needsPlaybackUrlEnrichment(post: any): boolean {
+  const normalized = normalizePost(post) as any;
+  const isVideo =
+    normalized.type === 'video' ||
+    normalized.mediaType === 'video' ||
+    !!(normalized.video_url || normalized.videoUrl);
+
+  if (!isVideo) {
+    return false;
+  }
+
+  return !getPlaybackUrl(normalized);
+}
+
 export function hasRenderableChallengeMedia(post: any): boolean {
   const normalized = normalizePost(post);
   const isVideo =
@@ -129,6 +151,7 @@ export async function prepareRenderableChallengePosts(
     (post) =>
       needsRenderableMediaEnrichment(post) ||
       needsChallengeMetaEnrichment(post) ||
+      needsPlaybackUrlEnrichment(post) ||
       !hasRenderableChallengeMedia(post),
   );
 
