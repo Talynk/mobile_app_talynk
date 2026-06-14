@@ -9,6 +9,12 @@
     "scheme": "talentix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "linking": {
+      "prefixes": [
+        "https://talentix.net",
+        "talentix://"
+      ]
+    },
     "splash": {
       "image": "./assets/images/mobile-app-logo-1024.png",
       "resizeMode": "contain",
@@ -36,7 +42,25 @@
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.ACCESS_MEDIA_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO"
+        "android.permission.READ_MEDIA_VIDEO",
+        "com.android.vending.INSTALL_REFERRER"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "talentix.net",
+              "pathPrefix": "/v"
+            }
+          ]
+        }
       ]
     },
     "web": {

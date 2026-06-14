@@ -32,6 +32,7 @@ import { NotificationBadgeProvider } from '@/lib/notification-badge-context';
 import { useAuth } from '@/lib/auth-context';
 import { UploadNotificationService } from '@/lib/notification-service';
 import { initGlobalVideoPauseListener } from '@/lib/hooks/use-video-pause-on-blur';
+import { useShareDeepLink } from '@/lib/hooks/use-share-deep-link';
 import { IOS_STARTUP_FLAGS } from '@/lib/utils/ios-startup-flags';
 
 export {
@@ -300,6 +301,8 @@ function RootLayoutNav() {
       .finally(() => setOnboardingChecked(true));
   }, []);
 
+  useShareDeepLink({ enabled: onboardingChecked });
+
   // Initialize image cache (never crash app)
   useEffect(() => {
     try {
@@ -448,6 +451,7 @@ function RootLayoutNav() {
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="auth" options={{ headerShown: false }} />
                   <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
+                  <Stack.Screen name="v/[id]" options={{ headerShown: false, animation: 'fade' }} />
                   <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
                   <Stack.Screen name="profile-feed/[userId]" options={{ headerShown: false }} />
                   <Stack.Screen name="search" options={{ headerShown: false }} />

@@ -567,6 +567,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   index,
   onLike,
   onComment,
+  onShare,
   onReport,
   onFollow,
   onUnfollow,
@@ -587,7 +588,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   showBottomFooter = false,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
-  const [showShareComingSoonModal, setShowShareComingSoonModal] = useState(false);
   const isAppActive = useAppActive();
   const showBestButton = likesDuringChallenge !== undefined && likesDuringChallenge !== null;
   const { width: screenWidth } = useWindowDimensions();
@@ -697,7 +697,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
   // Watch all internal modal states — resume playback when they ALL close.
   const anyInternalModalOpen =
-    showUnfollowModal || showFollowLoginModal || showBestModal || showAppealModal || showShareComingSoonModal;
+    showUnfollowModal || showFollowLoginModal || showBestModal || showAppealModal;
   const prevModalOpenRef = useRef(false);
   useEffect(() => {
     if (anyInternalModalOpen) {
@@ -1889,7 +1889,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
 
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => setShowShareComingSoonModal(true)}
+            onPress={() => onShare(item.id)}
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
@@ -2044,31 +2044,6 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setShowFollowLoginModal(false)}>
               <Text style={styles.followLoginDismissText}>Not now</Text>
-            </TouchableOpacity>
-          </View>
-        </Pressable>
-      </Modal>
-
-      <Modal
-        visible={showShareComingSoonModal}
-        transparent
-        onRequestClose={() => setShowShareComingSoonModal(false)}
-      >
-        <Pressable style={styles.bestModalOverlay} onPress={() => setShowShareComingSoonModal(false)}>
-          <View style={styles.shareComingSoonModal}>
-            <View style={styles.shareComingSoonIconWrap}>
-              <Feather name="send" size={30} color="#60a5fa" />
-            </View>
-            <Text style={styles.shareComingSoonTitle}>Coming soon</Text>
-            <Text style={styles.shareComingSoonMessage}>
-              Sharing Talentix posts is being polished and will be available soon.
-            </Text>
-            <TouchableOpacity
-              style={styles.shareComingSoonButton}
-              onPress={() => setShowShareComingSoonModal(false)}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.shareComingSoonButtonText}>Got it</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
