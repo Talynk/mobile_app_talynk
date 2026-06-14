@@ -11,7 +11,7 @@
     "newArchEnabled": true,
     "linking": {
       "prefixes": [
-        "https://talentix.net",
+        "https://talentix.godetour.link",
         "talentix://"
       ]
     },
@@ -23,6 +23,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.ihirwe.talentix",
+      "associatedDomains": [
+        "applinks:talentix.godetour.link"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
       }
@@ -42,8 +45,7 @@
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.ACCESS_MEDIA_LOCATION",
         "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "com.android.vending.INSTALL_REFERRER"
+        "android.permission.READ_MEDIA_VIDEO"
       ],
       "intentFilters": [
         {
@@ -56,8 +58,8 @@
           "data": [
             {
               "scheme": "https",
-              "host": "talentix.net",
-              "pathPrefix": "/v"
+              "host": "talentix.godetour.link",
+              "pathPrefix": "/mIlEGaC9ru"
             }
           ]
         }
@@ -132,7 +134,8 @@
       ],
       "react-native-compressor",
       "react-native-vision-camera",
-      "./plugins/withUserLeaveHintGuard"
+      "./plugins/withUserLeaveHintGuard",
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true

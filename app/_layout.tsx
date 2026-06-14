@@ -32,8 +32,10 @@ import { NotificationBadgeProvider } from '@/lib/notification-badge-context';
 import { useAuth } from '@/lib/auth-context';
 import { UploadNotificationService } from '@/lib/notification-service';
 import { initGlobalVideoPauseListener } from '@/lib/hooks/use-video-pause-on-blur';
-import { useShareDeepLink } from '@/lib/hooks/use-share-deep-link';
+import { detourConfig } from '@/lib/detour-config';
 import { IOS_STARTUP_FLAGS } from '@/lib/utils/ios-startup-flags';
+import { DetourProvider } from '@swmansion/react-native-detour';
+import { DetourDeferredLinkHandler } from '@/components/DetourDeferredLinkHandler';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -301,8 +303,6 @@ function RootLayoutNav() {
       .finally(() => setOnboardingChecked(true));
   }, []);
 
-  useShareDeepLink({ enabled: onboardingChecked });
-
   // Initialize image cache (never crash app)
   useEffect(() => {
     try {
@@ -435,8 +435,10 @@ function RootLayoutNav() {
             <RealtimeProvider>
             <NotificationBadgeProvider>
             <CreateFocusProvider>
+            <DetourProvider config={detourConfig}>
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
+                <DetourDeferredLinkHandler />
                 <VideoReadyWatcher />
                 <NetworkBanner />
                 <SuspensionModal />
@@ -471,6 +473,7 @@ function RootLayoutNav() {
               </View>
               <StatusBar style="light" />
             </ThemeProvider>
+            </DetourProvider>
             </CreateFocusProvider>
             </NotificationBadgeProvider>
             </RealtimeProvider>
