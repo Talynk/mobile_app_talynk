@@ -48,6 +48,7 @@ import {
   VIDEO_FEED_WINDOW_SIZE,
 } from '@/lib/utils/video-feed';
 import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { useFeedPlaybackBlocked } from '@/lib/feed-playback-block';
 import {
   subscribeHomeFeedRefresh,
 } from '@/lib/home-feed-events';
@@ -142,6 +143,7 @@ export default function FeedScreen() {
   const { isCreateFocused } = useCreateFocus();
   const { isOffline } = useNetworkStatus();
   const isAppActive = useAppActive();
+  const feedPlaybackBlocked = useFeedPlaybackBlocked();
   const {
     followedUsers,
     followedUsersReady,
@@ -1158,7 +1160,7 @@ export default function FeedScreen() {
   ), [handleRefresh, isRefetching, pullRefreshing, renderSkeletonItem, verticalPageHeight]);
 
   const renderItem = useCallback(({ item, index }: { item: Post; index: number }) => {
-    const isActive = isScreenFocused && activePlayIndex === index;
+    const isActive = isScreenFocused && !feedPlaybackBlocked && activePlayIndex === index;
     const preloadAnchor = Platform.OS === 'android' ? activePlayIndex : currentIndex;
     const shouldPreload = shouldPreloadFeedVideo(index, preloadAnchor, { disabled: isCreateFocused });
 
@@ -1188,12 +1190,12 @@ export default function FeedScreen() {
         isFollowing={isFollowing}
         isFollowStateReady={!user || followedUsersReady || item.is_following_author === true}
         isActive={isActive}
-        suspendPlayback={commentsModalVisible || reportModalVisible}
+        suspendPlayback={commentsModalVisible || reportModalVisible || feedPlaybackBlocked}
         shouldPreload={shouldPreload}
         availableHeight={verticalPageHeight}
       />
     );
-  }, [activePlayIndex, activeTab, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
+  }, [activePlayIndex, activeTab, feedPlaybackBlocked, isScreenFocused, currentIndex, isCreateFocused, likedPosts, followedUsers, userFollowStatus, commentsModalVisible, reportModalVisible, handleLike, handleComment, handleShare, handleReport, handleFollow, handleUnfollow, verticalPageHeight]);
 
   const renderListFooter = useCallback(() => {
     if (isFetchingNextPage) {

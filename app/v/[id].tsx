@@ -1,60 +1,73 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Image,
-  Platform,
-  Pressable,
+  Alert,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import CommentsModal from '@/components/CommentsModal';
+import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
+import ReportModal from '@/components/ReportModal';
+import { useAuth } from '@/lib/auth-context';
+import { useCache } from '@/lib/cache-context';
+import { setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
+import {
+  prefetchFollowingFeed,
+  removeUserFromFollowingFeedCache,
+  seedFollowingFeedCache,
+} from '@/lib/following-feed-cache';
 import { useAppActive } from '@/lib/hooks/use-app-active';
-import { enterPlaybackMode } from '@/lib/media/audio-session';
-import { getPostDetailCached } from '@/lib/post-details-cache';
-import { getPlaybackUrl, getThumbnailUrl } from '@/lib/utils/file-url';
-import { getVideoSource } from '@/lib/utils/video-source';
+import { useSharedVideoPlaybackIsolation } from '@/lib/hooks/use-shared-video-playback-isolation';
+import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { followsApi, likesApi } from '@/lib/api';
+import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
+import { sharePost } from '@/lib/post-share';
+import { useAppDispatch, useAppSelector } from '@/lib/store/hooks';
+import { addLikedPost, removeLikedPost, setPostLikeCount } from '@/lib/store/slices/likesSlice';
+import { Post } from '@/types';
 
 export default function SharedPostScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const postId = typeof id === 'string' ? id : '';
   const insets = useSafeAreaInsets();
+  const { height: screenHeight } = useWindowDimensions();
   const isAppActive = useAppActive();
+  const { user } = useAuth();
+  const dispatch = useAppDispatch();
+  const likedPosts = useAppSelector((state) => state.likes.likedPosts);
+  const postLikeCounts = useAppSelector((state) => state.likes.postLikeCounts);
+  const { followedUsers, followedUsersReady, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
 
-  const [post, setPost] = useState<any>(null);
+  useSharedVideoPlaybackIsolation();
+
+  const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [videoReady, setVideoReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const pauseIndicatorOpacity = useRef(new Animated.Value(0)).current;
+  const [isScreenFocused, setIsScreenFocused] = useState(false);
+  const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [commentsModalVisible, setCommentsModalVisible] = useState(false);
+  const [commentsPostId, setCommentsPostId] = useState<string | null>(null);
+  const [commentsPostTitle, setCommentsPostTitle] = useState('');
+  const [commentsPostAuthor, setCommentsPostAuthor] = useState('');
+  const [commentsPostOwnerId, setCommentsPostOwnerId] = useState<string | undefined>(undefined);
 
-  const playbackUrl = post ? getPlaybackUrl(post) : null;
-  const isVideo = post?.type === 'video' || !!playbackUrl;
-  const thumbnailUrl = post ? getThumbnailUrl(post) : null;
-  const videoSource = isVideo && playbackUrl ? getVideoSource(playbackUrl) : null;
-
-  const player = useVideoPlayer(videoSource, (createdPlayer) => {
-    try {
-      createdPlayer.loop = true;
-      createdPlayer.muted = false;
-      createdPlayer.staysActiveInBackground = false;
-      createdPlayer.timeUpdateEventInterval = 0.25;
-      createdPlayer.pause();
-    } catch (_) {}
-  });
-
-  const handleClose = useCallback(() => {
-    try {
-      player?.pause();
-    } catch (_) {}
-    router.replace('/(tabs)' as any);
-  }, [player]);
+  useFocusEffect(
+    useCallback(() => {
+      setIsScreenFocused(true);
+      return () => {
+        setIsScreenFocused(false);
+      };
+    }, []),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -76,7 +89,8 @@ export default function SharedPostScreen() {
           setError('This video is no longer available.');
           setPost(null);
         } else {
-          setPost(cachedPost);
+          primePostDetailsCache([cachedPost]);
+          setPost(cachedPost as Post);
         }
       } catch (_) {
         if (!cancelled) {
@@ -95,61 +109,190 @@ export default function SharedPostScreen() {
     };
   }, [postId]);
 
-  useEffect(() => {
-    if (!player || !videoSource || !isAppActive || !isVideo) return;
+  const handleClose = useCallback(() => {
+    pauseAllVideos();
+    setFeedPlaybackBlocked(false);
+    router.replace('/(tabs)' as any);
+  }, []);
 
-    void enterPlaybackMode();
-    try {
-      player.play();
-      setIsPlaying(true);
-      setVideoReady(true);
-    } catch (_) {}
+  const handleLike = useCallback(async (targetPostId: string) => {
+    if (!post || targetPostId !== post.id) {
+      return;
+    }
 
-    return () => {
-      try {
-        player.pause();
-      } catch (_) {}
-    };
-  }, [isAppActive, isVideo, player, videoSource]);
+    if (!user) {
+      Alert.alert(
+        'Login Required',
+        'Please log in or sign up to like posts.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign Up', onPress: () => router.push({ pathname: '/auth/register' as any }) },
+          { text: 'Login', onPress: () => router.push({ pathname: '/auth/login' as any }) },
+        ],
+      );
+      return;
+    }
 
-  useEffect(() => {
-    if (!player) return;
+    const currentIsLiked = likedPosts.includes(targetPostId) || post.is_liked === true;
+    const currentCount = postLikeCounts[targetPostId] ?? post.like_count ?? post.likes ?? 0;
+    const newIsLiked = !currentIsLiked;
+    const newCount = newIsLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
 
-    const playingSub = player.addListener('playingChange', (event: { isPlaying: boolean }) => {
-      setIsPlaying(event.isPlaying);
-      if (event.isPlaying) {
-        setVideoReady(true);
-      }
+    if (newIsLiked) dispatch(addLikedPost(targetPostId));
+    else dispatch(removeLikedPost(targetPostId));
+    dispatch(setPostLikeCount({ postId: targetPostId, count: newCount }));
+
+    setPost((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        is_liked: newIsLiked,
+        like_count: newCount,
+        likes: newCount,
+      };
     });
 
-    return () => {
-      try {
-        playingSub.remove();
-      } catch (_) {}
-    };
-  }, [player]);
-
-  const handleTapToPause = useCallback(() => {
-    if (!player) return;
     try {
-      if (player.playing) {
-        player.pause();
-        Animated.timing(pauseIndicatorOpacity, {
-          toValue: 1,
-          duration: 120,
-          useNativeDriver: true,
-        }).start();
-      } else {
-        void enterPlaybackMode();
-        player.play();
-        Animated.timing(pauseIndicatorOpacity, {
-          toValue: 0,
-          duration: 120,
-          useNativeDriver: true,
-        }).start();
+      const response = await likesApi.toggle(targetPostId);
+      if (response.status !== 'success') {
+        if (currentIsLiked) dispatch(addLikedPost(targetPostId));
+        else dispatch(removeLikedPost(targetPostId));
+        dispatch(setPostLikeCount({ postId: targetPostId, count: currentCount }));
+        setPost((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            is_liked: currentIsLiked,
+            like_count: currentCount,
+            likes: currentCount,
+          };
+        });
       }
+    } catch (_) {
+      if (currentIsLiked) dispatch(addLikedPost(targetPostId));
+      else dispatch(removeLikedPost(targetPostId));
+      dispatch(setPostLikeCount({ postId: targetPostId, count: currentCount }));
+      setPost((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          is_liked: currentIsLiked,
+          like_count: currentCount,
+          likes: currentCount,
+        };
+      });
+    }
+  }, [dispatch, likedPosts, post, postLikeCounts, user]);
+
+  const handleComment = useCallback((targetPostId: string) => {
+    if (!post || targetPostId !== post.id) {
+      return;
+    }
+
+    setCommentsPostId(targetPostId);
+    setCommentsPostTitle(post.title || post.description || '');
+    setCommentsPostAuthor(post.user?.username || '');
+    setCommentsPostOwnerId(post.user?.id);
+    setCommentsModalVisible(true);
+  }, [post]);
+
+  const handleShare = useCallback(async (targetPostId: string) => {
+    if (!post || targetPostId !== post.id) {
+      return;
+    }
+
+    try {
+      await sharePost(post);
     } catch (_) {}
-  }, [pauseIndicatorOpacity, player]);
+  }, [post]);
+
+  const handleReport = useCallback((targetPostId: string) => {
+    if (!post || targetPostId !== post.id) {
+      return;
+    }
+
+    if (!user) {
+      router.push({ pathname: '/auth/login' as any });
+      return;
+    }
+
+    setReportModalVisible(true);
+  }, [post, user]);
+
+  const handleFollow = useCallback(async (targetUserId: string) => {
+    if (!user || !post) {
+      return;
+    }
+
+    setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: true }));
+    seedFollowingFeedCache(user.id, targetUserId, [post]);
+    updateFollowedUsers(targetUserId, true);
+
+    try {
+      const response = await followsApi.follow(targetUserId);
+      if (response.status !== 'success') {
+        updateFollowedUsers(targetUserId, false);
+        setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: false }));
+        removeUserFromFollowingFeedCache(user.id, targetUserId);
+      } else {
+        void syncFollowedUsersFromServer();
+        void prefetchFollowingFeed(user.id);
+      }
+    } catch (_) {
+      updateFollowedUsers(targetUserId, false);
+      setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: false }));
+      removeUserFromFollowingFeedCache(user.id, targetUserId);
+    }
+  }, [post, syncFollowedUsersFromServer, updateFollowedUsers, user]);
+
+  const handleUnfollow = useCallback(async (targetUserId: string) => {
+    if (!user) {
+      return;
+    }
+
+    setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: false }));
+    removeUserFromFollowingFeedCache(user.id, targetUserId);
+    updateFollowedUsers(targetUserId, false);
+
+    try {
+      const response = await followsApi.unfollow(targetUserId);
+      if (response.status !== 'success') {
+        updateFollowedUsers(targetUserId, true);
+        setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: true }));
+      } else {
+        void syncFollowedUsersFromServer();
+      }
+    } catch (_) {
+      updateFollowedUsers(targetUserId, true);
+      setUserFollowStatus((prev) => ({ ...prev, [targetUserId]: true }));
+    }
+  }, [syncFollowedUsersFromServer, updateFollowedUsers, user]);
+
+  const handleCommentAdded = useCallback(() => {
+    if (!post) return;
+    setPost((prev) => {
+      if (!prev) return prev;
+      const nextCount = (prev.comments_count || prev.comment_count || 0) + 1;
+      return {
+        ...prev,
+        comments_count: nextCount,
+        comment_count: nextCount,
+      };
+    });
+  }, [post]);
+
+  const handleCommentDeleted = useCallback(() => {
+    if (!post) return;
+    setPost((prev) => {
+      if (!prev) return prev;
+      const nextCount = Math.max(0, (prev.comments_count || prev.comment_count || 0) - 1);
+      return {
+        ...prev,
+        comments_count: nextCount,
+        comment_count: nextCount,
+      };
+    });
+  }, [post]);
 
   if (loading) {
     return (
@@ -171,50 +314,73 @@ export default function SharedPostScreen() {
     );
   }
 
+  const targetUserId = post.user?.id || (post as any).user_id || (post as any).userId || '';
+  const optimisticFollowStatus = targetUserId ? userFollowStatus[targetUserId] : undefined;
+  const cachedFollowStatus = targetUserId ? followedUsers.has(targetUserId) : false;
+  const isFollowing = optimisticFollowStatus !== undefined
+    ? optimisticFollowStatus
+    : (cachedFollowStatus || post.is_following_author === true);
+  const isLiked = likedPosts.includes(post.id) || post.is_liked === true;
+  const isActive = isScreenFocused && isAppActive && !commentsModalVisible && !reportModalVisible;
+  const availableHeight = Math.max(0, screenHeight);
+
   return (
     <View style={styles.container}>
-      <Pressable style={styles.mediaPressable} onPress={handleTapToPause}>
-        {thumbnailUrl ? (
-          <Image
-            source={{ uri: thumbnailUrl }}
-            style={[styles.media, { opacity: isPlaying && videoReady ? 0 : 1 }]}
-            resizeMode="cover"
-          />
-        ) : null}
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-        {player && videoSource ? (
-          <View pointerEvents="none" style={styles.videoLayer}>
-            <VideoView
-              player={player}
-              style={styles.media}
-              contentFit="cover"
-              nativeControls={false}
-              useExoShutter={Platform.OS === 'android'}
-            />
-          </View>
-        ) : null}
+      <FullscreenFeedPostItem
+        item={post}
+        index={0}
+        onLike={handleLike}
+        onComment={handleComment}
+        onShare={handleShare}
+        onReport={handleReport}
+        onFollow={handleFollow}
+        onUnfollow={handleUnfollow}
+        isLiked={isLiked}
+        isFollowing={isFollowing}
+        isFollowStateReady={!user || followedUsersReady || post.is_following_author === true}
+        isActive={isActive}
+        suspendPlayback={commentsModalVisible || reportModalVisible}
+        shouldPreload
+        availableHeight={availableHeight}
+      />
 
-        <Animated.View style={[styles.pauseIndicator, { opacity: pauseIndicatorOpacity }]} pointerEvents="none">
-          <Feather name="play" size={48} color="rgba(255,255,255,0.95)" />
-        </Animated.View>
-      </Pressable>
-
-      <SafeAreaView style={styles.overlay} pointerEvents="box-none">
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
-          <TouchableOpacity style={styles.closeButton} onPress={handleClose} hitSlop={12}>
-            <Feather name="x" size={28} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <Text style={styles.username}>@{post.user?.username || post.user?.name || 'unknown'}</Text>
-          {(post.caption || post.description || post.title) ? (
-            <Text style={styles.caption} numberOfLines={3}>
-              {post.caption || post.description || post.title}
-            </Text>
-          ) : null}
-        </View>
+      <SafeAreaView style={styles.closeOverlay} pointerEvents="box-none">
+        <TouchableOpacity
+          style={[styles.closeButton, { marginTop: Math.max(insets.top, 8) }]}
+          onPress={handleClose}
+          hitSlop={12}
+          accessibilityLabel="Close shared video"
+          accessibilityRole="button"
+        >
+          <Feather name="x" size={28} color="#fff" />
+        </TouchableOpacity>
       </SafeAreaView>
+
+      <ReportModal
+        isVisible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        postId={post.id}
+        onReported={() => {
+          setReportModalVisible(false);
+          Alert.alert('Reported', 'Thank you for reporting this content. We will review it shortly.');
+        }}
+      />
+
+      <CommentsModal
+        visible={commentsModalVisible && !!commentsPostId}
+        onClose={() => {
+          setCommentsModalVisible(false);
+          setTimeout(() => setCommentsPostId(null), 300);
+        }}
+        postId={commentsPostId || post.id}
+        postTitle={commentsPostTitle}
+        postAuthor={commentsPostAuthor}
+        postOwnerId={commentsPostOwnerId}
+        onCommentAdded={handleCommentAdded}
+        onCommentDeleted={handleCommentDeleted}
+      />
     </View>
   );
 }
@@ -231,21 +397,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  mediaPressable: {
+  closeOverlay: {
     ...StyleSheet.absoluteFillObject,
-  },
-  media: {
-    width: '100%',
-    height: '100%',
-  },
-  videoLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-  },
-  header: {
+    alignItems: 'flex-start',
     paddingHorizontal: 16,
   },
   closeButton: {
@@ -255,25 +409,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  footer: {
-    paddingHorizontal: 16,
-  },
-  username: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  caption: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  pauseIndicator: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   errorTitle: {
     color: '#fff',
