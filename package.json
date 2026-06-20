@@ -7,6 +7,8 @@
     "android": "expo run:android",
     "android:device": "powershell -ExecutionPolicy Bypass -File scripts/run-android-device.ps1",
     "android:pixel": "powershell -ExecutionPolicy Bypass -File scripts/run-android-device.ps1 -Device Pixel_10_Pro_Fold",
+    "android:open-shared-link": "bash scripts/run-android-shared-link.sh",
+    "android:open-shared-link:adb": "bash scripts/open-shared-link-android.sh",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest --watchAll",

@@ -2,8 +2,7 @@ import { useEffect } from 'react';
 import { useDetourContext } from '@swmansion/react-native-detour';
 import { router } from 'expo-router';
 
-import { setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
-import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { burstPauseFeedVideos, setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
 
 /**
  * Navigates to the matched route after a deferred deep link (post-install first open).
@@ -18,7 +17,7 @@ export function DetourDeferredLinkHandler() {
     }
 
     setFeedPlaybackBlocked(true);
-    pauseAllVideos();
+    burstPauseFeedVideos();
     router.replace({
       pathname: link.pathname as any,
       params: link.params,

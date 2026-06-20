@@ -1,28 +1,25 @@
 import { useCallback, useLayoutEffect } from 'react';
 import { useFocusEffect } from 'expo-router';
 
-import { setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
-import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
+import { burstPauseFeedVideos } from '@/lib/feed-playback-block';
 
 /**
- * Mutes/pauses background feed players while a shared-video screen is visible.
+ * Extra pause bursts while the shared-video screen is focused.
+ * Route blocking is handled globally by FeedPlaybackRouteGuard.
  */
 export function useSharedVideoPlaybackIsolation() {
   useLayoutEffect(() => {
-    setFeedPlaybackBlocked(true);
-    pauseAllVideos();
+    burstPauseFeedVideos();
     return () => {
-      setFeedPlaybackBlocked(false);
+      burstPauseFeedVideos();
     };
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      setFeedPlaybackBlocked(true);
-      pauseAllVideos();
+      burstPauseFeedVideos();
       return () => {
-        setFeedPlaybackBlocked(false);
-        pauseAllVideos();
+        burstPauseFeedVideos();
       };
     }, []),
   );

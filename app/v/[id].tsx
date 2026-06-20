@@ -18,7 +18,7 @@ import FullscreenFeedPostItem from '@/components/FullscreenFeedPostItem';
 import ReportModal from '@/components/ReportModal';
 import { useAuth } from '@/lib/auth-context';
 import { useCache } from '@/lib/cache-context';
-import { setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
+import { burstPauseFeedVideos } from '@/lib/feed-playback-block';
 import {
   prefetchFollowingFeed,
   removeUserFromFollowingFeedCache,
@@ -26,7 +26,6 @@ import {
 } from '@/lib/following-feed-cache';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { useSharedVideoPlaybackIsolation } from '@/lib/hooks/use-shared-video-playback-isolation';
-import { pauseAllVideos } from '@/lib/hooks/use-video-pause-on-blur';
 import { followsApi, likesApi } from '@/lib/api';
 import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { sharePost } from '@/lib/post-share';
@@ -110,8 +109,7 @@ export default function SharedPostScreen() {
   }, [postId]);
 
   const handleClose = useCallback(() => {
-    pauseAllVideos();
-    setFeedPlaybackBlocked(false);
+    burstPauseFeedVideos();
     router.replace('/(tabs)' as any);
   }, []);
 

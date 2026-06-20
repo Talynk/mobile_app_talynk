@@ -36,6 +36,8 @@ import { detourConfig } from '@/lib/detour-config';
 import { IOS_STARTUP_FLAGS } from '@/lib/utils/ios-startup-flags';
 import { DetourProvider } from '@swmansion/react-native-detour';
 import { DetourDeferredLinkHandler } from '@/components/DetourDeferredLinkHandler';
+import { FeedPlaybackRouteGuard } from '@/components/FeedPlaybackRouteGuard';
+import { SharedVideoLinkListener } from '@/components/SharedVideoLinkListener';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -439,6 +441,8 @@ function RootLayoutNav() {
             <ThemeProvider value={theme}>
               <View style={{ flex: 1 }}>
                 <DetourDeferredLinkHandler />
+                <FeedPlaybackRouteGuard />
+                <SharedVideoLinkListener />
                 <VideoReadyWatcher />
                 <NetworkBanner />
                 <SuspensionModal />
@@ -450,10 +454,10 @@ function RootLayoutNav() {
                   }}
                 >
                   <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false, freezeOnBlur: true }} />
                   <Stack.Screen name="auth" options={{ headerShown: false }} />
                   <Stack.Screen name="post/[id]" options={{ headerShown: false }} />
-                  <Stack.Screen name="v/[id]" options={{ headerShown: false, animation: 'fade' }} />
+                  <Stack.Screen name="v/[id]" options={{ headerShown: false, animation: 'fade', freezeOnBlur: true }} />
                   <Stack.Screen name="user/[id]" options={{ headerShown: false }} />
                   <Stack.Screen name="profile-feed/[userId]" options={{ headerShown: false }} />
                   <Stack.Screen name="search" options={{ headerShown: false }} />
