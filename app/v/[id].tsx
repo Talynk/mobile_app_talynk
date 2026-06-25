@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,8 @@ import {
 } from '@/lib/following-feed-cache';
 import { useAppActive } from '@/lib/hooks/use-app-active';
 import { useSharedVideoPlaybackIsolation } from '@/lib/hooks/use-shared-video-playback-isolation';
+import { enterSharedVideoPlaybackMode } from '@/lib/media/audio-session';
+import { useMute } from '@/lib/mute-context';
 import { followsApi, likesApi } from '@/lib/api';
 import { getPostDetailCached, primePostDetailsCache } from '@/lib/post-details-cache';
 import { sharePost } from '@/lib/post-share';
@@ -44,13 +46,19 @@ export default function SharedPostScreen() {
   const likedPosts = useAppSelector((state) => state.likes.likedPosts);
   const postLikeCounts = useAppSelector((state) => state.likes.postLikeCounts);
   const { followedUsers, followedUsersReady, updateFollowedUsers, syncFollowedUsersFromServer } = useCache();
+  const { setMuted } = useMute();
 
   useSharedVideoPlaybackIsolation();
+
+  useLayoutEffect(() => {
+    setMuted(false);
+    void enterSharedVideoPlaybackMode();
+  }, [setMuted]);
 
   const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isScreenFocused, setIsScreenFocused] = useState(false);
+  const [isScreenFocused, setIsScreenFocused] = useState(true);
   const [userFollowStatus, setUserFollowStatus] = useState<Record<string, boolean>>({});
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -341,6 +349,7 @@ export default function SharedPostScreen() {
         isActive={isActive}
         suspendPlayback={commentsModalVisible || reportModalVisible}
         shouldPreload
+        ensureAudibleAutoplay
         availableHeight={availableHeight}
       />
 

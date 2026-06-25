@@ -3,6 +3,7 @@ import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 
 import { burstPauseFeedVideos, setFeedPlaybackBlocked } from '@/lib/feed-playback-block';
+import { enterSharedVideoPlaybackMode } from '@/lib/media/audio-session';
 import { normalizeSharedVideoRoute } from '@/lib/shared-video-route';
 
 /**
@@ -19,6 +20,7 @@ export function SharedVideoLinkListener() {
 
       setFeedPlaybackBlocked(true);
       burstPauseFeedVideos();
+      void enterSharedVideoPlaybackMode();
       router.replace(route as any);
     };
 

@@ -9,11 +9,13 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 interface MuteContextType {
     isMuted: boolean;
     toggleMute: () => boolean; // Returns new muted state
+    setMuted: (muted: boolean) => void;
 }
 
 const MuteContext = createContext<MuteContextType>({
     isMuted: false,
     toggleMute: () => false,
+    setMuted: () => {},
 });
 
 export const MuteProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -28,8 +30,12 @@ export const MuteProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return newVal;
     }, []);
 
+    const setMuted = useCallback((muted: boolean) => {
+        setIsMuted(muted);
+    }, []);
+
     return (
-        <MuteContext.Provider value={{ isMuted, toggleMute }}>
+        <MuteContext.Provider value={{ isMuted, toggleMute, setMuted }}>
             {children}
         </MuteContext.Provider>
     );

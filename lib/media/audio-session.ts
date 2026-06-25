@@ -1,9 +1,9 @@
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 
-let lastMode: 'playback' | 'recording' | 'inactive' | null = null;
+let lastMode: 'playback' | 'recording' | 'inactive' | 'shared-playback' | null = null;
 
 async function setMode(
-  nextMode: 'playback' | 'recording' | 'inactive',
+  nextMode: 'playback' | 'recording' | 'inactive' | 'shared-playback',
   config: Parameters<typeof Audio.setAudioModeAsync>[0],
 ) {
   if (lastMode === nextMode) {
@@ -23,6 +23,19 @@ export async function enterPlaybackMode() {
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
     shouldDuckAndroid: false,
+    playThroughEarpieceAndroid: false,
+    staysActiveInBackground: false,
+  });
+}
+
+/** Exclusive audio focus for shared deep-link playback (Samsung / OEM-safe). */
+export async function enterSharedVideoPlaybackMode() {
+  await setMode('shared-playback', {
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+    interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+    shouldDuckAndroid: false,
+    interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
     playThroughEarpieceAndroid: false,
     staysActiveInBackground: false,
   });

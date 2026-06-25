@@ -39,7 +39,7 @@ import { getChallengeVideoStatusLabel } from '@/lib/utils/challenge-post-visibil
 import { getCategoryDisplayName } from '@/lib/utils/category-display';
 import { registerVideoPauser } from '@/lib/hooks/use-video-pause-on-blur';
 import { addFabricBreadcrumb, captureFabricError } from '@/lib/utils/fabric-diagnostics';
-import { enterPlaybackMode } from '@/lib/media/audio-session';
+import { enterPlaybackMode, enterSharedVideoPlaybackMode } from '@/lib/media/audio-session';
 import { feedTelemetry } from '@/lib/feed-telemetry';
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 let mountedFeedPlayerCount = 0;
@@ -560,6 +560,8 @@ export interface FullscreenFeedPostItemProps {
   bottomOverlayOffset?: number;
   bottomFooterHeight?: number;
   showBottomFooter?: boolean;
+  /** Shared deep-link screen: always start audible + retry autoplay on picky OEMs. */
+  ensureAudibleAutoplay?: boolean;
 }
 
 const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
@@ -586,6 +588,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   bottomOverlayOffset = 0,
   bottomFooterHeight = 0,
   showBottomFooter = false,
+  ensureAudibleAutoplay = false,
 }) => {
   const [showBestModal, setShowBestModal] = useState(false);
   const isAppActive = useAppActive();
@@ -627,6 +630,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
   const [imageError, setImageError] = useState(false);
   const [usingImageFallback, setUsingImageFallback] = useState(false);
   const { isMuted, toggleMute } = useMute();
+  const playbackMuted = ensureAudibleAutoplay ? false : isMuted;
   const [videoError, setVideoError] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
   const [firstFrameRendered, setFirstFrameRendered] = useState(false);
@@ -689,11 +693,11 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       const ctrl = videoControllerRef.current;
       if (!ctrl || !playerValidRef.current) return;
       try {
-        ctrl.setMuted(isMuted);
+        ctrl.setMuted(playbackMuted);
         ctrl.play();
       } catch (_) {}
     }, 150);
-  }, [decoderErrorDetected, isActive, isAppActive, isMuted, pausedByUser, suspendPlayback]);
+  }, [decoderErrorDetected, isActive, isAppActive, playbackMuted, pausedByUser, suspendPlayback]);
 
   // Watch all internal modal states — resume playback when they ALL close.
   const anyInternalModalOpen =
@@ -790,7 +794,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     (isActive || shouldPreload) &&
     !videoError;
   const shouldMountVideoPlayer = shouldLoadVideo;
-  const shouldMuteVideo = isMuted;
+  const shouldMuteVideo = playbackMuted;
   const directVideoPlayerSource = React.useMemo(
     () => playbackUrl
       ? {
@@ -830,7 +834,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     lastPlaybackTimeRef.current = 0;
     lastSyncedProgressTimeRef.current = 0;
 
-    void enterPlaybackMode();
+    void (ensureAudibleAutoplay ? enterSharedVideoPlaybackMode() : enterPlaybackMode());
 
     const controller = videoControllerRef.current;
 
@@ -851,7 +855,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
       pendingPlayRef.current = false;
       try {
         seekToStartIfNeeded();
-        controller.setMuted(isMuted);
+        controller.setMuted(playbackMuted);
+        if (!playbackMuted && (controller as any).setVolume) {
+          try {
+            (controller as any).setVolume(1);
+          } catch (_) {}
+        }
         controller.play();
       } catch (_) {
         pendingPlayRef.current = true;
@@ -863,9 +872,10 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     return true;
   }, [
     decoderErrorDetected,
+    ensureAudibleAutoplay,
     isActive,
     isAppActive,
-    isMuted,
+    playbackMuted,
     isVideo,
     pausedByUser,
     scrubProgress,
@@ -1059,7 +1069,12 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
             controller.seekTo(0);
             lastSyncedProgressTimeRef.current = 0;
           }
-          controller.setMuted(isMuted);
+          controller.setMuted(playbackMuted);
+          if (!playbackMuted && (controller as any).setVolume) {
+            try {
+              (controller as any).setVolume(1);
+            } catch (_) {}
+          }
           controller.play();
           pendingPlayRef.current = false;
         } catch (_) {
@@ -1091,7 +1106,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
         !decoderErrorDetected
       ) {
         try {
-          controller.setMuted(isMuted);
+          controller.setMuted(playbackMuted);
           controller.play();
         } catch (_) {
           lastStartedPlaybackGenerationRef.current = -1;
@@ -1132,7 +1147,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     decoderErrorDetected,
     isActive,
     isAppActive,
-    isMuted,
+    playbackMuted,
     isVideo,
     pausedByUser,
     playbackGeneration,
@@ -1163,7 +1178,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     }
 
     lastStartedPlaybackGenerationRef.current = playbackGeneration;
-    void enterPlaybackMode();
+    void (ensureAudibleAutoplay ? enterSharedVideoPlaybackMode() : enterPlaybackMode());
     startActivePlayback();
   }, [
     canMountVideoPlayer,
@@ -1174,6 +1189,53 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
     isVideo,
     pausedByUser,
     playbackGeneration,
+    ensureAudibleAutoplay,
+    startActivePlayback,
+    suspendPlayback,
+  ]);
+
+  // Shared deep links: some Samsung/OEM builds need repeated audible-autoplay kicks.
+  useEffect(() => {
+    if (!ensureAudibleAutoplay || !isVideo || !isActive || pausedByUser || suspendPlayback || !isAppActive) {
+      return;
+    }
+
+    const retryDelaysMs = [0, 250, 600, 1200, 2000];
+    const timeoutIds = retryDelaysMs.map((delayMs) => setTimeout(() => {
+      if (!isMountedRef.current || !isActive || pausedByUser || suspendPlayback || !isAppActive) {
+        return;
+      }
+
+      void enterSharedVideoPlaybackMode();
+      const controller = videoControllerRef.current;
+      if (!controller || !playerValidRef.current) {
+        startActivePlayback();
+        return;
+      }
+
+      try {
+        controller.setMuted(false);
+        if ((controller as any).setVolume) {
+          (controller as any).setVolume(1);
+        }
+        if (!controller.isPlaying?.()) {
+          controller.play();
+        }
+      } catch (_) {
+        startActivePlayback();
+      }
+    }, delayMs));
+
+    return () => {
+      timeoutIds.forEach((timeoutId) => clearTimeout(timeoutId));
+    };
+  }, [
+    ensureAudibleAutoplay,
+    isActive,
+    isAppActive,
+    isPlayerValid,
+    isVideo,
+    pausedByUser,
     startActivePlayback,
     suspendPlayback,
   ]);
@@ -1338,13 +1400,18 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
               controller.seekTo(0);
               lastSyncedProgressTimeRef.current = 0;
             }
-            controller.setMuted(isMuted);
+            controller.setMuted(playbackMuted);
+            if (!playbackMuted && (controller as any).setVolume) {
+              try {
+                (controller as any).setVolume(1);
+              } catch (_) {}
+            }
             controller.play();
           } catch (_) {}
         }
       }
     }
-  }, [decoderErrorDetected, index, isActive, isAppActive, isMuted, isVideo, item.id, pausedByUser, preferDirectVideoSource, shouldLoadVideo, suspendPlayback, videoSourceMode]);
+  }, [decoderErrorDetected, index, isActive, isAppActive, playbackMuted, isVideo, item.id, pausedByUser, preferDirectVideoSource, shouldLoadVideo, suspendPlayback, videoSourceMode]);
 
   const handleNativeTimeUpdate = useCallback((payload: { currentTime: number; duration: number }) => {
     if (!isMountedRef.current) {
@@ -1803,7 +1870,7 @@ const FullscreenFeedPostItem: React.FC<FullscreenFeedPostItemProps> = ({
                 onPress={handleMuteToggle}
                 activeOpacity={0.8}
               >
-                <Feather name={isMuted ? 'volume-x' : 'volume-2'} size={22} color="rgba(255,255,255,0.9)" />
+                <Feather name={(ensureAudibleAutoplay || !isMuted) ? 'volume-2' : 'volume-x'} size={22} color="rgba(255,255,255,0.9)" />
               </TouchableOpacity>
             </Pressable>
           </>
@@ -2134,6 +2201,7 @@ function arePropsEqual(prev: FullscreenFeedPostItemProps, next: FullscreenFeedPo
     prev.isFollowing === next.isFollowing &&
     (prev.isFollowStateReady ?? true) === (next.isFollowStateReady ?? true) &&
     (prev.suspendPlayback ?? false) === (next.suspendPlayback ?? false) &&
+    (prev.ensureAudibleAutoplay ?? false) === (next.ensureAudibleAutoplay ?? false) &&
     prev.availableHeight === next.availableHeight &&
     (prev.showReportButton ?? true) === (next.showReportButton ?? true) &&
     (prev.likesDuringChallenge ?? -1) === (next.likesDuringChallenge ?? -1) &&
