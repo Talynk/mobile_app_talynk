@@ -53,12 +53,16 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Allow Talentix to access your camera to record videos and take photos.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Talentix uses your approximate location to suggest your country during registration and improve regional content recommendations. Location is not tracked in the background.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow Talentix to access your microphone to record audio with your videos.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Allow Talentix to save photos and videos to your library.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow Talentix to save photos and videos to your library.</string>
+    <string>Allow Talentix to access your photos and videos so you can upload content.</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

@@ -27,7 +27,17 @@
         "applinks:talentix.godetour.link"
       ],
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera"
+        "NSCameraUsageDescription": "Allow Talentix to access your camera to record videos and take photos.",
+        "NSMicrophoneUsageDescription": "Allow Talentix to access your microphone to record audio with your videos.",
+        "NSPhotoLibraryUsageDescription": "Allow Talentix to access your photos and videos so you can upload content.",
+        "NSPhotoLibraryAddUsageDescription": "Allow Talentix to save photos and videos to your library.",
+        "NSLocationWhenInUseUsageDescription": "Talentix uses your approximate location to suggest your country during registration and improve regional content recommendations. Location is not tracked in the background.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.associated-domains": [
+          "applinks:talentix.godetour.link"
+        ]
       }
     },
     "android": {

@@ -34,5 +34,14 @@
         "buildType": "app-bundle"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6784162235",
+        "appleId": "greenlandscapecompany@gmail.com",
+        "appleTeamId": "JRY2D7Y76N"
+      }
+    }
   }
 }
