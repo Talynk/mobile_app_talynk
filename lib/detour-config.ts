@@ -4,6 +4,10 @@ import type { Config } from '@swmansion/react-native-detour';
 export const DETOUR_HOST = 'talentix.godetour.link';
 export const DETOUR_APP_HASH = 'mIlEGaC9ru';
 
+/** Google Play App Signing SHA-256 (not the EAS upload key). Required in Detour dashboard. */
+export const ANDROID_PLAY_SIGNING_SHA256 =
+  '3A:E9:0E:D7:CB:AD:E4:22:DF:26:EC:23:C9:99:B6:EC:22:C3:47:F8:65:5F:5E:53:1E:70:B3:17:97:0C:12:F7';
+
 export const DETOUR_DEFERRED_LINK_BASE = `https://${DETOUR_HOST}/${DETOUR_APP_HASH}`;
 
 const apiKey = process.env.EXPO_PUBLIC_DETOUR_API_KEY ?? '';

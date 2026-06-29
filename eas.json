@@ -28,7 +28,8 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "ANDROID_PLAY_SIGNING_SHA256": "3A:E9:0E:D7:CB:AD:E4:22:DF:26:EC:23:C9:99:B6:EC:22:C3:47:F8:65:5F:5E:53:1E:70:B3:17:97:0C:12:F7"
       },
       "android": {
         "buildType": "app-bundle"

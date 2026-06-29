@@ -14,7 +14,8 @@
     "test": "jest --watchAll",
     "postinstall": "patch-package",
     "eas-build-pre-install": "node scripts/ensure-ios-lf.mjs",
-    "fix:icon": "node scripts/fix-app-icon.mjs"
+    "fix:icon": "node scripts/fix-app-icon.mjs",
+    "verify:app-links": "node scripts/verify-android-app-links.mjs"
   },
   "jest": {
     "preset": "jest-expo",
